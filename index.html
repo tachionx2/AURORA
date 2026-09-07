@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0A0F14">
+<title>Aurora — Comunicatore a scansione</title>
+<!-- Carattere INCLUSO nel programma: chi legge con difficoltà non deve
+     dipendere da un server esterno per vedere le lettere. -->
+<link href="vendor/fonts/atkinson.css" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body data-tab="parla">
+
+<!-- ================= BARRA DI STATO ================= -->
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark" aria-hidden="true"></span>
+    <span class="brand-name">Aurora</span>
+  </div>
+  <div class="status-cluster" id="statusCluster">
+    <span class="chip" id="chipEngine" data-state="paused">In pausa</span>
+    <span class="chip chip-quiet" id="chipSource">camera —</span>
+    <span class="chip chip-quiet" id="chipSignal">segnale —</span>
+    <button class="chip chip-act" id="btnMini" title="Riduci restando attivo sopra le altre finestre" hidden>▣ Riduci</button>
+    <span class="chip chip-quiet" id="chipCam" title="Stato della telecamera">camera —</span>
+    <span class="chip chip-quiet" id="chipBuild" title="Versione caricata">—</span>
+  </div>
+  <nav class="tabs" role="tablist">
+    <button class="tab is-active" data-goto="parla" role="tab" data-i18n="tab.speak">Parla</button>
+    <button class="tab" data-goto="punta" role="tab" data-i18n="tab.point">Punta</button>
+    <button class="tab" data-goto="detta" role="tab" data-i18n="tab.dictate">Detta</button>
+    <button class="tab" data-goto="guarda" role="tab" data-i18n="tab.watch">Media</button>
+    <button class="tab" data-goto="statistiche" role="tab" data-i18n="tab.stats">Statistiche</button>
+    <button class="tab" data-goto="diagnostica" role="tab" data-i18n="tab.debug">Diagnostica</button>
+    <button class="tab" data-goto="impostazioni" role="tab" data-i18n="tab.settings">Impostazioni</button>
+  </nav>
+</header>
+
+<!-- ================= TAB: PARLA ================= -->
+<main class="panel is-active" id="panel-parla">
+
+  <!-- Testo in composizione: l'eroe della pagina -->
+  <div class="spoken-banner" id="spokenBanner" aria-live="assertive"></div>
+
+  <section class="compose" aria-live="polite">
+    <div class="compose-sentence" id="composeSentence"><span class="placeholder">…</span></div>
+    <div class="compose-current">
+      <span class="compose-letters" id="composeLetters"></span><span class="caret" aria-hidden="true"></span>
+    </div>
+  </section>
+
+  <!-- Contenuto in visione: compare solo quando qualcosa è aperto -->
+  <section class="parla-media" id="parlaMedia">
+    <div class="media-stage" id="parlaMediaStage"></div>
+  </section>
+
+  <!-- Elemento in scansione: enorme, un solo fuoco -->
+  <section class="stage">
+    <div class="stage-path" id="stagePath">menu</div>
+    <div class="stage-current" id="stageCurrent">—</div>
+    <p class="pause-hint" id="pauseHint" style="display:none"></p>
+    <div class="scanbar" id="scanbar"><i id="scanbarFill"></i></div>
+    <div class="stage-siblings" id="stageSiblings"></div>
+  </section>
+
+  <!-- Controlli grandi per l'assistente -->
+  <section class="controls">
+    <button class="btn btn-primary" id="btnStart" data-i18n="btn.start">Avvia</button>
+    <button class="btn" id="btnPause" data-i18n="btn.pause">Pausa</button>
+    <button class="btn" id="btnSelect" data-i18n="btn.select">Seleziona</button>
+    <button class="btn" id="btnUndo" data-i18n="btn.undo">Annulla</button>
+    <button class="btn" id="btnBack" data-i18n="btn.back">Indietro</button>
+    <button class="btn btn-speak" id="btnSpeak" data-i18n="btn.speak">Pronuncia</button>
+  </section>
+
+  <div class="cambar">
+    <button class="btn btn-sm" id="btnCamMain" data-i18n="btn.camStart">Avvia camera</button>
+    <select class="input cam-select" data-cam-select title="Telecamera in uso"></select>
+    <span class="camstate" id="camState">camera spenta</span>
+  </div>
+  <p class="hint" id="mainHint" data-i18n="hint.keyboard">Barra spaziatrice: seleziona · Backspace: annulla · Invio: pronuncia · Esc: pausa</p>
+</main>
+
+<!-- ================= TAB: IMPOSTAZIONI ================= -->
+<main class="panel" id="panel-impostazioni">
+  <div class="settings-head">
+    <div>
+      <h1 data-i18n="settings.title">Impostazioni</h1>
+      <p class="sub" data-i18n="settings.sub">Tutto ciò che si può tarare vive qui.</p>
+    </div>
+    <div class="profile-actions">
+      <input class="input input-name" id="profileName" data-i18n-ph="placeholder.profile" placeholder="Nome profilo">
+      <button class="btn btn-sm" id="btnExport" data-i18n="btn.export">Esporta profilo</button>
+      <label class="btn btn-sm" for="fileImport" data-i18n="btn.import">Importa profilo</label>
+      <input type="file" id="fileImport" accept="application/json" hidden>
+      <button class="btn btn-sm btn-primary" id="btnAutoTune" data-i18n="btn.autotune">Taratura automatica</button>
+      <button class="btn btn-sm btn-danger" id="btnReset" data-i18n="btn.reset">Ripristina</button>
+    </div>
+  </div>
+  <div class="tune-report" id="tuneReport" style="display:none"></div>
+  <div class="settings-grid" id="settingsGrid"></div>
+</main>
+
+<!-- ================= TAB: GUARDA ================= -->
+<main class="panel" id="panel-guarda">
+  <div class="settings-head">
+    <div>
+      <h1 data-i18n="watch.title">Media</h1>
+      <p class="sub" data-i18n="watch.sub">Video, documenti e immagini. I comandi diventano una voce del menu di scansione: si guidano con lo stesso gesto usato per scrivere.</p>
+    </div>
+    <div class="profile-actions">
+      <label class="btn btn-sm ptr-target" for="fileDoc" data-i18n="btn.openDoc">Carica file</label>
+      <input type="file" id="fileDoc" multiple hidden
+             accept=".pdf,.txt,.md,.docx,.mp3,.m4a,.aac,.ogg,.wav,.flac,.opus,.mp4,.webm,.mov,.m4v,image/*">
+      <label class="btn btn-sm ptr-target" for="fileImg" data-i18n="btn.openImg">Carica immagini</label>
+      <input type="file" id="fileImg" accept="image/*" multiple hidden>
+      <label class="btn btn-sm ptr-target" for="fileFolder" data-i18n="btn.openFolder">Carica cartella</label>
+      <input type="file" id="fileFolder" webkitdirectory directory multiple hidden>
+      <button class="btn btn-sm ptr-target" id="btnSaveText" data-i18n="btn.saveText">Salva ciò che ho scritto</button>
+    </div>
+  </div>
+
+  <div class="guarda-corpo">
+    <aside class="guarda-lato">
+      <section class="card" id="favCard">
+    <h2 data-i18n="card.favorites">Video preferiti</h2>
+    <p class="note" data-i18n="watch.favNote">Chi assiste incolla qui i link. La persona li sceglie in scansione, senza dover cercare né digitare.</p>
+    <div class="profile-actions">
+      <input class="input" id="favTitle" data-i18n-ph="ph.favTitle" placeholder="Titolo">
+      <input class="input" id="favUrl" data-i18n-ph="ph.favUrl" placeholder="Link YouTube">
+      <button class="btn btn-sm" id="btnFavAdd" data-i18n="btn.add">Aggiungi</button>
+    </div>
+    <div class="list" id="favList"></div>
+  </section>
+
+      <section class="card">
+        <h2 data-i18n="card.library">Documenti e immagini</h2>
+        <p class="note" data-i18n="watch.libNote">I file caricati restano disponibili nel menu GUARDA della pagina Parla, finché la scheda resta aperta.</p>
+        <div class="list" id="libList"></div>
+      </section>
+    </aside>
+    <div class="guarda-principale">
+      <section class="card">
+    <h2><span data-i18n="card.viewer">Visualizzatore</span> <span class="tag" id="mediaInfo">nessun contenuto</span></h2>
+    <div class="media-bar" id="mediaBar"></div>
+    <div class="media-stage" id="mediaStage"></div>
+  </section>
+    </div>
+  </div>
+</main>
+
+<!-- ================= TAB: PUNTA ================= -->
+<main class="panel" id="panel-punta">
+
+  <!-- Riga comandi compatta: tutto ciò che serve, in una riga sola -->
+  <div class="pt-top">
+    <div class="pt-modes" role="tablist">
+      <button class="pt-mode is-active ptr-target" id="ptMode-tastiera" data-ptmode="tastiera" data-i18n="pt.keyboard">Tastiera</button>
+      <button class="pt-mode ptr-target" id="ptMode-testi" data-ptmode="testi" data-i18n="pt.texts">I miei testi</button>
+      <button class="pt-mode ptr-target" id="ptMode-media" data-ptmode="media" data-i18n="pt.media">Media</button>
+      <button class="pt-mode ptr-target" id="ptMode-braccio" data-ptmode="braccio" data-i18n="pt.arm">Braccio</button>
+    </div>
+    <div class="pt-actions">
+      <button class="btn btn-sm ptr-target" id="btnPtrToggle" data-i18n="btn.ptrStart">Attiva puntatore</button>
+      <button class="btn btn-sm ptr-target" id="btnCalibrate" data-i18n="btn.calibrate">Calibra</button>
+      <button class="btn btn-sm ptr-target" id="btnRecenter" data-i18n="btn.recenter">Ricentra</button>
+      <button class="btn btn-sm ptr-target" id="btnStripe" data-i18n="btn.stripe">Bande</button>
+      <button class="btn btn-sm ptr-target ptr-danger" id="ptCam" data-i18n="btn.camStart">Avvia camera</button>
+      <select class="input cam-select" data-cam-select title="Telecamera in uso"></select>
+    </div>
+    <div class="pt-status" id="ptrStatus"></div>
+  </div>
+
+  <!-- MODALITÀ TASTIERA -->
+  <div class="pt-view is-active" id="ptView-tastiera">
+    <!-- Il testo composto sta SOPRA la tastiera ed è l'elemento più
+         grande della schermata: è ciò che la persona deve leggere. -->
+    <div class="pt-compose" aria-live="polite">
+      <div class="pt-sentence" id="ptSentence"><span class="placeholder">…</span></div>
+      <div class="pt-letters" id="ptLetters"></div>
+    </div>
+
+    <div class="kb-grid" id="kbGrid"></div>
+
+    <div class="pt-bottom">
+      <button class="btn ptr-target btn-speak" id="ptSpeak" data-i18n="btn.speak">Pronuncia</button>
+      <button class="btn ptr-target" id="ptUndo" data-i18n="btn.undo">Annulla</button>
+      <button class="btn ptr-target" id="ptSaveDraft" data-i18n="btn.saveDraft2">Salva testo</button>
+      <button class="btn ptr-target" id="ptClear" data-i18n="btn.clear">Svuota</button>
+    </div>
+  </div>
+
+  <!-- MODALITÀ TESTI: qui vivono le lettere e i discorsi lunghi -->
+  <div class="pt-view" id="ptView-testi">
+<section class="card card-wide" id="draftCard">
+    <h2 data-i18n="card.drafts">I miei testi</h2>
+    <p class="note" data-i18n="drafts.how"><b>Come si usa.</b> Si scrive un po' alla volta — nella pagina Parla con la scansione, o qui con la tastiera. Quando il testo è pronto: <b>SALVA</b>. Resta qui finché serve. Per farlo pronunciare quando arriva la persona a cui è rivolto: si sceglie <b>I MIEI TESTI</b> nel menu di scansione, poi il testo, poi <b>PARLA QUESTO</b>. Rileggere non cancella niente, e il lavoro in corso viene salvato da solo.</p>
+    <div class="profile-actions">
+      <button class="btn btn-sm ptr-target" id="btnSaveDraft" data-i18n="btn.saveDraft">Salva il testo in composizione</button>
+      <button class="btn btn-sm" id="btnExportDrafts" data-i18n="btn.exportDrafts">Esporta tutti</button>
+      <label class="btn btn-sm" for="fileImportDrafts" data-i18n="btn.importDrafts">Importa</label>
+      <input type="file" id="fileImportDrafts" accept="application/json" hidden>
+    </div>
+    <div class="list" id="draftList"></div>
+  </section>
+  </div>
+
+  <!-- MODALITÀ MEDIA: stessi contenuti della scheda Media, comandati
+       con il puntatore invece che con la scansione -->
+  <div class="pt-view" id="ptView-media">
+    <div class="pt-tiles" id="ptTiles"></div>
+    <div class="media-bar" id="ptMediaBar"></div>
+    <div class="media-stage" id="ptMediaStage"></div>
+  </div>
+
+  <!-- MODALITÀ BRACCIO -->
+  <div class="pt-view" id="ptView-braccio">
+    <p class="note warn-note" data-i18n="point.armWarn">Un braccio vicino a chi non può spostarsi è un rischio serio: servono un arresto fisico raggiungibile da chi assiste, limiti di coppia sul dispositivo e prove prolungate a vuoto prima dell'uso.</p>
+    <div id="armPanel"></div>
+  </div>
+</main>
+
+<!-- ================= TAB: DETTA ================= -->
+<main class="panel" id="panel-detta">
+  <div class="dt-top">
+    <button class="btn btn-primary ptr-target" id="dtMic" data-i18n="btn.dictStart">🎤 Detta</button>
+    <select id="dtLang" class="input" title="Lingua della dettatura"></select>
+    <input class="input dt-titolo" id="dtTitolo" data-i18n-ph="dict.title" placeholder="Titolo del documento">
+    <span class="dt-stato" id="dtStato"></span>
+    <span class="dt-conta" id="dtConta"></span>
+  </div>
+
+  <textarea id="dtTesto" class="dt-testo" spellcheck="true"
+    data-i18n-ph="dict.placeholder"
+    placeholder="Premi Detta e parla, oppure scrivi qui."></textarea>
+  <div class="dt-parziale" id="dtParziale"></div>
+
+  <div class="dt-azioni">
+    <button class="btn btn-sm ptr-target" id="dtSpeak" data-i18n="btn.dictSpeak">🔊 Pronuncia</button>
+    <button class="btn btn-sm ptr-target" id="dtStopSpeak" data-i18n="btn.dictStopSpeak">⏹ Ferma voce</button>
+    <select id="dtVoce" class="input" title="Voce per la lettura"></select>
+    <select id="dtRate" class="input" title="Velocità di lettura">
+      <option value="0.7">0,7×</option><option value="0.85">0,85×</option>
+      <option value="1" selected>1×</option><option value="1.15">1,15×</option>
+      <option value="1.35">1,35×</option><option value="1.6">1,6×</option>
+    </select>
+    <button class="btn btn-sm ptr-target" id="dtSelectAll" data-i18n="btn.selectAll">Seleziona tutto</button>
+    <button class="btn btn-sm ptr-target" id="dtCopy" data-i18n="btn.copy">Copia</button>
+    <button class="btn btn-sm ptr-target" id="dtCut" data-i18n="btn.cut">Taglia</button>
+    <button class="btn btn-sm ptr-target" id="dtPaste" data-i18n="btn.paste">Incolla</button>
+    <label class="btn btn-sm ptr-target" for="dtFile" data-i18n="btn.openTxt">Apri file</label>
+    <input type="file" id="dtFile" accept=".txt,.md,.docx" hidden>
+    <button class="btn btn-sm ptr-target" id="dtSave" data-i18n="btn.dictSave">Salva nei miei testi</button>
+    <button class="btn btn-sm ptr-target" id="dtDownload" data-i18n="btn.dictDownload">Scarica come file</button>
+    <button class="btn btn-sm ptr-target" id="dtToBuffer" data-i18n="btn.dictToBuffer">Manda a Parla</button>
+    <button class="btn btn-sm btn-danger ptr-target" id="dtClear" data-i18n="btn.clear">Svuota</button>
+  </div>
+
+  <details class="dt-trad" id="dtFileBox">
+    <summary data-i18n="dict.fromFile">Trascrivi da un file audio o video</summary>
+    <p class="note" data-i18n="dict.fromFileNote">⚠️ Il browser non sa leggere direttamente l'audio di un file: il file viene <b>riprodotto ad alta voce</b> e il microfono lo ascolta. Serve quindi volume alto, poco rumore intorno, e il microfono acceso. Il risultato è buono con registrazioni pulite, incerto con audio disturbato.</p>
+    <div class="dt-tradrow">
+      <label class="btn btn-sm" for="dtAudioFile" data-i18n="btn.loadAudio">Carica audio o video</label>
+      <input type="file" id="dtAudioFile" accept="audio/*,video/*" hidden>
+      <button class="btn btn-sm" id="dtTrascrivi" data-i18n="btn.transcribe">▶ Trascrivi</button>
+      <button class="btn btn-sm btn-danger" id="dtStopTrascrivi" data-i18n="btn.stop">⏹ Ferma</button>
+      <button class="btn btn-sm" id="dtBack10">⏪ 10s</button>
+      <button class="btn btn-sm" id="dtFwd10">⏩ 10s</button>
+      <select id="dtSpeed" class="input" title="Velocità di riproduzione">
+        <option value="0.5">0,5×</option><option value="0.75">0,75×</option>
+        <option value="1" selected>1×</option><option value="1.25">1,25×</option>
+      </select>
+    </div>
+    <div class="dt-tradrow">
+      <label class="dt-mini">da <input type="number" id="dtStart" class="input" value="0" min="0" step="1"> s</label>
+      <label class="dt-mini">a <input type="number" id="dtStop" class="input" value="0" min="0" step="1"> s</label>
+      <span class="dt-conta" id="dtProgresso"></span>
+    </div>
+    <audio id="dtAudio" class="media-el" controls style="display:none"></audio>
+  </details>
+
+  <details class="dt-trad" id="dtTradBox">
+    <summary data-i18n="dict.translate">Traduci</summary>
+    <p class="note" data-i18n="dict.translateNote">⚠️ La traduzione è l'unica funzione che richiede una connessione a internet, e il servizio gratuito ha un limite giornaliero.</p>
+    <div class="dt-tradrow">
+      <select id="dtFrom" class="input"></select>
+      <span>→</span>
+      <select id="dtTo" class="input"></select>
+      <button class="btn btn-sm" id="dtTrad" data-i18n="btn.translate">Traduci</button>
+      <button class="btn btn-sm" id="dtTradSpeak" data-i18n="btn.dictSpeak">🔊 Pronuncia</button>
+      <button class="btn btn-sm" id="dtTradCopy" data-i18n="btn.copy">Copia</button>
+      <button class="btn btn-sm" id="dtTradUse" data-i18n="btn.useTranslation">Usa come testo</button>
+    </div>
+    <textarea id="dtTradOut" class="dt-testo dt-testo-sm" readonly
+      data-i18n-ph="dict.translationHere" placeholder="La traduzione comparirà qui."></textarea>
+  </details>
+</main>
+
+<!-- ================= TAB: STATISTICHE ================= -->
+<main class="panel" id="panel-statistiche">
+  <div class="settings-head">
+    <div>
+      <h1 data-i18n="stats.title">Statistiche</h1>
+      <p class="sub" data-i18n="stats.sub">Non è un pannello informativo.</p>
+    </div>
+    <div class="profile-actions">
+      <input class="input" id="newPhrase" data-i18n-ph="placeholder.newPhrase" placeholder="Aggiungi una frase che usa davvero">
+      <button class="btn btn-sm" id="btnAddPhrase" data-i18n="btn.add">Aggiungi</button>
+      <button class="btn btn-sm" id="btnStatsExport" data-i18n="btn.statsExport">Esporta statistiche</button>
+      <label class="btn btn-sm" for="fileStatsMerge" data-i18n="btn.statsMerge">Importa e unisci</label>
+      <input type="file" id="fileStatsMerge" accept="application/json" hidden>
+      <label class="btn btn-sm btn-danger" for="fileStatsReplace" data-i18n="btn.statsReplace">Importa e sostituisci</label>
+      <input type="file" id="fileStatsReplace" accept="application/json" hidden>
+    </div>
+  </div>
+  <div class="stats-grid">
+    <section class="card">
+      <h2 data-i18n="card.phrases">Frasi più usate</h2>
+      <div class="list" id="statPhrases"></div>
+    </section>
+    <section class="card">
+      <h2 data-i18n="card.words">Parole più usate</h2>
+      <div class="list" id="statWords"></div>
+    </section>
+    <section class="card">
+      <h2 data-i18n="card.letters">Lettere</h2>
+      <div class="bars" id="statLetters"></div>
+    </section>
+    <section class="card">
+      <h2 data-i18n="card.session">Sessione</h2>
+      <div class="metrics" id="statSession"></div>
+    </section>
+  </div>
+</main>
+
+<!-- ================= TAB: DIAGNOSTICA ================= -->
+<main class="panel" id="panel-diagnostica">
+  <div class="settings-head">
+    <div>
+      <h1 data-i18n="debug.title">Diagnostica</h1>
+      <p class="sub" data-i18n="debug.sub">Cosa il programma sta vedendo.</p>
+    </div>
+    <div class="profile-actions">
+      <button class="btn btn-sm" id="btnCamStart" data-i18n="btn.camStart">Avvia camera</button>
+      <button class="btn btn-sm" id="btnCamStop" data-i18n="btn.camStop">Ferma camera</button>
+      <select class="input cam-select" data-cam-select title="Telecamera in uso"></select>
+      <label class="btn btn-sm" for="fileVideo" data-i18n="btn.loadVideo">Carica video</label>
+      <input type="file" id="fileVideo" accept="video/*" hidden>
+      <button class="btn btn-sm btn-primary" id="btnDiagSession" data-i18n="btn.diagSession">Salva statistica sessione</button>
+      <button class="btn btn-sm" id="btnDiagTotal" data-i18n="btn.diagTotal">Salva statistica cumulata</button>
+      <label class="btn btn-sm" for="fileDiag" data-i18n="btn.diagImport">Importa diagnostica</label>
+      <input type="file" id="fileDiag" accept="application/json" hidden>
+    </div>
+  </div>
+
+  <!-- Seconda riga: taratura.
+       Sta a sé perché è un'altra cosa dal comandare la telecamera o
+       salvare le statistiche: qui si CAMBIANO i parametri del
+       programma, e conviene che si veda. -->
+  <div class="profile-actions diag-taratura">
+    <button class="btn btn-sm btn-primary" id="btnDiagApply" data-i18n="btn.diagApply">Applica parametri</button>
+    <!-- Ripristino: applicare e poter togliere permette di vedere la
+         differenza in tempo reale, invece di doverla immaginare. -->
+    <button class="btn btn-sm" id="btnDiagUndo" data-i18n="btn.diagUndo" disabled>Ripristina i precedenti</button>
+    <label class="switch switch-inline" for="chkDiagAlways" title="Continua a misurare anche quando questa scheda non è aperta">
+      <input type="checkbox" id="chkDiagAlways"><span></span>
+      <em data-i18n="diag.always">Misura sempre</em>
+    </label>
+  </div>
+
+  <!-- Comandi del video caricato: compaiono solo con un file aperto -->
+  <div class="vid-bar" id="vidBar" style="display:none">
+    <button class="btn btn-sm" id="vidPlay" title="Riproduci o metti in pausa">⏸</button>
+    <button class="btn btn-sm" id="vidRew" title="Torna all'inizio">⏮</button>
+    <button class="btn btn-sm" id="vidBack" title="Indietro 5 secondi">⏪</button>
+    <button class="btn btn-sm" id="vidFwd" title="Avanti 5 secondi">⏩</button>
+    <input type="range" id="vidSeek" min="0" max="1000" value="0" title="Posizione nel video">
+    <span class="vid-t" id="vidTime">0:00 / 0:00</span>
+    <select id="vidSpeed" class="input" title="Velocità">
+      <option value="0.25">0,25×</option><option value="0.5">0,5×</option>
+      <option value="1" selected>1×</option><option value="1.5">1,5×</option>
+      <option value="2">2×</option>
+    </select>
+    <label class="vid-loop" title="Quando finisce ricomincia da solo">
+      <input type="checkbox" id="vidLoop" checked> <span data-i18n="vid.loop">ciclo</span>
+    </label>
+  </div>
+
+  <section class="card card-wide" id="diagStatsCard">
+    <h2><span data-i18n="card.diagStats">Comportamento oculare</span>
+        <span class="tag" id="diagAffid">—</span></h2>
+    <p class="note" data-i18n="debug.statsNote">Misurato di continuo mentre usi il programma, su ogni scheda. Più a lungo osserva, più i parametri proposti sono affidabili: la taratura automatica dura venticinque secondi, questa può durare ore.</p>
+    <div class="counters" id="diagStats"></div>
+    <div class="tune-report" id="diagReport" style="display:none"></div>
+  </section>
+
+  <div class="diag-grid">
+    <section class="card">
+      <h2><span data-i18n="card.eyeLeft">Occhio sinistro (suo)</span> <span class="tag" id="tagLeft">—</span></h2>
+      <canvas class="eyecanvas" id="eyeLeft" width="380" height="200"></canvas>
+    </section>
+    <section class="card">
+      <h2><span data-i18n="card.eyeRight">Occhio destro (suo)</span> <span class="tag" id="tagRight">—</span></h2>
+      <canvas class="eyecanvas" id="eyeRight" width="380" height="200"></canvas>
+    </section>
+    <section class="card card-wide">
+      <h2><span data-i18n="card.signal">Segnale</span>
+        <span class="tag" id="plotHint">tratto pieno = filtrato · sottile = grezzo · la distanza fra i due è il nistagmo rimosso</span></h2>
+      <div class="tracebar" id="traceBar"></div>
+      <canvas class="plotcanvas" id="plotY" width="1000" height="230"></canvas>
+    </section>
+    <section class="card card-wide">
+      <h2 data-i18n="card.counters">Contatori</h2>
+      <div class="counters" id="counters"></div>
+    </section>
+    <section class="card card-wide">
+      <h2 data-i18n="card.eventlog">Registro eventi</h2>
+      <div class="eventlog" id="eventLog"></div>
+    </section>
+  </div>
+</main>
+
+<!-- Avviso iniziale: l'audio richiede un gesto dell'utente -->
+<div class="gate" id="gate">
+  <div class="gate-card">
+    <h1>Aurora</h1>
+    <p class="gate-lead" data-i18n="app.tagline">Comunicatore a scansione uditiva.</p>
+    <ul class="gate-list">
+      <li data-i18n="gate.p1">Tutto resta sul dispositivo.</li>
+      <li data-i18n="gate.p2">Non è un dispositivo medico.</li>
+      <li data-i18n="gate.p3">Tieni disponibile il metodo manuale.</li>
+    </ul>
+
+    <p class="gate-free" data-i18n="gate.free">
+      Aurora è gratuito e lo sarà per sempre, per chiunque ne abbia bisogno.
+      Nessuno può chiedere denaro per il suo utilizzo.
+    </p>
+
+    <!-- ⚠️ Il collegamento ai termini sta FUORI dall'etichetta.
+         Dentro, ogni clic sul collegamento spuntava anche la casella:
+         si sarebbe accettato un documento senza averlo aperto. -->
+    <p class="gate-leggi">
+      <button type="button" class="linklike" id="gateTerms" data-i18n="gate.readTerms">Leggi i termini e le condizioni</button>
+    </p>
+    <label class="gate-accept" for="gateAccept">
+      <input type="checkbox" id="gateAccept">
+      <span data-i18n="gate.accept">Ho letto e accetto i termini e le condizioni</span>
+    </label>
+
+    <button class="btn btn-primary btn-lg" id="btnEnter" data-i18n="gate.enter" disabled>Attiva audio e inizia</button>
+    <p class="gate-foot" data-i18n="gate.foot">L'audio richiede un tocco.</p>
+    <p class="gate-author">© 2026 Francesco Pagliano · <span data-i18n="gate.licence">licenza libera con vincolo di gratuità</span></p>
+  </div>
+</div>
+
+<!-- Termini e condizioni: si apre dalla schermata iniziale, prima che
+     il programma parta. È l'assistente a leggerli, con un mouse. -->
+<div class="legal" id="legalBox" hidden>
+  <div class="legal-card">
+    <div class="legal-head">
+      <h2 data-i18n="legal.title">Termini e condizioni</h2>
+      <button class="btn btn-sm" id="legalClose" data-i18n="btn.close">Chiudi</button>
+    </div>
+    <div class="legal-body" id="legalBody"></div>
+    <div class="legal-foot">
+      <a class="btn btn-sm" id="legalPdf" href="documenti/aurora-termini-licenza-paternita.pdf"
+         download data-i18n="btn.termsPdf">Scarica il documento (PDF)</a>
+      <a class="btn btn-sm" id="legalTxt" href="documenti/AURORA-LICENSE.txt"
+         download data-i18n="btn.licenceTxt">Scarica la licenza (TXT)</a>
+      <button class="btn btn-sm" id="legalPrint" data-i18n="btn.printTerms">Stampa</button>
+      <button class="btn btn-sm btn-primary" id="legalAccept" data-i18n="btn.acceptTerms">Ho letto e accetto</button>
+    </div>
+  </div>
+</div>
+
+<!-- Pannello compatto: normalmente nascosto, viene SPOSTATO nella
+     finestra sempre in primo piano quando si usa il mouse con gli occhi.
+     Resta nella pagina perché deve poter tornare al suo posto. -->
+<div class="mini" id="miniPanel" hidden>
+  <div class="mini-riga">
+    <span class="mini-stato" id="miniStato">—</span>
+    <span class="mini-cur" id="miniCur"></span>
+  </div>
+  <div class="mini-voce" id="miniVoce">Aurora</div>
+  <div class="mini-cmd">
+    <button class="btn btn-sm ptr-target" id="miniClick">Clic</button>
+    <button class="btn btn-sm ptr-target" id="miniDouble">Doppio</button>
+    <button class="btn btn-sm ptr-target" id="miniRight">Destro</button>
+    <button class="btn btn-sm ptr-target" id="miniUp">▲</button>
+    <button class="btn btn-sm ptr-target" id="miniDown">▼</button>
+    <button class="btn btn-sm btn-danger ptr-target" id="miniClose">Torna ad Aurora</button>
+  </div>
+</div>
+
+<canvas class="ptr-overlay" id="ptrOverlay" style="display:none"></canvas>
+<div class="toast" id="toast" role="status"></div>
+
+<script type="module" src="js/main.js"></script>
+<script>
+  // Service worker: dopo il primo caricamento l'app funziona offline.
+  // Va registrato solo su HTTPS o localhost; su file:// viene ignorato.
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js')
+        .catch(e => console.warn('[sw] registrazione non riuscita:', e.message));
+    });
+  }
+</script>
+</body>
+</html>
