@@ -1332,5 +1332,51 @@ app.goto('parla');
      `nessuna stima per-occhio viene memorizzata fra le sessioni (chiavi: ${[...chiavi].join(', ')})`);
 }
 
+/* ═══════════ Ogni canale che esiste deve essere assegnabile ═══════════
+ *
+ * ⚠️ Apertura e canale combinato esistevano, funzionavano, avevano
+ * soglia, guadagno e traccia nel grafico — ma mancavano nell'elenco
+ * che DISEGNA la scheda dei canali di gesto, quindi non si potevano
+ * assegnare a un'azione. Una funzione che non si può usare è una
+ * funzione che non c'è.
+ *
+ * Il difetto nasceva da un elenco DUPLICATO: uno in configurazione,
+ * uno dentro la scheda. Aggiungendo un canale al primo si crede di
+ * aver finito.                                                       */
+{
+  const fsG = await import('node:fs');
+  const pathG = await import('node:path');
+  const quiG = pathG.dirname(import.meta.filename || process.argv[1]);
+  const svG = fsG.readFileSync(pathG.join(quiG, '..', 'js/ui/SettingsView.js'), 'utf8');
+  const { DEFAULT_CONFIG: DCG } = await import('../js/core/config.js');
+
+  const i = svG.indexOf('const GESTURE_META = {');
+  const blocco = svG.slice(i, svG.indexOf('\n};', i));
+  const assegnabili = [...blocco.matchAll(/^  ([A-Z_]+):\s/gm)].map(m => m[1]);
+
+  /* I canali del VISO hanno una scheda propria — bocca, labbra,
+   * sopracciglia — e non vanno cercati qui. Si controllano quelli
+   * oculari, che è dove il difetto si era annidato. */
+  const delViso = ['MOUTH_OPEN', 'SMILE', 'PUCKER', 'FUNNEL', 'CHEEK_PUFF', 'BROW_UP'];
+  const canali = Object.entries(DCG.gestures)
+    .filter(([k, v]) => v && typeof v === 'object' && v.action !== undefined && !delViso.includes(k))
+    .map(([k]) => k);
+
+  const mancanti = canali.filter(k => !assegnabili.includes(k));
+  ok(mancanti.length === 0,
+     `ogni canale di gesto è assegnabile a un'azione (mancano: ${mancanti.join(', ') || 'nessuno'})`);
+  for (const k of ['WIDE', 'NARROW', 'COMBO']) {
+    ok(assegnabili.includes(k), `il canale "${k}" compare fra quelli assegnabili`);
+  }
+
+  /* Le caselle del canale combinato devono avere un'ETICHETTA:
+   * otto levette identiche senza testo invitano a premere alla cieca. */
+  ok(/combo-nome/.test(svG), 'le caselle dei canali da sommare hanno un nome accanto');
+  const cssG = fsG.readFileSync(pathG.join(quiG, '..', 'css/app.css'), 'utf8');
+  ok(/\.combo-elenco\{[^}]*grid/.test(cssG),
+     'e sono disposte in griglia, non allineate a caso');
+  ok(/\.combo-nome\{/.test(cssG), 'con uno stile proprio per il nome');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

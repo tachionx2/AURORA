@@ -411,11 +411,47 @@ export class SessionStats {
     const debole = E.ampiezzaMediana < 0.006;
     if (debole) {
       p['signal.medianWindowMs'] = 200;
-      p['signal.lowPassHz'] = 2.0;
+      p['signal.lowPassHz'] = 3.0;
       motivi.push('oscillazione debole: filtri leggeri, per non aggiungere ritardo inutile');
     } else if (f > 0.3) {
-      p['signal.medianWindowMs'] = clamp(Math.round(1500 / f / 50) * 50, 120, 600);
-      p['signal.lowPassHz'] = clamp(Math.round((f / 3) * 10) / 10, 0.8, 3.0);
+      /* ══════════════════════════════════════════════════════════════
+       * ⚠️ I FILTRI NON DEVONO MANGIARSI IL GESTO
+       * ══════════════════════════════════════════════════════════════
+       *
+       * Le formule precedenti guardavano solo l'oscillazione da
+       * togliere. Con un tremore a 0,8 Hz proponevano passa-basso a
+       * 0,8 Hz e mediana da 600 ms — e un gesto che dura poco più di
+       * un secondo ha la sua energia proprio lì attorno.
+       *
+       * Misurato: con quei valori l'ampiezza partiva da 34σ e crollava
+       * a 16σ nel giro di venticinque ripetizioni. Peggio, i parametri
+       * applicati restano salvati: una taratura sbagliata rovinava
+       * anche tutte le sessioni successive, e sembrava un difetto del
+       * programma.
+       *
+       * Il gesto va quindi PROTETTO con due limiti invalicabili:
+       *
+       *  · la mediana deve essere MOLTO più corta del gesto, altrimenti
+       *    ne appiattisce la salita. Metà del tempo di permanenza
+       *    richiesto è già generoso;
+       *  · il passa-basso deve restare BEN SOPRA la banda del gesto.
+       *    Un gesto di un secondo ha energia fino a circa 1,5 Hz:
+       *    sotto i 2,5 Hz si comincia a tagliare il segnale utile
+       *    invece del rumore.
+       *
+       * Filtrare meno e alzare la soglia è sempre preferibile a
+       * filtrare tanto: la soglia scarta il rumore, il filtro scarta
+       * anche il gesto. */
+      const dwell = this.cfgDwellMs || 400;
+      const medianaMax = clamp(Math.round(dwell / 2 / 50) * 50, 120, 350);
+      p['signal.medianWindowMs'] = clamp(Math.round(1500 / f / 50) * 50, 120, medianaMax);
+      p['signal.lowPassHz'] = clamp(Math.round((f / 3) * 10) / 10, 2.5, 6.0);
+      if (f / 3 < 2.5) {
+        motivi.push(
+          `⚠️ l'oscillazione è a ${f.toFixed(1)} Hz, vicina alla banda del gesto: `
+          + 'il filtro resta a 2,5 Hz per non tagliare anche il movimento — '
+          + 'meglio alzare la soglia che filtrare più a fondo');
+      }
       motivi.push(`oscillazione mediana ${f.toFixed(1)} Hz, ampiezza ${E.ampiezzaMediana.toFixed(4)}`);
     }
 

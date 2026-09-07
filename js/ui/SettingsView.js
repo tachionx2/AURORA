@@ -54,6 +54,14 @@ const INTERRUTTORI_CHE_APRONO = new Set([
   'audio.useVoiceBank',
   'pointer.enabled',
   'signal.blinkAutoCalibrate',
+  // ⚠️ Senza questo, accendendo il canale combinato l'elenco dei
+  // canali da sommare non compariva: bisognava cambiare gruppo e
+  // tornare indietro. Un comando che non mostra ciò che governa
+  // sembra guasto.
+  'gestures.COMBO.enabled',
+  'signal.blinkRichiedeIride',
+  'detection.irisOcclusionFix',
+  'stampa.enabled',
 ]);
 
 export class SettingsView {
@@ -288,6 +296,29 @@ export class SettingsView {
         this._toggle('detection.irUseGlint', 'IR · usa glint (PCCR)', 'Sottrae il riflesso corneale: cancella i movimenti di testa'),
         this._toggle('detection.irInvert', 'IR · inverti immagine', 'Per sensori che restituiscono il negativo'),
       ]);
+  }
+
+  /* ⚠️ Ritorno ai filtri sicuri.
+   *
+   * I parametri applicati restano salvati: una taratura sbagliata —
+   * per esempio un passa-basso dentro la banda del gesto — rovina
+   * anche tutte le sessioni successive, e sembra un difetto del
+   * programma invece che una regolazione da rifare.
+   *
+   * Questo comando riporta SOLO i filtri e le soglie ai valori
+   * predefiniti, senza toccare nient'altro. */
+  _ripristinaFiltri() {
+    const sicuri = {
+      'signal.medianWindowMs': 250,
+      'signal.lowPassHz': 3.5,
+      'signal.thresholdOn': 3.5,
+      'signal.thresholdOff': 1.5,
+      'signal.baselineTauSec': 30,
+      'detection.minConfidence': 0.40,
+    };
+    for (const [via, val] of Object.entries(sicuri)) this.app.set(via, val);
+    this.render();
+    this.app.toast('Filtri e soglie riportati ai valori predefiniti');
   }
 
   _signalCard(cfg) {
@@ -948,8 +979,15 @@ export class SettingsView {
         ['browUp', P(['Sopracciglia alzate', 'Brows raised'])],
         ['mouthOpen', P(['Bocca aperta', 'Mouth open'])],
       ];
+      /* ⚠️ Caselle con l'etichetta ACCANTO, non interruttori nudi.
+       *
+       * Prima erano interruttori senza testo visibile e allineati a
+       * caso: si vedevano otto levette identiche senza sapere quale
+       * canale governasse ciascuna. Un controllo che non dice cosa fa
+       * è peggio di un controllo assente, perché invita a premerlo
+       * alla cieca. */
       for (const [id, nome] of disponibili) {
-        const riga = h('label', 'switch switch-inline');
+        const riga = h('label', 'combo-voce' + (scelti.has(id) ? ' is-on' : ''));
         const inp = h('input');
         inp.type = 'checkbox';
         inp.checked = scelti.has(id);
@@ -959,9 +997,10 @@ export class SettingsView {
           this.app.set('signal.comboCanali', [...s2]);
           this.render();
         };
-        riga.append(inp, h('span'), h('em', null, nome));
+        riga.append(inp, h('span', 'combo-nome', nome));
         box.append(riga);
       }
+      box.className = 'combo-elenco';
       righe.push(box);
       righe.push(h('p', scelti.size >= 2 ? 'sub' : 'note',
         scelti.size >= 2
@@ -1791,6 +1830,21 @@ const GESTURE_META = {
   DOWN:         { name: ['Occhio in basso', 'Eye down'],                     hint: null },
   LEFT:         { name: ['Occhio a sinistra', 'Eye left'],                   hint: null },
   RIGHT:        { name: ['Occhio a destra', 'Eye right'],                    hint: null },
+  /* ⚠️ Apertura della palpebra e canale combinato.
+   *
+   * Mancavano in questo elenco — che è quello che DISEGNA la scheda —
+   * quindi i due canali esistevano, funzionavano, avevano soglia,
+   * guadagno e traccia nel grafico, ma non si potevano assegnare a
+   * un'azione. Una funzione che non si può usare è una funzione che
+   * non c'è. */
+  WIDE:         { name: ['Occhio spalancato', 'Eye wide open'],
+                  hint: ['alzando lo sguardo l\'occhio si apre: spesso piu netto del movimento dell\'iride',
+                         'looking up widens the eye: often clearer than the iris movement'] },
+  NARROW:       { name: ['Occhio socchiuso', 'Eye narrowed'],
+                  hint: ['per chi socchiude volontariamente', 'for those who deliberately narrow the eye'] },
+  COMBO:        { name: ['Canale combinato', 'Combined channel'],
+                  hint: ['somma dei canali scelti nella scheda del canale combinato',
+                         'sum of the channels chosen in the combined channel card'] },
   BLINK:        { name: ['Ammiccamento singolo', 'Single blink'],            hint: ['attenzione agli spasmi involontari', 'beware of involuntary spasms'] },
   DOUBLE_BLINK: { name: ['Doppio ammiccamento', 'Double blink'],             hint: null },
   TRIPLE_BLINK: { name: ['Triplo ammiccamento', 'Triple blink'],             hint: null },

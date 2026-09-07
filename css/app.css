@@ -1084,3 +1084,28 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
   .set-tab{flex:1 1 100%}
   .set-tab em{display:none}
 }
+
+/* ── Scelta dei canali da sommare ──
+ *
+ * ⚠️ Erano interruttori senza testo visibile e allineati a caso: si
+ * vedevano otto levette identiche senza sapere quale canale
+ * governasse ciascuna. Un controllo che non dice cosa fa è peggio di
+ * un controllo assente, perché invita a premerlo alla cieca.
+ */
+.combo-elenco{
+  display:grid;grid-template-columns:repeat(auto-fill,minmax(min(190px,100%),1fr));
+  gap:.35rem;margin:.4rem 0;
+}
+.combo-voce{
+  display:flex;align-items:center;gap:.5rem;cursor:pointer;
+  background:var(--raised);border:1px solid var(--line);border-radius:8px;
+  padding:.45rem .6rem;transition:border-color .15s,background .15s;
+}
+.combo-voce:hover{border-color:var(--accent)}
+.combo-voce.is-on{border-color:var(--accent);background:rgba(127,224,200,.10)}
+.combo-voce input{
+  width:18px;height:18px;flex:0 0 auto;accent-color:var(--accent);cursor:pointer;
+  margin:0;opacity:1;position:static;
+}
+.combo-nome{font:600 .82rem var(--font);color:var(--text);line-height:1.2}
+.combo-voce.is-on .combo-nome{color:var(--accent)}

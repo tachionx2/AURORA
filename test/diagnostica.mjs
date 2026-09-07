@@ -2256,5 +2256,97 @@ function corri(mod, script) {
   }
 }
 
+/* ══════ 52. I FILTRI PROPOSTI non devono mangiarsi il gesto ══════
+ *
+ * ⚠️ La regressione più insidiosa di tutte, perché non stava nel
+ * motore ma in ciò che la diagnostica CONSIGLIAVA.
+ *
+ * Le formule guardavano solo l'oscillazione da togliere: con un
+ * tremore a 0,8 Hz proponevano passa-basso a 0,8 Hz e mediana da
+ * 600 ms. Ma un gesto che dura poco più di un secondo ha la sua
+ * energia proprio lì attorno.
+ *
+ * Misurato: con quei valori l'ampiezza partiva da 34σ e crollava a
+ * 16σ in venticinque ripetizioni. E poiché i parametri applicati
+ * restano salvati, una taratura sbagliata rovinava anche tutte le
+ * sessioni successive — sembrava un difetto del programma.        */
+{
+  const { SessionStats: SS52 } = await import('../js/signal/SessionStats.js');
+
+  function proposta(freq) {
+    const st = new SS52();
+    let t = 0;
+    for (let i = 0; i < 30000; i++) {
+      t += 33;
+      const y = 0.030 * Math.sin(2 * Math.PI * freq * t / 1000);
+      const o = () => ({ x: 0, y, openness: 0.44, confidence: 0.97 });
+      st.push(t, { left: o(), right: o() }, 2.0, false);
+    }
+    return st.parametriConsigliati();
+  }
+
+  for (const f of [0.5, 0.8, 1.2, 2.0, 4.0]) {
+    const p = proposta(f);
+    const lp = p.proposta['signal.lowPassHz'];
+    const md = p.proposta['signal.medianWindowMs'];
+    if (lp !== undefined) {
+      ok(lp >= 2.5,
+         `52a. con oscillazione a ${f} Hz il passa-basso resta sopra la banda del gesto (${lp} Hz)`);
+    }
+    if (md !== undefined) {
+      ok(md <= 350,
+         `52b. e la mediana resta molto più corta del gesto (${md} ms)`);
+    }
+  }
+
+  /* La prova che conta: con i filtri limitati l'ampiezza non crolla. */
+  function conFiltri(median, lowpass, n = 25) {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.signal.medianWindowMs = median;
+    c.signal.lowPassHz = lowpass;
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.015 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); } };
+    d(120000);
+    const v = [];
+    for (let k = 0; k < n; k++) {
+      let p = 0;
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(-0.15 * i / 250), right: o(-0.15 * i / 250) }); }
+      for (let i = 0; i < 800; i += 33) {
+        t += 33; g.process(t, { left: o(-0.15), right: o(-0.15) });
+        const ch = g.channels()['left.up']; if (ch) p = Math.max(p, ch.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(-0.15 * (1 - i / 250)), right: o(-0.15 * (1 - i / 250)) }); }
+      d(2500);
+      v.push(p);
+    }
+    const m = (i, j) => v.slice(i, j).reduce((a, b) => a + b, 0) / (j - i);
+    return { ini: m(2, 10), fin: m(n - 8, n) };
+  }
+
+  const sicuri = conFiltri(250, 3.5);
+  const varSicuri = (sicuri.fin / sicuri.ini - 1) * 100;
+  ok(varSicuri > -12,
+     `52c. con filtri sicuri l ampiezza non cala (${sicuri.ini.toFixed(1)}σ → ${sicuri.fin.toFixed(1)}σ)`);
+
+  const aggressivi = conFiltri(600, 0.8);
+  const varAggr = (aggressivi.fin / aggressivi.ini - 1) * 100;
+  ok(varAggr < -25,
+     `52d. mentre con filtri dentro la banda del gesto crolla (${varAggr.toFixed(0)}%) — è la prova che il limite serve`);
+
+  // Il comando di ritorno ai valori sicuri deve esistere
+  const fs52 = await import('node:fs');
+  const path52 = await import('node:path');
+  const qui52 = path52.dirname(import.meta.filename || process.argv[1]);
+  const sv52 = fs52.readFileSync(path52.join(qui52, '..', 'js/ui/SettingsView.js'), 'utf8');
+  ok(/_ripristinaFiltri/.test(sv52),
+     '52e. esiste un comando per tornare ai filtri sicuri dopo una taratura sbagliata');
+  ok(/'gestures\.COMBO\.enabled'/.test(sv52),
+     '52f. e il canale combinato mostra subito i propri canali quando lo si accende');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);
