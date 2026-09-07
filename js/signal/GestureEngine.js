@@ -432,6 +432,67 @@ export class GestureEngine {
          * Con questa opzione la baseline impara solo quando il segnale
          * è davvero fermo: descrive il riposo vero della persona,
          * non una media fra riposo e movimento. */
+        /* ══════════════════════════════════════════════════════════
+         * PROTEZIONE LEGATA AL MOVIMENTO, NON AL GESTO RICONOSCIUTO
+         * ══════════════════════════════════════════════════════════
+         *
+         * ⚠️ Il circolo vizioso che faceva calare un occhio solo.
+         *
+         * Finora la baseline veniva congelata quando SCATTAVA
+         * l'aggancio del gesto, cioè sopra la soglia di attivazione.
+         * Ma se l'ampiezza di un occhio scende sotto quella soglia —
+         * perché quell'occhio è più coperto, più obliquo, meno
+         * illuminato — l'aggancio non scatta più, la baseline smette
+         * di essere protetta e comincia ad assorbire il movimento.
+         * Il gesto successivo risulta più piccolo, quindi ancora più
+         * lontano dalla soglia: da lì in giù non risale più.
+         *
+         * Misurato: un occhio che parte a 3,4σ scendeva a 1,9σ in una
+         * quarantina di ripetizioni, mentre l'altro restava a 22σ con
+         * lo STESSO movimento fisico.
+         *
+         * La protezione va quindi legata al MOVIMENTO, non al suo
+         * riconoscimento: basta che il segnale superi la soglia di
+         * rilascio — molto più bassa — perché la baseline si fermi.
+         * Un occhio debole resta così protetto e può risalire.
+         *
+         * ⚠️ Con un TETTO alla durata: una deriva vera — la testa
+         * scivolata, la telecamera urtata — terrebbe la baseline
+         * congelata per sempre, e il segnale resterebbe spostato.
+         */
+        if (s.baselineFreezeDuringGesture) {
+          const rap = Math.abs(A.disp) / Math.max(1e-9, A.sigma);
+          const agganciato = A.hyst
+            && Object.values(A.hyst).some(h => h && h.active);
+          if (A._nonProteggere) {
+            // Protezione sospesa dopo un rilascio d'ufficio: si
+            // riprende solo quando il segnale è tornato a riposo.
+            if (rap <= (s.baselineFreezeSigma || 2.5)) A._nonProteggere = false;
+            A._congDa = null;
+            A.base.release();
+          } else if (agganciato) {
+            /* ⚠️ Gesto RICONOSCIUTO: si congela senza tetto.
+             *
+             * Il tetto qui sarebbe un danno: chi tiene l'occhio alzato
+             * mezzo minuto — per riposare, per pensare — si vedrebbe
+             * quella posizione promossa a nuovo riposo, e il gesto
+             * sparirebbe. Da un aggancio che non si scioglie difende
+             * già il rilascio d'ufficio, che è il posto giusto. */
+            A._congDa = null;
+            A.base.freeze();
+          } else if (rap > (s.baselineFreezeSigma || 2.5)) {
+            /* Movimento visibile ma non riconosciuto come gesto: si
+             * protegge lo stesso, ma CON tetto. È il criterio debole,
+             * e senza limite una deriva vera lo terrebbe attivo per
+             * sempre. */
+            if (A._congDa == null) A._congDa = t;
+            if (t - A._congDa < (s.baselineFreezeMaxMs || 20000)) A.base.freeze();
+            else A.base.release();
+          } else {
+            A._congDa = null;
+            A.base.release();
+          }
+        }
         const b = A.base.push(t, A.smooth);
         A.baseline = b.baseline; A.sigma = b.sigma;
         A.disp = A.smooth - A.baseline;
@@ -614,6 +675,18 @@ export class GestureEngine {
              * la taratura. E se la persona torna davvero al riposo, ci
              * arriva senza che nessuno la spinga. */
             this._congelaAsse(eye, c.axis, false);
+            /* ⚠️ Dopo un rilascio d'ufficio si SOSPENDE la protezione
+             * finché il segnale non torna a riposo almeno una volta.
+             *
+             * Senza, il canale si riagganciava al fotogramma dopo — il
+             * segnale è ancora alto — e la baseline restava congelata
+             * per sempre: una deriva vera, come la telecamera urtata,
+             * non veniva mai seguita e il programma non tornava più a
+             * posto.
+             *
+             * Il senso è: "sei fermo lassù da troppo tempo, smetto di
+             * proteggerti finché non torni giù". */
+            A._nonProteggere = true;
             this.counters.latchReleased = (this.counters.latchReleased || 0) + 1;
             out.candidates.push({ eye, axis: c.axis, sign: c.sign, phase: 'timeout', durMs: da, t });
             continue;

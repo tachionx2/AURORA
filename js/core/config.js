@@ -221,6 +221,31 @@ export const DEFAULT_CONFIG = {
     medianWindowMs: 250,         // rimuove le fasi rapide del nistagmo
     lowPassHz: 1.5,              // il gesto volontario è un gradino lento
     baselineTauSec: 30,          // deriva lenta: postura, scivolamento
+    /* Tetto al congelamento continuo della baseline: oltre questo
+     * tempo si smette di resistere e si segue. Un movimento dura
+     * secondi, una deriva vera molto di più. */
+    /* Cinque secondi: un gesto dura uno o due secondi, quindi è
+     * abbondante; una deriva vera dura molto di più e va seguita.
+     * Il tetto vale SOLO per il criterio debole — un gesto
+     * riconosciuto è protetto senza limite. */
+    /* Sopra quanto rumore si considera "movimento in corso" e si
+     * protegge la baseline. Deve stare SOPRA il rumore di riposo —
+     * altrimenti si congela di continuo e il tetto scade a metà
+     * gesto — e ben SOTTO la soglia del gesto, altrimenti un occhio
+     * debole resta senza protezione. */
+    /* ⚠️ 1,5 — la stessa soglia del rilascio del gesto.
+     *
+     * Tarata misurando, non a intuito. Valori più alti sembravano
+     * migliori con prove brevi, ma quelle misuravano l'assestamento
+     * del metro, non la stabilità: con un riscaldamento realistico
+     * 1,5 è l'unico valore che tiene stabile anche un occhio debole,
+     * che è il caso da proteggere.
+     *
+     * Deve stare SOTTO l'ampiezza dell'occhio più debole — altrimenti
+     * proprio quello resta senza protezione — e sopra il rumore di
+     * riposo. */
+    baselineFreezeSigma: 1.5,
+    baselineFreezeMaxMs: 20000,
     baselineFreezeDuringGesture: true,   // CRITICO: vedi nota in filters.js
     thresholdOn: 3.5,            // in sigma
     thresholdOff: 1.5,           // isteresi
@@ -241,7 +266,20 @@ export const DEFAULT_CONFIG = {
      * 10 secondi la protezione scattava su gesti legittimi e spostava
      * la taratura, facendo calare l'ampiezza di tutti i gesti
      * successivi. */
-    maxLatchMs: 30000,
+    /* ⚠️ DUE MINUTI, non trenta secondi.
+     *
+     * Un segnale alto a lungo può essere due cose opposte: una tenuta
+     * volontaria, che va protetta, o un blocco vero, che va sciolto.
+     * Per durata sono indistinguibili.
+     *
+     * Fra i due errori possibili il peggiore è chiaro: sciogliere una
+     * tenuta legittima fa sparire il gesto di chi sta comunicando —
+     * misurato, da 16σ a 0,2σ. Aspettare due minuti prima di sciogliere
+     * un blocco vero costa invece solo un ritardo, e nel frattempo il
+     * programma continua a funzionare.
+     *
+     * Nessuno tiene un gesto oculare per due minuti. */
+    maxLatchMs: 120000,
     // Durata dell'osservazione per la taratura automatica. Più lunga =
     // stima più affidabile del rumore, ma anche più fatica per chi deve
     // restare fermo.
@@ -741,6 +779,8 @@ export function migrateConfig(cfg) {
     if (c.signal.blinkRichiedeIride === undefined) c.signal.blinkRichiedeIride = true;
     if (c.signal.blinkSogliaIride === undefined) c.signal.blinkSogliaIride = 0.55;
     if (c.signal.blinkSmentiSopra === undefined) c.signal.blinkSmentiSopra = 0.45;
+    if (c.signal.baselineFreezeMaxMs === undefined) c.signal.baselineFreezeMaxMs = 20000;
+    if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 1.5;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
   if (v < 31 && c.detection && c.detection.irisOcclusionSoglia === undefined) c.detection.irisOcclusionSoglia = 0.78;
