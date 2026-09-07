@@ -345,6 +345,16 @@ export class BlinkDetector {
     // Il rapporto invece è stabile: guardando in basso l'apertura
     // scende al 40-60% del riposo, chiudendo scende sotto il 25%.
     this.ratioChiuso = 0.25;
+    /* Per dichiarare l'occhio chiuso non basta l'apertura ridotta:
+     * serve anche che l'iride non si veda più. Vedi update(). */
+    this.richiedeIride = true;
+    this.sogliaIride = 0.55;
+    /* La zona di smentimento è STRETTA: solo un occhio ancora aperto
+     * per quasi metà. Più in basso è una chiusura vera, e va contata.
+     * Nei dati reali l'occhio che si stringeva guardando in alto stava
+     * al 54% del riposo; una chiusura volontaria scende al 13%. */
+    this.smentiSopra = 0.45;
+    this.smentiti = 0;
     this.tSottoSoglia = null;        // da quando siamo sotto soglia
     // Soglia fissa, quando l'auto-calibrazione è spenta. La logica di
     // durata resta la STESSA: distinguere un ammiccamento da uno
@@ -356,8 +366,20 @@ export class BlinkDetector {
     this.buf.length = 0; this.openRef = null; this.calibrated = false;
     this.tSottoSoglia = null;
   }
-  configure(ratio, floor, discrimina, sustainedMs, sogliaFissa, ratioChiuso) {
-    this.ratio = ratio; this.floor = floor;
+  configure(ratio, floor, discrimina, sustainedMs, sogliaFissa, ratioChiuso,
+            richiedeIride, sogliaIride, smentiSopra) {
+    if (richiedeIride !== undefined) this.richiedeIride = !!richiedeIride;
+    if (sogliaIride !== undefined) this.sogliaIride = sogliaIride;
+    if (smentiSopra !== undefined) this.smentiSopra = smentiSopra;
+    /* ⚠️ I parametri non specificati NON vanno azzerati.
+     *
+     * Prima venivano assegnati comunque: chiamando `configure` per
+     * cambiare una sola cosa, tutte le altre diventavano `undefined` e
+     * la soglia si trasformava in NaN — l'occhio non risultava mai
+     * chiuso. Un difetto silenzioso, che si manifesta solo se qualcuno
+     * chiama il metodo in modo parziale. */
+    if (ratio !== undefined) this.ratio = ratio;
+    if (floor !== undefined) this.floor = floor;
     if (discrimina !== undefined) this.discriminaVelocita = !!discrimina;
     if (sustainedMs !== undefined) this.sustainedMs = sustainedMs;
     if (sogliaFissa !== undefined) this.sogliaFissa = sogliaFissa;
@@ -381,7 +403,12 @@ export class BlinkDetector {
    *   parziale→ palpebra abbassata ma non un ammiccamento: campione
    *             VALIDO, perché è quello che succede guardando in basso
    */
-  update(openness, t = 0) {
+  /**
+   * @param confidenza qualità del rilevamento dell'iride, 0..1.
+   *        Serve a distinguere un ammiccamento vero da un'apertura che
+   *        si stringe perché lo sguardo è andato in alto.
+   */
+  update(openness, t = 0, confidenza = null) {
     if (!isFinite(openness) || openness <= 0) {
       return { closed: false, blink: false, parziale: false,
                openRef: this.openRef, threshold: this.threshold, calibrated: this.calibrated };
@@ -397,7 +424,41 @@ export class BlinkDetector {
     //
     // Quindi: mentre l'occhio è giudicato chiuso, il riferimento non si
     // aggiorna. Resta ancorato a com'era prima della chiusura.
+    /* ══════════════════════════════════════════════════════════════
+     * AMMICCAMENTO VERO O SGUARDO IN ALTO?
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Alzando molto lo sguardo la palpebra superiore copre parte
+     * dell'occhio e l'apertura MISURATA si stringe. Se scende sotto la
+     * soglia di chiusura, il gesto viene scambiato per un
+     * ammiccamento: mascherato proprio mentre avviene, e il suo
+     * transitorio finisce nella stima del rumore, che si gonfia e
+     * abbassa TUTTE le ampiezze di quell'occhio.
+     *
+     * È quanto accadeva all'occhio destro: undici secondi e mezzo di
+     * "chiuso" contro mezzo secondo del sinistro, con ammiccamenti
+     * doppi e tripli mai avvenuti.
+     *
+     * I due casi però si distinguono bene: in un ammiccamento vero la
+     * palpebra copre l'IRIDE e il rilevamento crolla; alzando lo
+     * sguardo l'iride resta perfettamente visibile — nei dati reali la
+     * confidenza restava a 0,97.
+     *
+     * Quindi: apertura ridotta MA iride ancora ben visibile non è un
+     * ammiccamento.
+     */
     const giaGiudicabile = this.calibrated && this.openRef;
+    /* ⚠️ La protezione del riferimento NON va smentita.
+     *
+     * Applicandole lo stesso smentimento, durante una chiusura
+     * prolungata il riferimento tornava ad aggiornarsi, collassava, e
+     * dopo qualche secondo l'occhio chiuso risultava aperto: una
+     * chiusura di dieci secondi ne mostrava cinque. È esattamente il
+     * difetto che quella protezione esisteva per evitare.
+     *
+     * Lo smentimento serve a non chiamare "chiusura" un occhio che si
+     * stringe; qui invece si difende un riferimento, e in caso di
+     * dubbio conviene difenderlo. */
     const oraChiuso = giaGiudicabile && openness < this.sogliaChiusura;
     if (!oraChiuso) {
       this.buf.push(openness);
@@ -414,7 +475,41 @@ export class BlinkDetector {
     const thr = this.threshold;
     const rif = this.openRef ?? openness;
 
-    const sottoSoglia = openness < thr;
+    /* ⚠️ La stessa distinzione vale per la decisione finale.
+     *
+     * Correggere solo il riferimento non bastava: la chiusura veniva
+     * comunque dichiarata, il gesto mascherato e il rumore gonfiato.
+     * Un occhio che si stringe ma la cui iride si vede ancora NON è un
+     * occhio chiuso. */
+    let sottoSoglia = openness < thr;
+    /* ⚠️ Lo smentimento vale SOLO nella zona intermedia.
+     *
+     * Il primo tentativo si basava sulla sola confidenza, e ha spento
+     * il riconoscimento degli ammiccamenti: ventisei verifiche cadute
+     * in un colpo. Se la confidenza non crolla abbastanza durante un
+     * ammiccamento vero, chi comanda Aurora con gli occhi perde un
+     * modo di comandare — un prezzo inaccettabile.
+     *
+     * Serve quindi una seconda condizione, indipendente e più solida:
+     * un occhio DAVVERO chiuso ha un'apertura vicina a zero, molto
+     * sotto la soglia di ammiccamento. Un occhio che si stringe perché
+     * lo sguardo è andato in alto resta ben sopra.
+     *
+     * Si smentisce solo chi sta nel mezzo: sotto la soglia di
+     * ammiccamento ma sopra quella di chiusura vera, e con l'iride
+     * ancora ben visibile. Un ammiccamento vero non passa mai di lì. */
+    if (sottoSoglia && this.richiedeIride
+        /* ⚠️ Il pavimento assoluto non si scavalca MAI.
+         * Esiste per riconoscere un occhio davvero chiuso quando il
+         * riferimento non è affidabile — per esempio un occhio che non
+         * si apre mai. Smentirlo significava non vedere più chiuso un
+         * occhio che lo era in modo evidente. */
+        && openness >= this.floor
+        && this.openRef && openness > this.smentiSopra * this.openRef
+        && Number.isFinite(confidenza) && confidenza >= this.sogliaIride) {
+      sottoSoglia = false;
+      this.smentiti = (this.smentiti || 0) + 1;
+    }
     if (!sottoSoglia) {
       this.tSottoSoglia = null;
       return { closed: false, blink: false, parziale: false,

@@ -120,6 +120,32 @@ export class StatsView {
 
 /* ============================== DIAGNOSTICA ============================== */
 
+/**
+ * Classe di dimensione in base a quanto è lungo il valore.
+ *
+ * La finestrella è larga 150 px e il carattere a larghezza fissa
+ * occupa circa 0,6 em per carattere: oltre una dozzina di caratteri
+ * si esce, e i valori doppi ne hanno spesso quindici o più.
+ */
+function misuraTesto(v) {
+  const t = String(v ?? '');
+  /* ⚠️ I valori doppi vanno A CAPO, non rimpiccioliti fino a
+   * illeggibilità.
+   *
+   * "0.01492 / 0.00587" a un carattere che ci stia su una riga sola
+   * richiederebbe 0,59 rem: troppo piccolo per leggerlo di sfuggita
+   * mentre si osserva un video. Su due righe restano sette caratteri
+   * per riga, che stanno comodi a una misura leggibile.
+   *
+   * L'etichetta sotto dice già "SX / DX", quindi l'ordine si capisce
+   * senza bisogno del separatore su una riga sola. */
+  if (t.includes(' / ')) return 'cv-due';
+  const n = t.length;
+  if (n <= 12) return '';
+  if (n <= 17) return 'cv-m';
+  return 'cv-s';
+}
+
 export class DebugView {
   constructor(app) {
     this.app = app;
@@ -238,7 +264,14 @@ export class DebugView {
     const el = document.getElementById('counters');
     if (!el) return;
     el.innerHTML = items.map(([l, v]) =>
-      `<div class="counter"><div class="cv">${esc(v)}</div><div class="cl">${esc(l)}</div></div>`).join('');
+      /* ⚠️ Il testo si adatta alla lunghezza.
+       *
+       * I valori doppi — "0.0150 / 0.0142" — non entravano nei 150 px
+       * della finestrella e venivano troncati: si leggeva il valore
+       * dell'occhio sinistro e del destro restavano i puntini. Proprio
+       * il confronto fra i due occhi, che è la cosa più utile da
+       * guardare, era l'unica che non si poteva fare. */
+      `<div class="counter"><div class="cv ${misuraTesto(v)}">${esc(v)}</div><div class="cl">${esc(l)}</div></div>`).join('');
   }
 
   updateTags(res) {

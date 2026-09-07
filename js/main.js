@@ -1045,7 +1045,16 @@ class App {
     const pannello = document.getElementById('miniPanel');
     if (!pannello) return false;
     pannello.hidden = false;
-    const r = await this.finestra.apri(pannello, { larghezza: 400, altezza: 250 });
+    /* ⚠️ Piccola davvero: 250×130 invece di 400×250.
+     *
+     * Deve restare visibile mentre la persona usa il computer, quindi
+     * deve occupare pochissimo. Un riquadro che copre un angolo di
+     * schermo è un riquadro che dà fastidio, e che si finisce per
+     * chiudere — perdendo proprio la funzione per cui esiste. */
+    const r = await this.finestra.apri(pannello, {
+      larghezza: this.cfg.ui.miniLarghezza || 250,
+      altezza: this.cfg.ui.miniAltezza || 130,
+    });
     if (!r.ok) {
       pannello.hidden = true;
       this.toast('Finestra non aperta: ' + r.motivo, true);
@@ -1801,7 +1810,14 @@ class App {
       ['Segnale a riposo', `${r.riposoMediana.toFixed(1)}σ · 99° ${r.riposo99.toFixed(1)}σ`],
     ];
     box.innerHTML = voci.map(([k, v]) =>
-      `<div class="counter"><div class="cv">${v}</div><div class="cl">${k}</div></div>`).join('');
+      // Stessa regola dei contatori: i valori doppi devono entrare
+      // interi, perché il confronto fra i due occhi è la cosa più
+      // utile da guardare in questa scheda.
+      `<div class="counter"><div class="cv ${
+        String(v).includes(' / ') ? 'cv-due'
+        : String(v).length <= 12 ? ''
+        : String(v).length <= 17 ? 'cv-m' : 'cv-s'
+      }">${v}</div><div class="cl">${k}</div></div>`).join('');
 
     // Rapporto con parametri proposti e avvisi
     const rep = document.getElementById('diagReport');

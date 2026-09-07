@@ -1797,5 +1797,102 @@ function corri(mod, script) {
      `46e. su 60 ripetizioni dopo l assestamento la misura è stabile (${varSx.toFixed(1)}% di variazione)`);
 }
 
+/* ══════ 47. Sguardo in alto scambiato per ammiccamento ══════
+ *
+ * ⚠️ Il difetto che rendeva l'occhio destro molto meno sensibile del
+ * sinistro, pur muovendosi allo stesso modo.
+ *
+ * Alzando molto lo sguardo la palpebra copre parte dell'occhio e
+ * l'apertura MISURATA si stringe. Se scende sotto la soglia, il gesto
+ * viene scambiato per un ammiccamento: mascherato proprio mentre
+ * avviene, e il suo transitorio finisce nella stima del rumore, che si
+ * gonfia e abbassa TUTTE le ampiezze di quell'occhio.
+ *
+ * Nei dati reali: undici secondi e mezzo di "chiuso" a destra contro
+ * mezzo secondo a sinistra, con ammiccamenti doppi e tripli mai
+ * avvenuti — mentre la confidenza restava a 0,97, cioè l'iride si
+ * vedeva benissimo.
+ *
+ * I due casi si distinguono: in un ammiccamento vero la palpebra copre
+ * l'IRIDE e il rilevamento crolla; alzando lo sguardo l'iride resta
+ * visibile.                                                          */
+{
+  function sguardoInAlto(richiede) {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.signal.blinkRichiedeIride = richiede;
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const rum = () => 0.012 * Math.sin(2 * Math.PI * 4.2 * t / 1000);
+    const o = (y, ap, conf) => ({ x: 0, y: y + rum(), openness: ap, confidence: conf });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0, 0.45, 0.97), right: o(0, 0.45, 0.97) }); } };
+    d(40000);
+    let ps = 0, pd = 0;
+    for (let k = 0; k < 25; k++) {
+      ps = 0; pd = 0;
+      // L'apertura si stringe alzando lo sguardo: a destra quasi il doppio.
+      const passo = (f) => g.process(t, {
+        left: o(-0.09 * f, 0.45 - 0.12 * f, 0.97),
+        right: o(-0.09 * f, 0.45 - 0.22 * f, 0.97),
+      });
+      for (let i = 0; i < 250; i += 33) { t += 33; passo(i / 250); }
+      for (let i = 0; i < 800; i += 33) {
+        t += 33; passo(1);
+        const a = g.channels()['left.up'], b = g.channels()['right.up'];
+        if (a) ps = Math.max(ps, a.n);
+        if (b) pd = Math.max(pd, b.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; passo(1 - i / 250); }
+      d(2500);
+    }
+    return { ps, pd, smentiti: g.blink.right.smentiti || 0 };
+  }
+
+  const con = sguardoInAlto(true);
+  ok(Math.abs(con.ps - con.pd) < con.ps * 0.08,
+     `47a. i due occhi restano pari anche se uno si stringe di più (${con.ps.toFixed(1)}σ contro ${con.pd.toFixed(1)}σ)`);
+  ok(con.smentiti > 0,
+     `47b. le finte chiusure vengono smentite dall iride visibile (${con.smentiti})`);
+  ok(con.pd > 15, `47c. l occhio che si stringe resta ben rilevabile (${con.pd.toFixed(1)}σ)`);
+
+  /* ⚠️ Controprova indispensabile: un ammiccamento VERO deve restare
+   * riconosciuto. Una correzione che spegnesse il rilevamento delle
+   * chiusure toglierebbe a chi usa Aurora un modo di comandare. */
+  const { BlinkDetector } = await import('../js/signal/filters.js');
+  const bd = new BlinkDetector();
+  let tt = 0;
+  for (let i = 0; i < 200; i++) { tt += 33; bd.update(0.45, tt, 0.95); }
+  const veroAmmicco = bd.update(0.04, tt + 33, 0.15);
+  ok(veroAmmicco.closed === true,
+     '47d. un ammiccamento vero — iride sparita — resta riconosciuto');
+  // ⚠️ Un occhio STRETTO sta nella zona intermedia: sotto la soglia di
+  // ammiccamento ma ben sopra quella di chiusura vera. Un ammiccamento
+  // vero (0,04) non passa mai di lì, ed è ciò che rende sicura la
+  // distinzione.
+  /* Valori presi dai dati REALI di una sessione: riposo 0,45, e
+   * l'occhio destro che guardando in alto scendeva a circa 0,24 —
+   * appena sotto la soglia di ammiccamento (0,248) e ben sopra il
+   * pavimento assoluto. È esattamente la finestra in cui il gesto
+   * veniva scambiato per un ammiccamento. */
+  const bd3 = new BlinkDetector();
+  let t3 = 0;
+  for (let i = 0; i < 200; i++) { t3 += 33; bd3.update(0.45, t3, 0.95); }
+  const strizzata = bd3.update(0.24, t3 + 33, 0.95);
+  ok(strizzata.closed === false,
+     '47e. un occhio stretto con iride ancora visibile non è una chiusura');
+  const strizzataSenzaIride = bd3.update(0.24, t3 + 66, 0.20);
+  ok(strizzataSenzaIride.closed === true,
+     '47e2. ma se l iride sparisce alla stessa apertura, allora sì');
+
+  // Spegnendo l'opzione si torna al comportamento di prima
+  const bd2 = new BlinkDetector();
+  bd2.configure(undefined, undefined, undefined, undefined, undefined, undefined, false);
+  let t2 = 0;
+  for (let i = 0; i < 200; i++) { t2 += 33; bd2.update(0.45, t2, 0.95); }
+  // 0,14 sta sotto la soglia di ammiccamento (0,165) e dentro la zona
+  // di smentimento: acceso lo smentisce, spento lo conta.
+  ok(bd2.update(0.15, t2 + 33, 0.95).closed === true,
+     '47f. spegnendo l opzione anche un occhio stretto torna a contare come chiuso');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

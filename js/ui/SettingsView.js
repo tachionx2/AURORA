@@ -481,6 +481,14 @@ export class SettingsView {
       : P(['⚠️ Il tuo browser NON offre le finestre sempre in primo piano, quindi il pulsante qui sopra non può funzionare. Servono Chrome o Edge da computer in versione recente: su Firefox, Safari e sui telefoni la funzione non esiste. Il resto del programma funziona comunque.',
            '⚠️ Your browser does NOT support always-on-top windows, so the button above cannot work. Chrome or Edge on desktop are required.'])));
 
+    righe.push(this._range('ui.miniLarghezza',
+      P(['Larghezza del pannello ridotto', 'Compact panel width']),
+      P(['Quanto spazio occupa la finestrella sempre in primo piano. Piccola di proposito: un riquadro che copre un angolo di schermo è un riquadro che dà fastidio, e che si finisce per chiudere.',
+         'How much space the always-on-top window takes. Deliberately small.']),
+      180, 500, 10, ' px'));
+    righe.push(this._range('ui.miniAltezza',
+      P(['Altezza del pannello ridotto', 'Compact panel height']), null, 100, 320, 10, ' px'));
+
     righe.push(this._toggle('source.backgroundMode',
       P(['Continua anche a finestra nascosta', 'Keep running when the window is hidden']),
       P(['Fa scandire i fotogrammi dalla TELECAMERA invece che dal disegno dello schermo, così l\'elaborazione continua anche riducendo a icona. Se il browser non lo sostiene si torna da solo al funzionamento di sempre, senza conseguenze. Sperimentale: consuma più batteria.',

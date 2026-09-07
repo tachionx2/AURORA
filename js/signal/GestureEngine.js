@@ -295,7 +295,8 @@ export class GestureEngine {
     for (const eye of ['left', 'right']) {
       this.blink[eye].configure(
         s.blinkRatio, s.blinkFloor, s.blinkDiscriminate, s.blinkSustainedMs,
-        s.blinkAutoCalibrate ? null : s.blinkLidThreshold, s.blinkClosedRatio);
+        s.blinkAutoCalibrate ? null : s.blinkLidThreshold, s.blinkClosedRatio,
+        s.blinkRichiedeIride, s.blinkSogliaIride, s.blinkSmentiSopra);
     }
     for (const eye of ['left', 'right'])
       this.burst[eye].configure(g.blinkBurstMs, g.blinkMinPulseMs, g.blinkMaxPulseMs);
@@ -394,7 +395,10 @@ export class GestureEngine {
       // due secondi restava mascherato per due secondi interi.
       // Come si sceglie la soglia e come si interpreta ciò che sta
       // sotto sono due questioni indipendenti.
-      const bstat = this.blink[eye].update(o.openness, t);
+      // ⚠️ La confidenza dice se l'iride si vede ancora: distingue un
+      // ammiccamento vero da un'apertura che si stringe perché lo
+      // sguardo è andato in alto.
+      const bstat = this.blink[eye].update(o.openness, t, o.confidence);
       const closed = bstat.closed;
       if (bstat.parziale) sostenuto = true;
       if (eye === 'left') this.counters.validiLeft++; else this.counters.validiRight++;

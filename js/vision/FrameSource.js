@@ -406,7 +406,12 @@ export class FileSource extends FrameSource {
         this.eventi.push(riga);
         if (this.eventi.length > 40) this.eventi.shift();
         this.ultimoEvento = riga;
-        if (this.registra) console.log('[video]', riga);
+        /* ⚠️ Gli eventi che possono FERMARE la riproduzione si scrivono
+         * sempre, anche a registro spento: sono rari e sono l'unica
+         * traccia di un blocco. Gli altri solo su richiesta. */
+        const critico = ['suspend', 'stalled', 'error', 'abort', 'emptied', 'pause', 'ended'].includes(ev);
+        if (critico) console.warn('[aurora/video]', riga);
+        else if (this.registra) console.log('[aurora/video]', riga);
       });
     }
 
@@ -446,7 +451,9 @@ export class FileSource extends FrameSource {
          * riprendere, poi si sposta di un istante, che sblocca una
          * decodifica impantanata. */
         if (!v.paused && !v.ended) {
-          if (v.currentTime === this._tContenuto) {
+          // Anche readyState basso è un blocco: il video "va" ma non ha
+          // fotogrammi da mostrare.
+          if (v.currentTime === this._tContenuto || v.readyState < 2) {
             if (!this._fermoDa) this._fermoDa = ora;
             else {
               const fermoDa = ora - this._fermoDa;
@@ -462,8 +469,8 @@ export class FileSource extends FrameSource {
               if (fermoDa > 1500 && ora - (this._ultimoTentativo || 0) > 3000) {
                 this._ultimoTentativo = ora;
                 this.bloccati++;
-                if (this.registra) {
-                  console.warn(`[video] FERMO da ${(fermoDa / 1000).toFixed(1)}s`
+                {
+                  console.warn(`[aurora/video] FERMO da ${(fermoDa / 1000).toFixed(1)}s`
                     + ` — t=${v.currentTime.toFixed(2)}s rs=${v.readyState}`
                     + ` net=${v.networkState} paused=${v.paused} ended=${v.ended}`
                     + ` buffered=${v.buffered?.length ? v.buffered.end(v.buffered.length - 1).toFixed(1) + 's' : 'nulla'}`

@@ -262,6 +262,22 @@ export const DEFAULT_CONFIG = {
     // del riposo; chiudendo scende sotto il 25%. Serve a non scambiare
     // una chiusura prolungata per uno sguardo in basso.
     blinkClosedRatio: 0.25,
+    /* ⚠️ Per dichiarare l'occhio chiuso non basta l'apertura ridotta.
+     *
+     * Alzando molto lo sguardo la palpebra copre parte dell'occhio e
+     * l'apertura misurata si stringe: il gesto veniva scambiato per un
+     * ammiccamento, mascherato proprio mentre avveniva, e il suo
+     * transitorio gonfiava la stima del rumore abbassando TUTTE le
+     * ampiezze di quell'occhio.
+     *
+     * In un ammiccamento vero la palpebra copre l'IRIDE e il
+     * rilevamento crolla; alzando lo sguardo l'iride resta visibile.
+     * Si richiede quindi anche che l'iride non si veda più. */
+    blinkRichiedeIride: true,
+    blinkSogliaIride: 0.55,
+    // Zona di smentimento: solo un occhio ancora aperto per quasi
+    // metà. Più in basso è una chiusura vera e va contata.
+    blinkSmentiSopra: 0.45,
     blinkSustainedMs: 500,       // oltre: non è un ammiccamento
 
     // ── Soglie e guadagni PER DIREZIONE ──
@@ -486,6 +502,10 @@ export const DEFAULT_CONFIG = {
      * davvero il programma: uscendo dalla scheda la misura non deve
      * interrompersi. Costa un po' di calcolo in più. */
     diagAlways: false,
+    /* Dimensione della finestra sempre in primo piano. Piccola di
+     * proposito: deve stare in un angolo senza dare fastidio. */
+    miniLarghezza: 250,
+    miniAltezza: 130,
     language: 'it',              // it | en
     theme: 'dark',               // dark | light
     fontScale: 1.0,
@@ -717,9 +737,18 @@ export function migrateConfig(cfg) {
   // Soglia di chiusura relativa: prima non esisteva e un occhio chiuso
   // sopra il pavimento assoluto veniva scambiato per sguardo in basso.
   // Canali del viso: soglie e guadagni per espressione.
+  if (v < 31 && c.signal) {
+    if (c.signal.blinkRichiedeIride === undefined) c.signal.blinkRichiedeIride = true;
+    if (c.signal.blinkSogliaIride === undefined) c.signal.blinkSogliaIride = 0.55;
+    if (c.signal.blinkSmentiSopra === undefined) c.signal.blinkSmentiSopra = 0.45;
+  }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
   if (v < 31 && c.detection && c.detection.irisOcclusionSoglia === undefined) c.detection.irisOcclusionSoglia = 0.78;
-  if (v < 31 && c.ui && c.ui.diagAlways === undefined) c.ui.diagAlways = false;
+  if (v < 31 && c.ui) {
+    if (c.ui.diagAlways === undefined) c.ui.diagAlways = false;
+    if (c.ui.miniLarghezza === undefined) c.ui.miniLarghezza = 250;
+    if (c.ui.miniAltezza === undefined) c.ui.miniAltezza = 130;
+  }
   if (v < 31 && c.detection && c.detection.irisOcclusionFix === undefined) c.detection.irisOcclusionFix = true;
   if (v < 30 && c.scan) {
     if (c.scan.showMenuItem === undefined) c.scan.showMenuItem = false;

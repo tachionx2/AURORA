@@ -1018,3 +1018,40 @@ audio.media-el{height:54px;background:transparent}
   font-style:normal;font-size:.78rem;color:var(--muted);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
+
+/* ── Valori lunghi nelle finestrelle dei contatori ──
+ *
+ * ⚠️ I valori doppi — "0.0150 / 0.0142" — non entravano nei 150 px e
+ * venivano troncati: si leggeva l'occhio sinistro e del destro
+ * restavano i puntini. Proprio il confronto fra i due occhi, che è la
+ * cosa più utile da guardare, era l'unica che non si poteva fare.
+ *
+ * Il carattere si riduce quanto basta a farli entrare interi. Resta
+ * a larghezza fissa, così le cifre non ballano mentre cambiano.
+ */
+/* Valori doppi: su DUE righe, a misura leggibile.
+   Su una riga sola servirebbero 0,59 rem — troppo piccolo per leggerli
+   di sfuggita mentre si osserva un video. L'etichetta sotto dice già
+   "SX / DX", quindi l'ordine si capisce lo stesso. */
+.counter .cv.cv-due{
+  font-size:.92rem;height:2.5em;line-height:1.25em;
+  white-space:normal;word-break:break-word;text-overflow:clip;
+}
+.counter .cv.cv-m{font-size:.80rem;height:1.85em;line-height:1.85em}
+.counter .cv.cv-s{
+  font-size:.68rem;height:2.6em;line-height:1.3em;
+  white-space:normal;word-break:break-word;text-overflow:clip;
+}
+
+/* ── Finestra sempre in primo piano: piccola davvero ──
+ *
+ * Deve restare visibile mentre la persona usa il computer, quindi
+ * deve occupare pochissimo: un riquadro che copre un angolo di
+ * schermo è un riquadro che dà fastidio e che si finisce per chiudere.
+ */
+body.in-finestra .mini{padding:.3rem .4rem;gap:.2rem}
+body.in-finestra .mini-voce{font-size:1.05rem;padding:.1rem 0}
+body.in-finestra .mini-stato,
+body.in-finestra .mini-cur{font-size:.62rem}
+body.in-finestra .mini-cmd{gap:.15rem}
+body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-radius:5px}
