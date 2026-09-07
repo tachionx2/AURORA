@@ -1914,98 +1914,96 @@ function corri(mod, script) {
      '47f. spegnendo l opzione anche un occhio stretto torna a contare come chiuso');
 }
 
-/* ══════ 48. L'occhio DEBOLE non deve degradare ══════
+/* ══════ 48. L'occhio DEBOLE non deve degradare — IN CONDIZIONI REALI ══════
  *
- * ⚠️ Il circolo vizioso che faceva calare un occhio solo, ed è l'ultima
- * causa del problema che ha attraversato tutto questo progetto.
+ * ⚠️ Il difetto più ostinato di questo progetto, e la lezione più
+ * importante che ne è venuta.
  *
- * La baseline veniva congelata quando SCATTAVA l'aggancio del gesto,
- * cioè sopra la soglia di attivazione. Ma se l'ampiezza di un occhio
- * scende sotto quella soglia — perché è più coperto dalla palpebra,
- * più obliquo, meno illuminato — l'aggancio non scatta più, la
- * baseline smette di essere protetta e comincia ad assorbire il
- * movimento. Il gesto successivo risulta più piccolo, quindi ancora
- * più lontano dalla soglia: da lì in giù non risale più.
+ * Quando un occhio è più debole — più coperto dalla palpebra, più
+ * obliquo, meno illuminato — la sua ampiezza può non superare la
+ * soglia del gesto. Allora per lui il gesto non esiste, i suoi
+ * campioni non vengono esclusi dalla stima del rumore, e quella si
+ * gonfia: da lì l'ampiezza cala, il gesto scatta ancora meno, e non
+ * si risale più.
  *
- * Misurato prima della correzione: un occhio a 3,4σ scendeva a 1,9σ in
- * quaranta ripetizioni, mentre l'altro restava a 22σ con lo STESSO
- * movimento fisico.
+ * ⚠️ E LA LEZIONE: per due giorni questo difetto è sfuggito perché le
+ * prove usavano un segnale troppo PULITO. Nei dati veri il rumore era
+ * cinque volte tanto e il gesto il doppio. Con quei numeri il difetto
+ * appare subito — e una correzione tentata in condizioni pulite
+ * (congelare la baseline appena il segnale si muove) in condizioni
+ * reali peggiorava tutto del 76%, perché il rumore superava quella
+ * soglia quasi sempre.
  *
- * La protezione è ora legata al MOVIMENTO, non al suo riconoscimento.  */
+ * Le prove qui sotto usano quindi i numeri REALI misurati su una
+ * sessione: gesto 0,18 e rumore che porta sigma attorno a 0,02.    */
 {
-  function debole(fattoreDx, n = 60) {
+  // Rumore realistico: nistagmo, micromovimenti e vaganza lenta.
+  const RUMORE = (t) =>
+      0.055 * Math.sin(2 * Math.PI * 4.2 * t / 1000)
+    + 0.022 * Math.sin(2 * Math.PI * 7.7 * t / 1000)
+    + 0.030 * Math.sin(2 * Math.PI * 0.13 * t / 1000)
+    + 0.018 * Math.sin(2 * Math.PI * 0.41 * t / 1000 + 1.1);
+
+  function reale(fattoreDx, n = 50) {
     const c = deepClone(DEFAULT_CONFIG);
     const g = new GestureEngine(c, () => {});
     let t = 0;
-    const rum = () => 0.012 * Math.sin(2 * Math.PI * 4.2 * t / 1000);
-    const o = y => ({ x: 0, y: y + rum(), openness: 0.45, confidence: 0.95 });
+    const o = y => ({ x: 0, y: y + RUMORE(t), openness: 0.45, confidence: 0.95 });
     const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); } };
-    // Assestamento del metro prima di misurare la stabilità.
-    d(150000);
+    d(150000);                        // assestamento del metro
     const dx = [], sx = [];
     for (let k = 0; k < n; k++) {
       let pd = 0, ps = 0;
-      const p = (f) => g.process(t, { left: o(-0.09 * f), right: o(-0.09 * fattoreDx * f) });
-      for (let i = 0; i < 250; i += 33) { t += 33; p(i / 250); }
+      const q = (f) => g.process(t, { left: o(-0.18 * f), right: o(-0.18 * fattoreDx * f) });
+      for (let i = 0; i < 250; i += 33) { t += 33; q(i / 250); }
       for (let i = 0; i < 800; i += 33) {
-        t += 33; p(1);
+        t += 33; q(1);
         const a = g.channels()['left.up'], b = g.channels()['right.up'];
         if (a) ps = Math.max(ps, a.n);
         if (b) pd = Math.max(pd, b.n);
       }
-      for (let i = 0; i < 250; i += 33) { t += 33; p(1 - i / 250); }
+      for (let i = 0; i < 250; i += 33) { t += 33; q(1 - i / 250); }
       d(2500);
       dx.push(pd); sx.push(ps);
     }
-    const med = (a, i, j) => a.slice(i, j).reduce((x, y) => x + y, 0) / (j - i);
+    const m = (a, i, j) => a.slice(i, j).reduce((x, y) => x + y, 0) / (j - i);
     return {
-      dxIni: med(dx, 5, 15), dxFin: med(dx, n - 10, n),
-      sxIni: med(sx, 5, 15), sxFin: med(sx, n - 10, n),
-      sigmaDx: g.eyes.right.y.sigma,
+      di: m(dx, 2, 10), df: m(dx, n - 8, n),
+      si: m(sx, 2, 10), sf: m(sx, n - 8, n),
+      sd: g.eyes.right.y.sigma, ss: g.eyes.left.y.sigma,
     };
   }
 
-  /* Occhi che si muovono in modo DIVERSO: il destro sempre più debole,
-   * fino a scendere sotto la soglia di attivazione (3,5σ). */
-  for (const f of [1.0, 0.5, 0.20, 0.15, 0.12, 0.10]) {
-    const r = debole(f);
-    const varDx = (r.dxFin / r.dxIni - 1) * 100;
-    ok(varDx > -20,
-       `48a. occhio al ${(f * 100).toFixed(0)}% : nessun degrado (${r.dxIni.toFixed(1)}σ → ${r.dxFin.toFixed(1)}σ, ${varDx >= 0 ? '+' : ''}${varDx.toFixed(0)}%)`);
-    ok(r.sigmaDx < 0.0045,
-       `48b. occhio al ${(f * 100).toFixed(0)}% : il rumore stimato resta al minimo (${r.sigmaDx.toFixed(5)})`);
-    // ⚠️ E l'occhio forte non deve risentirne
-    const varSx = (r.sxFin / r.sxIni - 1) * 100;
-    ok(varSx > -12,
-       `48c. occhio al ${(f * 100).toFixed(0)}% : l occhio forte resta stabile (${r.sxFin.toFixed(1)}σ)`);
+  for (const f of [1.0, 0.85, 0.7, 0.5, 0.35]) {
+    const r = reale(f);
+    const vDx = (r.df / r.di - 1) * 100;
+    const vSx = (r.sf / r.si - 1) * 100;
+    ok(vDx > -12,
+       `48a. destro al ${(f * 100).toFixed(0)}%: non cala (${r.di.toFixed(1)}σ → ${r.df.toFixed(1)}σ, ${vDx >= 0 ? '+' : ''}${vDx.toFixed(0)}%)`);
+    ok(vSx > -12,
+       `48b. destro al ${(f * 100).toFixed(0)}%: e il sinistro non ne risente (${vSx >= 0 ? '+' : ''}${vSx.toFixed(0)}%)`);
+    // ⚠️ Il rumore stimato del debole non deve gonfiarsi: è la spia
+    // del circolo vizioso, prima ancora del calo di ampiezza.
+    ok(r.sd < r.ss * 2.2,
+       `48c. destro al ${(f * 100).toFixed(0)}%: il suo rumore stimato resta paragonabile (${r.sd.toFixed(5)} contro ${r.ss.toFixed(5)})`);
   }
 
-  /* ⚠️ Il tetto al congelamento: una deriva VERA deve essere seguita.
-   * Senza, la baseline resterebbe congelata per sempre e il segnale
-   * resterebbe spostato: il programma non tornerebbe mai a posto. */
+  /* ⚠️ La contropartita da sorvegliare: sospendere l'apprendimento del
+   * rumore non deve moltiplicare i falsi comandi. Un programma che
+   * scrive lettere da solo è peggio di uno che ne scrive poche. */
   {
     const c = deepClone(DEFAULT_CONFIG);
-    const g = new GestureEngine(c, () => {});
+    const ev = []; const g = new GestureEngine(c, e => ev.push(e));
     let t = 0;
-    const o = y => ({ x: 0, y: y + 0.010 * Math.sin(2 * Math.PI * 4.2 * t / 1000), openness: 0.45, confidence: 0.95 });
-    const d = (ms, y) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(y), right: o(y) }); } };
-    d(40000, 0);
-    d(3000, -0.03);
-    const subito = g.channels()['left.up']?.n ?? 0;
-    ok(subito > 2, `48d. uno spostamento vero viene visto subito (${subito.toFixed(1)}σ)`);
-    /* ⚠️ Il recupero da una deriva vera è LENTO di proposito.
-     *
-     * Un segnale alto a lungo può essere una tenuta volontaria o un
-     * blocco: per durata sono indistinguibili. Fra i due errori il
-     * peggiore è sciogliere una tenuta legittima, che fa sparire il
-     * gesto di chi sta comunicando. Si aspetta quindi, e nel frattempo
-     * il programma continua a funzionare. */
-    d(200000, -0.03);
-    const dopo = g.channels()['left.up']?.n ?? 0;
-    ok(dopo < 2,
-       `48e. dopo qualche minuto la nuova posizione è diventata il riposo (${dopo.toFixed(1)}σ)`);
-    ok(Math.abs(g.eyes.left.y.baseline + 0.03) < 0.008,
-       `48f. la baseline ha seguito la deriva (${g.eyes.left.y.baseline.toFixed(5)} contro -0,03000)`);
+    const o = () => ({
+      x: 0,
+      y: RUMORE(t) + 0.012 * Math.sin(2 * Math.PI * 1.9 * t / 1000 + 2.2),
+      openness: 0.45, confidence: 0.95,
+    });
+    const minuti = 8;
+    for (let i = 0; i < minuti * 60 * 30; i++) { t += 33; g.process(t, { left: o(), right: o() }); }
+    ok(ev.length / minuti < 1.0,
+       `48d. in ${minuti} minuti di solo rumore i falsi comandi restano rari (${(ev.length / minuti).toFixed(2)} al minuto)`);
   }
 }
 

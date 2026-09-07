@@ -260,6 +260,37 @@ export class GestureEngine {
     const A = this.eyes[eye]?.[axis];
     if (!A) return;
     if (congela) A.base.freeze(); else A.base.release();
+
+    /* ══════════════════════════════════════════════════════════════
+     * LA STIMA DEL RUMORE SI SOSPENDE SU ENTRAMBI GLI OCCHI
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ È la correzione del difetto più ostinato di questo progetto.
+     *
+     * Quando un occhio è più debole — più coperto, più obliquo, meno
+     * illuminato — la sua ampiezza può non superare la soglia del
+     * gesto. Allora per lui il gesto non esiste, i suoi campioni non
+     * vengono esclusi dalla stima del rumore, e quella si gonfia: da
+     * lì l'ampiezza cala, il gesto scatta ancora meno, e non si
+     * risale più. Misurato: da 3,5σ a 2,0σ con il rumore cresciuto da
+     * 0,004 a 0,050, mentre l'altro occhio restava stabile.
+     *
+     * La via d'uscita sta in una legge della fisiologia: gli occhi
+     * ruotano SEMPRE insieme (legge di Hering). Un movimento dello
+     * sguardo è un evento di entrambi, anche quando uno solo lo
+     * mostra abbastanza da essere riconosciuto.
+     *
+     * Quindi: se un occhio riconosce un gesto, per ENTRAMBI si sospende
+     * l'apprendimento del rumore. La baseline invece resta per occhio,
+     * perché quella descrive dove sta il riposo di ciascuno.
+     *
+     * ⚠️ Non vale per gli ammiccamenti, che possono essere di un occhio
+     * solo: qui si parla di direzione dello sguardo.
+     */
+    for (const altro of ['left', 'right']) {
+      const B = this.eyes[altro]?.[axis];
+      if (B) B.base.congelaScala(congela);
+    }
   }
 
   /** Soglia di un'espressione, o quella globale se non impostata. */
@@ -467,7 +498,7 @@ export class GestureEngine {
           if (A._nonProteggere) {
             // Protezione sospesa dopo un rilascio d'ufficio: si
             // riprende solo quando il segnale è tornato a riposo.
-            if (rap <= (s.baselineFreezeSigma || 2.5)) A._nonProteggere = false;
+            if (rap <= (s.baselineFreezeSigma || s.thresholdOff)) A._nonProteggere = false;
             A._congDa = null;
             A.base.release();
           } else if (agganciato) {
@@ -480,7 +511,7 @@ export class GestureEngine {
              * già il rilascio d'ufficio, che è il posto giusto. */
             A._congDa = null;
             A.base.freeze();
-          } else if (rap > (s.baselineFreezeSigma || 2.5)) {
+          } else if (s.baselineFreezeSigma > 0 && rap > s.baselineFreezeSigma) {
             /* Movimento visibile ma non riconosciuto come gesto: si
              * protegge lo stesso, ma CON tetto. È il criterio debole,
              * e senza limite una deriva vera lo terrebbe attivo per

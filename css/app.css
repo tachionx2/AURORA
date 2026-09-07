@@ -1055,3 +1055,32 @@ body.in-finestra .mini-stato,
 body.in-finestra .mini-cur{font-size:.62rem}
 body.in-finestra .mini-cmd{gap:.15rem}
 body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-radius:5px}
+
+/* ── Gruppi delle impostazioni ──
+ *
+ * Le schede erano venticinque, tutte una dopo l'altra: trovare quella
+ * giusta voleva dire scorrere e ricordare. I gruppi seguono l'ordine
+ * naturale del lavoro di chi installa.
+ */
+.set-tabs{
+  grid-column:1/-1;display:flex;gap:.4rem;flex-wrap:wrap;
+  margin-bottom:.2rem;
+}
+.set-tab{
+  flex:1 1 190px;min-width:150px;text-align:left;cursor:pointer;
+  display:flex;flex-direction:column;gap:.12rem;
+  background:var(--surface);border:1px solid var(--line);border-radius:10px;
+  padding:.55rem .7rem;color:var(--muted);
+  transition:border-color .15s,color .15s,background .15s;
+}
+.set-tab strong{font:700 .92rem var(--font);color:var(--text);line-height:1.2}
+.set-tab em{font:400 .72rem var(--font);font-style:normal;opacity:.75;line-height:1.25}
+.set-tab:hover{border-color:var(--accent)}
+.set-tab.is-on{
+  border-color:var(--accent);background:rgba(127,224,200,.08);
+}
+.set-tab.is-on strong{color:var(--accent)}
+@media (max-width:640px){
+  .set-tab{flex:1 1 100%}
+  .set-tab em{display:none}
+}

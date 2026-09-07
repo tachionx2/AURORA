@@ -206,13 +206,36 @@ ok(app._bootErrors?.length > 0, 'il guasto viene registrato, non ignorato in sil
 // 3. Le impostazioni non devono solo "non lanciare": devono PRODURRE
 //    contenuto. Con una scheda mancante la griglia restava vuota, e
 //    "non lancia" non lo avrebbe rilevato.
+/* ⚠️ Le impostazioni sono ora raggruppate in quattro gruppi, e se ne
+ * vede uno per volta. Si percorrono TUTTI: il rischio da coprire è che
+ * una scheda scompaia da un gruppo senza che nessuno se ne accorga. */
 let cardErr = null;
 const grid = document.getElementById('settingsGrid');
 grid.children = [];
 try { app.settingsView.render(); } catch (e) { cardErr = e.message; }
-ok(!cardErr, 'tutte le schede impostazioni si costruiscono: ' + (cardErr||''));
-const cards = grid.children;
-ok(cards.length >= 15, 'la pagina impostazioni contiene tutte le schede (trovate ' + cards.length + ' su 15)');
+ok(!cardErr, 'le schede impostazioni si costruiscono: ' + (cardErr||''));
+
+const gruppi = app.settingsView.gruppi || [];
+ok(gruppi.length === 4, `le impostazioni sono divise in quattro gruppi (${gruppi.length})`);
+for (const g of gruppi) {
+  ok(!!g.nome && !!g.sub, `il gruppo "${g.id}" ha nome e descrizione`);
+  ok(g.schede.length >= 4, `il gruppo "${g.id}" contiene ${g.schede.length} schede`);
+}
+
+// Si raccolgono le schede di TUTTI i gruppi, uno per volta.
+const cards = [];
+for (const g of gruppi) {
+  app.settingsView.gruppoAttivo = g.id;
+  grid.children = [];
+  let err = null;
+  try { app.settingsView.render(); } catch (e) { err = e.message; }
+  ok(!err, `il gruppo "${g.id}" si disegna senza errori: ${err || ''}`);
+  // La prima è la barra dei gruppi, non una scheda.
+  cards.push(...grid.children.slice(1));
+}
+app.settingsView.gruppoAttivo = gruppi[0]?.id;
+ok(cards.length >= 25,
+   `nessuna scheda perduta nel raggruppamento (trovate ${cards.length} su 25)`);
 function countDeep(node, acc = { fields: 0, inputs: 0 }) {
   for (const c of node.children || []) {
     if (c.className === 'field' || c.classList?.contains?.('field')) acc.fields++;
@@ -426,9 +449,10 @@ if (rifiutiAttesi.length) console.log(`  (${rifiutiAttesi.length} errori di rete
 
 /* ═══════════ Interruttori: devono essere davvero premibili ═══════════ */
 document.body.dataset.tab = 'impostazioni';
+/* Si percorrono tutti e quattro i gruppi: gli interruttori sono
+ * distribuiti fra loro, e guardarne uno solo ne mostrerebbe una
+ * frazione. */
 const grid2 = document.getElementById('settingsGrid');
-grid2.children = [];
-app.settingsView.render();
 function raccogli(node, out = []) {
   for (const c of node.children || []) {
     if (c.className === 'switch') out.push(c);
@@ -436,8 +460,17 @@ function raccogli(node, out = []) {
   }
   return out;
 }
-const interruttori = grid2.children.flatMap(c => raccogli(c));
-ok(interruttori.length >= 15, `interruttori trovati: ${interruttori.length}`);
+const interruttori = [];
+for (const g of (app.settingsView.gruppi || [])) {
+  app.settingsView.gruppoAttivo = g.id;
+  grid2.children = [];
+  app.settingsView.render();
+  for (const c of grid2.children) raccogli(c, interruttori);
+}
+app.settingsView.gruppoAttivo = app.settingsView.gruppi?.[0]?.id;
+grid2.children = [];
+app.settingsView.render();
+ok(interruttori.length >= 15, `interruttori trovati in tutti i gruppi: ${interruttori.length}`);
 // Una casella nascosta dentro un <div> non è premibile: solo la <label>
 // propaga il clic. È il difetto che rendeva TUTTE le impostazioni a
 // interruttore inattive.

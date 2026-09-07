@@ -71,12 +71,27 @@ export async function invia(cfg, { destinatario, testo, oggetto }) {
   const corpo = String(testo || '').trim();
   if (!corpo) return { ok: false, messaggio: 'il messaggio è vuoto' };
 
+  const E = cfg.email;
   const dati = {
     to: destinatario.indirizzo,
     toName: destinatario.nome || '',
-    from: cfg.email.mittente || '',
-    subject: oggetto || cfg.email.oggetto || 'Messaggio',
+    from: E.mittente || '',
+    subject: oggetto || E.oggetto || 'Messaggio',
     text: corpo,
+    /* Parametri della casella in uscita, trasmessi al servizio insieme
+     * al messaggio: così lo stesso servizio funziona con qualunque
+     * provider senza doverlo riconfigurare.
+     *
+     * ⚠️ Senza password: quella resta fra le variabili d'ambiente del
+     * servizio, dove nessun browser può leggerla. */
+    ...(E.smtpHost ? {
+      smtp: {
+        host: E.smtpHost,
+        port: Number(E.smtpPort) || 587,
+        secure: !!E.smtpSicuro,
+        user: E.smtpUser || '',
+      },
+    } : {}),
   };
 
   try {
@@ -128,6 +143,18 @@ export const ESEMPIO_NETLIFY = `// netlify/functions/invia-email.js
 //     port: Number(process.env.MAIL_PORT || 587),
 //     secure: Number(process.env.MAIL_PORT) === 465,  // 465 sì, 587 no
 //     auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS },
+//   });
+//
+// Se Aurora invia anche i parametri della casella (campo smtp), il
+// servizio può usarli e tenere in ambiente SOLO la password — così lo
+// stesso servizio serve più installazioni senza riconfigurarlo:
+//
+//   const s = JSON.parse(event.body).smtp;
+//   const transporter = nodemailer.createTransport({
+//     host: s?.host || process.env.MAIL_HOST,
+//     port: s?.port || Number(process.env.MAIL_PORT || 587),
+//     secure: s?.secure ?? false,
+//     auth: { user: s?.user || process.env.MAIL_USER, pass: process.env.MAIL_PASS },
 //   });
 //
 // Richiede: npm install nodemailer

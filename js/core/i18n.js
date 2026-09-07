@@ -118,7 +118,7 @@ const IT = {
   'sec.blink': 'Ammiccamento', 'sec.mouse': 'Mouse del sistema e finestra in primo piano',
   'sec.debug': 'Registro e diagnosi avanzata',
   'sec.offline': 'Funzionamento senza internet',
-  'sec.radio': 'Radio online', 'sec.email': 'Invio di messaggi di posta',
+  'sec.radio': 'Radio online', 'sec.email': 'Invio di messaggi email',
   'sec.domotica': 'Dispositivi di casa e stampa',
   'sec.channels': 'Canali RGB dello stream video',
   'sec.face': 'Canali del viso (bocca, labbra, sopracciglia)',

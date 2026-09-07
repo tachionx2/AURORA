@@ -88,6 +88,8 @@ export class RobustScale {
     this.minSigma = minSigma;
     this.buf = [];
     this.value = minSigma;
+    // Frazione della finestra usata per stimare il rumore.
+    this.perc = 0.4;
     this.tLast = -1e9;
   }
   reset() { this.buf.length = 0; this.value = this.minSigma; this.tLast = -1e9; }
@@ -111,8 +113,19 @@ export class RobustScale {
     const a = this.buf.map(x => x.v).sort((p, q) => p - q);
     // 40° percentile invece della mediana: doppia protezione, nel caso
     // qualche campione di gesto sfugga comunque al filtro sopra.
-    const q40 = a[Math.floor(a.length * 0.4)];
-    this.value = Math.max(this.minSigma, 1.4826 * q40 / 0.6745 * 0.6745);
+    /* ⚠️ Il percentile decide quanto la stima resiste ai gesti.
+     *
+     * I campioni raccolti durante un gesto RICONOSCIUTO sono già
+     * esclusi. Ma quando un occhio è troppo debole perché il gesto
+     * scatti, quei campioni entrano tutti: se i gesti occupano un
+     * terzo del tempo, il 40° percentile ci finisce dentro e la stima
+     * del rumore si gonfia. Da lì l'ampiezza cala, il gesto scatta
+     * ancora meno, e non si risale più.
+     *
+     * Un percentile più basso guarda solo la parte più quieta della
+     * finestra, e regge una quota di movimento molto maggiore. */
+    const q = a[Math.floor(a.length * (this.perc ?? 0.4))];
+    this.value = Math.max(this.minSigma, 1.4826 * q / 0.6745 * 0.6745);
     return this.value;
   }
 }
@@ -145,7 +158,10 @@ export class AdaptiveBaseline {
      * normale a trenta fotogrammi al secondo. */
     this.maxDt = 0.5;
   }
-  reset() { this.mean = null; this.scala.reset(); this.frozen = false; this.tPrev = null; }
+  reset() {
+    this.mean = null; this.scala.reset();
+    this.frozen = false; this.scalaFrozen = false; this.tPrev = null;
+  }
   freeze() { this.frozen = true; }
 
   /**
@@ -162,6 +178,9 @@ export class AdaptiveBaseline {
    * riposo": si assume la seconda, che è l'unica da cui si può
    * ripartire.
    */
+  /** Sospende o riprende il solo aggiornamento della stima del rumore. */
+  congelaScala(on) { this.scalaFrozen = !!on; }
+
   riancora(v, frazione = 0.5) {
     /* ⚠️ Riancoraggio PARZIALE, e la scala NON si azzera.
      *
@@ -228,7 +247,15 @@ export class AdaptiveBaseline {
     // La scala NON si aggiorna durante un gesto: sigma deve descrivere
     // il rumore a riposo. `frozen` è già alzato dal motore all'inizio
     // del gesto e abbassato alla fine.
-    const sigma = this.scala.push(t, d, !this.frozen);
+    /* ⚠️ La stima del rumore si può congelare SEPARATAMENTE dalla
+     * baseline.
+     *
+     * Servono per cose diverse: la baseline dice DOVE sta il riposo di
+     * QUESTO occhio, e va decisa guardando solo lui; la stima del
+     * rumore dice quanto è quieto il segnale, e va sospesa ogni volta
+     * che c'è un movimento in corso — anche se a riconoscerlo è stato
+     * l'altro occhio. */
+    const sigma = this.scala.push(t, d, !this.frozen && !this.scalaFrozen);
     return { baseline: this.mean, sigma };
   }
 }

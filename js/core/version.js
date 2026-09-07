@@ -6,4 +6,4 @@
  * si finisce per provare la build vecchia credendo di provare la nuova.
  * Il numero è mostrato nella barra in alto e nelle impostazioni.
  */
-export const BUILD = '20260907-1332';
+export const BUILD = '20260907-1448';

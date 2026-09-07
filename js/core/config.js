@@ -233,18 +233,23 @@ export const DEFAULT_CONFIG = {
      * altrimenti si congela di continuo e il tetto scade a metà
      * gesto — e ben SOTTO la soglia del gesto, altrimenti un occhio
      * debole resta senza protezione. */
-    /* ⚠️ 1,5 — la stessa soglia del rilascio del gesto.
+    /* ⚠️ 0 = SPENTA, ed è il valore giusto.
      *
-     * Tarata misurando, non a intuito. Valori più alti sembravano
-     * migliori con prove brevi, ma quelle misuravano l'assestamento
-     * del metro, non la stabilità: con un riscaldamento realistico
-     * 1,5 è l'unico valore che tiene stabile anche un occhio debole,
-     * che è il caso da proteggere.
+     * L'idea era proteggere la baseline appena il segnale si muove,
+     * non solo quando il gesto viene riconosciuto, così da coprire
+     * anche un occhio troppo debole per superare la soglia.
      *
-     * Deve stare SOTTO l'ampiezza dell'occhio più debole — altrimenti
-     * proprio quello resta senza protezione — e sopra il rumore di
-     * riposo. */
-    baselineFreezeSigma: 1.5,
+     * Con segnali puliti funzionava. Con il rumore VERO — cinque volte
+     * quello che simulavo — il segnale supera 1,5σ quasi sempre: la
+     * protezione restava attiva di continuo, la stima del rumore non
+     * si aggiornava mai e restava artificialmente al minimo, poi
+     * scadeva il tetto e crollava tutto insieme. Misurato in
+     * condizioni reali: −76% di ampiezza contro −16% senza.
+     *
+     * Lezione: una protezione che si attiva quasi sempre non è una
+     * protezione, è un blocco. Riattivarla solo dopo averla verificata
+     * con rumore realistico. */
+    baselineFreezeSigma: 0,
     baselineFreezeMaxMs: 20000,
     baselineFreezeDuringGesture: true,   // CRITICO: vedi nota in filters.js
     thresholdOn: 3.5,            // in sigma
@@ -663,6 +668,21 @@ export const DEFAULT_CONFIG = {
     oggetto: 'Messaggio da Aurora',
     contatti: [],        // { nome, indirizzo }
     conferma: true,      // chiedere conferma prima di spedire
+    /* ── Parametri della casella in uscita ──
+     * Vengono trasmessi al servizio di invio insieme al messaggio, così
+     * lo stesso servizio funziona con qualunque provider senza doverlo
+     * riconfigurare: Netlify, un server proprio, un hosting qualunque.
+     *
+     * ⚠️ LA PASSWORD NON STA QUI, ed è una scelta di sicurezza, non una
+     * dimenticanza. Tutto ciò che si scrive nelle impostazioni resta
+     * nel browser, dove chiunque apra gli strumenti di sviluppo può
+     * leggerlo — e parliamo della casella personale di una persona
+     * malata. La password va messa fra le variabili d'ambiente del
+     * servizio, dove nessun browser la vede. */
+    smtpHost: '',        // es. smtp.gmail.com
+    smtpPort: 587,       // 587 con STARTTLS, 465 con TLS diretto
+    smtpUser: '',        // indirizzo della casella in uscita
+    smtpSicuro: false,   // vero solo sulla porta 465
   },
 
   /* ── Domotica tramite Home Assistant ──
@@ -780,7 +800,7 @@ export function migrateConfig(cfg) {
     if (c.signal.blinkSogliaIride === undefined) c.signal.blinkSogliaIride = 0.55;
     if (c.signal.blinkSmentiSopra === undefined) c.signal.blinkSmentiSopra = 0.45;
     if (c.signal.baselineFreezeMaxMs === undefined) c.signal.baselineFreezeMaxMs = 20000;
-    if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 1.5;
+    if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
   if (v < 31 && c.detection && c.detection.irisOcclusionSoglia === undefined) c.detection.irisOcclusionSoglia = 0.78;

@@ -64,33 +64,104 @@ export class SettingsView {
     this.root.innerHTML = '';
     document.getElementById('profileName').value = cfg.profileName || '';
 
-    this.root.append(
-      this._sourceCard(cfg),
-      this._detectionCard(cfg),
-      this._signalCard(cfg),
-      this._gesturesCard(cfg),
-      this._blinkCard(cfg),
-      this._directionCard(cfg),
-      this._mouseCard(cfg),
-      this._debugCard(cfg),
-      this._offlineCard(cfg),
-      this._radioCard(cfg),
-      this._emailCard(cfg),
-      this._domoticaCard(cfg),
-      this._channelCard(cfg),
-      this._faceCard(cfg),
-      this._pointerCard(cfg),
-      this._draftsCard(cfg),
-      this._keyboardCard(cfg),
-      this._deviceCard(cfg),
-      this._scanCard(cfg),
-      this._phraseGroupsCard(cfg),
-      this._groupsCard(cfg),
-      this._audioCard(cfg),
-      this._voiceBankCard(cfg),
-      this._predictionCard(cfg),
-      this._uiCard(cfg),
-    );
+    /* ══════════════════════════════════════════════════════════════════
+     * QUATTRO GRUPPI, NELL'ORDINE IN CUI SI CONFIGURA
+     * ══════════════════════════════════════════════════════════════════
+     *
+     * Le schede erano venticinque, tutte una dopo l'altra: trovare
+     * quella giusta voleva dire scorrere e ricordare. Ora sono
+     * raggruppate secondo l'ordine naturale del lavoro di chi installa:
+     * prima si fa vedere la persona alla telecamera, poi si tara come
+     * rilevare i suoi movimenti, poi si decide come comunica, e infine
+     * si collega ciò che c'è intorno.
+     *
+     * ⚠️ Nessuna scheda è stata rimossa o modificata: solo raggruppata.
+     */
+    this.gruppi = [
+      {
+        id: 'vedere',
+        nome: P(['Vedere la persona', 'Seeing the person']),
+        sub: P(['Aspetto, telecamera e riconoscimento del volto',
+                'Appearance, camera and face detection']),
+        schede: [
+          () => this._uiCard(cfg),
+          () => this._sourceCard(cfg),
+          () => this._detectionCard(cfg),
+          () => this._channelCard(cfg),
+        ],
+      },
+      {
+        id: 'capire',
+        nome: P(['Capire i movimenti', 'Understanding movements']),
+        sub: P(['Gesti, segnale, ammiccamento e puntatore',
+                'Gestures, signal, blinking and pointer']),
+        schede: [
+          () => this._gesturesCard(cfg),
+          () => this._faceCard(cfg),
+          () => this._signalCard(cfg),
+          () => this._blinkCard(cfg),
+          () => this._directionCard(cfg),
+          () => this._debugCard(cfg),
+          () => this._pointerCard(cfg),
+        ],
+      },
+      {
+        id: 'comunicare',
+        nome: P(['Come comunica', 'How they communicate']),
+        sub: P(['Scansione, voce, lettere, frasi e predizione',
+                'Scanning, voice, letters, phrases and prediction']),
+        schede: [
+          () => this._scanCard(cfg),
+          () => this._keyboardCard(cfg),
+          () => this._audioCard(cfg),
+          () => this._voiceBankCard(cfg),
+          () => this._groupsCard(cfg),
+          () => this._phraseGroupsCard(cfg),
+          () => this._draftsCard(cfg),
+          () => this._predictionCard(cfg),
+        ],
+      },
+      {
+        id: 'mondo',
+        nome: P(['Aprirsi al mondo', 'Reaching outside']),
+        sub: P(['Uso senza internet, mouse, radio, posta e dispositivi',
+                'Offline use, mouse, radio, email and devices']),
+        schede: [
+          () => this._offlineCard(cfg),
+          () => this._mouseCard(cfg),
+          () => this._radioCard(cfg),
+          () => this._emailCard(cfg),
+          () => this._domoticaCard(cfg),
+          () => this._deviceCard(cfg),
+        ],
+      },
+    ];
+
+    /* Il gruppo scelto si ricorda: ridisegnando dopo ogni modifica —
+     * cosa che accade a ogni interruttore che apre una sezione — si
+     * tornerebbe altrimenti sempre al primo, perdendo il punto in cui
+     * si stava lavorando. */
+    if (!this.gruppoAttivo || !this.gruppi.some(g => g.id === this.gruppoAttivo)) {
+      this.gruppoAttivo = this.gruppi[0].id;
+    }
+
+    const barra = h('div', 'set-tabs');
+    for (const g of this.gruppi) {
+      const b = h('button', 'set-tab' + (g.id === this.gruppoAttivo ? ' is-on' : ''));
+      b.append(h('strong', null, g.nome), h('em', null, g.sub));
+      b.onclick = () => {
+        this.gruppoAttivo = g.id;
+        this.render();
+        // Si torna in cima: cambiando gruppo ci si aspetta di vedere
+        // la prima scheda, non il punto in cui si era altrove.
+        this.root.scrollIntoView?.({ block: 'start', behavior: 'auto' });
+      };
+      barra.append(b);
+    }
+    this.root.append(barra);
+
+    const gruppo = this.gruppi.find(g => g.id === this.gruppoAttivo);
+    for (const fai of gruppo.schede) this.root.append(fai());
   }
 
   /* ------------------------- helper di controllo ------------------------- */
@@ -621,6 +692,27 @@ export class SettingsView {
         P(['Nome del mittente', 'Sender name']), P(['Come comparirà a chi riceve', 'As it will appear to the recipient'])));
       righe.push(this._text('email.oggetto',
         P(['Oggetto predefinito', 'Default subject']), null));
+      righe.push(h('div', 'vb-testa', P(['CASELLA IN USCITA (facoltativa)', 'OUTGOING MAILBOX (optional)'])));
+      righe.push(h('p', 'sub', P(
+        ['Da compilare solo se Aurora non sta su Netlify, o se il servizio di invio deve servire più installazioni. Questi valori vengono trasmessi al servizio insieme al messaggio, così lo stesso servizio funziona con qualunque provider senza riconfigurarlo. Lasciandoli vuoti, il servizio usa la propria configurazione.',
+         'Fill these only if Aurora is not on Netlify, or if one sending service must serve several installations. Leave empty to use the service own configuration.'])));
+      righe.push(this._text('email.smtpHost',
+        P(['Server di posta in uscita', 'Outgoing mail server']), 'smtp.gmail.com'));
+      righe.push(this._range('email.smtpPort',
+        P(['Porta', 'Port']),
+        P(['587 con STARTTLS (la più comune), 465 con TLS diretto, 25 solo su reti interne.',
+           '587 with STARTTLS (most common), 465 with direct TLS, 25 only on internal networks.']),
+        25, 588, 1));
+      righe.push(this._text('email.smtpUser',
+        P(['Indirizzo della casella in uscita', 'Outgoing mailbox address']), 'nome@dominio.it'));
+      righe.push(this._toggle('email.smtpSicuro',
+        P(['Connessione cifrata diretta (porta 465)', 'Direct TLS (port 465)']),
+        P(['Da accendere SOLO sulla porta 465. Sulla 587 la cifratura si negozia dopo il collegamento e questo interruttore va lasciato spento.',
+           'Turn on ONLY for port 465. On 587 encryption is negotiated after connecting.'])));
+      righe.push(h('p', 'note', P(
+        ['🔒 LA PASSWORD NON SI METTE QUI, ed è una scelta di sicurezza, non una dimenticanza. Tutto ciò che si scrive in queste impostazioni resta nel browser, dove chiunque apra gli strumenti di sviluppo può leggerlo — e parliamo della casella personale di una persona malata. La password va messa fra le variabili d\'ambiente del servizio di invio, dove nessun browser la vede. Il codice di esempio qui sopra mostra come.',
+         '🔒 THE PASSWORD DOES NOT GO HERE. Anything written in these settings stays in the browser, readable by anyone opening developer tools. Put it in the sending service environment variables.'])));
+
       righe.push(this._toggle('email.conferma',
         P(['Chiedi conferma prima di spedire', 'Ask for confirmation before sending']),
         P(['⚠️ Consigliato. Un messaggio parte una volta sola e non torna indietro: per chi seleziona con lo sguardo, un gesto involontario non deve poter spedire una lettera.',
