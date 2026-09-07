@@ -98,6 +98,7 @@ export class SettingsView {
         schede: [
           () => this._gesturesCard(cfg),
           () => this._faceCard(cfg),
+          () => this._comboCard(cfg),
           () => this._signalCard(cfg),
           () => this._blinkCard(cfg),
           () => this._directionCard(cfg),
@@ -309,6 +310,29 @@ export class SettingsView {
           P(['Sotto questa frazione dell\'apertura di riposo l\'occhio è considerato CHIUSO, non solo abbassato: resta mascherato per tutta la durata, anche di minuti. Guardando in basso l\'apertura scende al 40-60% del riposo; chiudendo scende sotto il 25%. Alzarla fa scambiare uno sguardo in basso per una chiusura; abbassarla fa risultare "aperto" un occhio chiuso.',
              'Below this fraction of the resting opening the eye counts as CLOSED, not merely lowered: it stays masked for the whole duration, even minutes. Looking down brings the opening to 40-60% of rest; closing brings it below 25%. Raising it makes a downward gaze look like a closure; lowering it makes a closed eye look open.']),
           0.05, 0.5, 0.01),
+        /* ══════════════════════════════════════════════════════════
+         * DISTINZIONE FRA AMMICCAMENTO E SGUARDO ALZATO
+         * ══════════════════════════════════════════════════════════
+         * Sono i parametri più delicati di tutta la taratura: una
+         * chiusura dichiarata per sbaglio maschera il gesto proprio
+         * mentre avviene, e il suo transitorio gonfia la stima del
+         * rumore abbassando TUTTE le ampiezze di quell'occhio.       */
+        this._toggle('signal.blinkRichiedeIride',
+          P(['Per dichiarare chiuso serve che l\'iride sparisca', 'Closure also requires the iris to disappear']),
+          P(['⚠️ Il parametro più importante per chi tiene un occhio semichiuso o alza molto lo sguardo. Con la palpebra che copre, l\'apertura misurata si stringe e il gesto verrebbe scambiato per un ammiccamento — mascherato mentre avviene, con il suo transitorio che gonfia il rumore e abbassa tutte le ampiezze di quell\'occhio. In un ammiccamento vero la palpebra copre anche l\'IRIDE e il rilevamento crolla; stringendo gli occhi l\'iride resta visibile. Spegnere solo se gli ammiccamenti volontari non vengono più riconosciuti.',
+             '⚠️ The most important parameter for someone who keeps an eye half-closed or looks far up. In a real blink the lid also covers the IRIS and detection collapses; when squinting the iris stays visible.'])),
+        ...(cfg.signal.blinkRichiedeIride ? [
+          this._range('signal.blinkSogliaIride',
+            P(['Confidenza sopra cui l\'iride si vede ancora', 'Confidence above which the iris is still visible']),
+            P(['Sopra questo valore di confidenza il rilevamento dell\'iride è ancora buono, quindi non è un ammiccamento. Guarda la CONFIDENZA nei contatori: se durante i gesti resta vicino a 1,00 e durante gli ammiccamenti veri scende molto, la soglia va messa fra i due. Alzarla rende la distinzione più prudente; abbassarla la rende più decisa.',
+               'Above this confidence the iris is still well detected, so it is not a blink. Compare with the CONFIDENZA counter during gestures and during real blinks.']),
+            0.2, 0.9, 0.05),
+          this._range('signal.blinkSmentiSopra',
+            P(['Apertura sopra cui vale la distinzione', 'Opening above which the distinction applies']),
+            P(['Frazione dell\'apertura di riposo sotto la quale la distinzione NON si applica più: lì l\'occhio è considerato chiuso comunque. Serve a non smentire mai un ammiccamento vero, che scende molto in basso. ⚠️ Alzarla troppo restringe la finestra utile: con il riposo a 0,44 e questo valore a 0,45 la distinzione valeva solo fra 0,20 e 0,24, e uno sguardo molto alzato ci passava sotto — trentasette ammiccamenti fantasma in tre minuti. Abbassarla allarga la protezione.',
+               'Fraction of the resting opening below which the distinction no longer applies. Raising it too much narrows the useful window.']),
+            0.05, 0.60, 0.01),
+        ] : []),
         this._range('signal.blinkSustainedMs',
           P(['Oltre questo tempo non è un ammiccamento', 'Beyond this it is not a blink']),
           P(['Palpebra abbassata più a lungo di così: è sguardo in basso, non chiusura',
@@ -584,15 +608,25 @@ export class SettingsView {
 
     righe.push(h('div', 'vb-testa', P(['CORREZIONE DELL\'IRIDE COPERTA', 'OCCLUDED IRIS CORRECTION'])));
     righe.push(this._toggle('detection.irisOcclusionFix',
-      P(['Ricostruisci il centro quando la palpebra copre l\'iride', 'Reconstruct the centre when the eyelid covers the iris']),
-      P(['⚠️ SPERIMENTALE, spenta di default. Chi alza molto lo sguardo porta la pupilla sotto la palpebra: il centro stimato scivola in basso e il movimento risulta più piccolo. La correzione lo ricostruisce dal raggio orizzontale, che la palpebra non tocca. Ma su volti veri il criterio può scattare anche a iride intera, aggiungendo uno spostamento a ogni fotogramma: il rumore stimato cresce e TUTTE le ampiezze crollano. Prima di accenderla, guarda nel registro in console il valore "schiacc" e la percentuale "corretti": se corregge quasi sempre, la soglia qui sotto va abbassata.',
-         '⚠️ EXPERIMENTAL, off by default. Check the "schiacc" value and "corretti" percentage in the console log before enabling.'])));
+      P(['Compensa quando la palpebra copre l\'iride', 'Compensate when the eyelid covers the iris']),
+      P(['⚠️ SPERIMENTALE, spenta di default. Chi alza molto lo sguardo porta la pupilla sotto la palpebra: il centro stimato scivola in basso e il movimento risulta più piccolo di quanto sia. Guarda in Diagnostica il contatore "Palpebra copre iride": a occhio rilassato dovrebbe stare vicino a zero, e salire nettamente quando lo sguardo va in alto. Se non sale, non c\'è nulla da compensare e questa funzione va lasciata spenta.',
+         '⚠️ EXPERIMENTAL, off by default. Check the "Palpebra copre iride" counter in Diagnostics before enabling.'])));
     if (cfg.detection.irisOcclusionFix) {
       righe.push(this._range('detection.irisOcclusionSoglia',
-        P(['Soglia di schiacciamento', 'Squash threshold']),
-        P(['Sotto questo rapporto fra raggio verticale e orizzontale l\'iride si considera coperta. Più basso = corregge più di rado. Confrontalo con il valore "schiacc" del registro: la soglia deve stare SOTTO il valore che si legge a iride intera.',
-           'Below this ratio the iris is considered occluded. Lower = corrects less often.']),
-        0.5, 0.95, 0.01));
+        P(['Copertura oltre cui compensare', 'Coverage above which to compensate']),
+        P(['Un po\' di palpebra sopra l\'iride c\'è sempre, anche a occhio rilassato: compensare quella sposterebbe il segno di continuo. Metti questa soglia POCO SOPRA il valore che leggi a occhio rilassato nel contatore "Palpebra copre iride".',
+           'Some eyelid over the iris is always present. Set this slightly above the value read at rest.']),
+        0.02, 0.60, 0.01));
+      righe.push(this._range('detection.irisOcclusionForza',
+        P(['Quanto compensare', 'How much to compensate']),
+        P(['Frazione della copertura eccedente che viene compensata. Alzala finché il segno rosso segue il centro della pupilla anche a sguardo molto alzato, senza superarlo. Se lo supera o vibra, abbassala.',
+           'Fraction of the excess coverage that is compensated. Raise until the red mark follows the pupil centre without overshooting.']),
+        0, 1.5, 0.05));
+      righe.push(this._range('detection.irisOcclusionMax',
+        P(['Compensazione massima', 'Maximum compensation']),
+        P(['Tetto di sicurezza, in frazione del raggio dell\'iride: un rilevamento sbagliato non deve poter far volare il segno lontano dall\'occhio.',
+           'Safety cap, as a fraction of the iris radius.']),
+        0.1, 1.2, 0.05));
     }
 
     return this._card(t('sec.debug'), null, righe);
@@ -886,6 +920,63 @@ export class SettingsView {
       righe);
   }
 
+  _comboCard(cfg) {
+    const righe = [];
+    righe.push(h('p', 'note', P(
+      ['Un solo movimento volontario produce spesso PIÙ segnali insieme: alzando lo sguardo l\'iride sale, la palpebra si spalanca, e a volte il sopracciglio si solleva. Finora ciascuno veniva giudicato da solo, e se nessuno superava la propria soglia il gesto andava perso — anche quando tutti dicevano la stessa cosa.',
+       'A single voluntary movement often produces SEVERAL signals at once. Until now each was judged alone, and if none crossed its threshold the gesture was lost.'])));
+    righe.push(h('p', 'sub', P(
+      ['Sommandoli il guadagno è preciso e prevedibile: il rumore dei canali è in buona parte indipendente, quindi sommandone due il rapporto segnale-rumore migliora del 41%, con tre del 73%. Il canale combinato si misura nella stessa unità degli altri, quindi le soglie restano confrontabili.',
+       'Summing them, noise grows as the square root while the signal grows linearly: two channels give +41%, three +73%.'])));
+
+    righe.push(this._toggle('gestures.COMBO.enabled',
+      P(['Usa il canale combinato', 'Use the combined channel']),
+      P(['⚠️ I canali singoli continuano a funzionare esattamente come prima: questo si aggiunge, non sostituisce. Spento, nulla cambia.',
+         '⚠️ Single channels keep working exactly as before: this adds to them.'])));
+
+    if (cfg.gestures.COMBO?.enabled) {
+      righe.push(h('div', 'vb-testa', P(['CANALI DA SOMMARE', 'CHANNELS TO SUM'])));
+      const scelti = new Set(cfg.signal.comboCanali || []);
+      const box = h('div', 'pgroup');
+      const disponibili = [
+        ['up', P(['Occhio in alto', 'Eye up'])],
+        ['down', P(['Occhio in basso', 'Eye down'])],
+        ['left', P(['Occhio a sinistra', 'Eye left'])],
+        ['right', P(['Occhio a destra', 'Eye right'])],
+        ['wide', P(['Occhio spalancato', 'Eye wide open'])],
+        ['narrow', P(['Occhio socchiuso', 'Eye narrowed'])],
+        ['browUp', P(['Sopracciglia alzate', 'Brows raised'])],
+        ['mouthOpen', P(['Bocca aperta', 'Mouth open'])],
+      ];
+      for (const [id, nome] of disponibili) {
+        const riga = h('label', 'switch switch-inline');
+        const inp = h('input');
+        inp.type = 'checkbox';
+        inp.checked = scelti.has(id);
+        inp.onchange = () => {
+          const s2 = new Set(this.app.get('signal.comboCanali') || []);
+          if (inp.checked) s2.add(id); else s2.delete(id);
+          this.app.set('signal.comboCanali', [...s2]);
+          this.render();
+        };
+        riga.append(inp, h('span'), h('em', null, nome));
+        box.append(riga);
+      }
+      righe.push(box);
+      righe.push(h('p', scelti.size >= 2 ? 'sub' : 'note',
+        scelti.size >= 2
+          ? P([`✓ ${scelti.size} canali sommati: guadagno atteso ×${Math.sqrt(scelti.size).toFixed(2)} sul rapporto segnale-rumore.`,
+               `✓ ${scelti.size} channels summed: expected gain ×${Math.sqrt(scelti.size).toFixed(2)}.`])
+          : P(['⚠️ Servono almeno DUE canali: con uno solo non c\'è nulla da sommare e il combinato resta inattivo.',
+               '⚠️ At least TWO channels are needed.'])));
+      righe.push(h('p', 'sub', P(
+        ['Scegli i canali che si muovono INSIEME durante il gesto della persona. Guarda il grafico in diagnostica: se due tracce salgono nello stesso momento, sommarle conviene. Sommare un canale che non si muove peggiora invece il risultato, perché aggiunge rumore senza segnale.',
+         'Choose channels that move TOGETHER during the person\'s gesture. Adding a channel that does not move makes things worse.'])));
+    }
+
+    return this._card(t('sec.combo'), null, righe);
+  }
+
   _faceCard(cfg) {
     const righe = [];
     righe.push(this._toggle('detection.faceChannels',
@@ -967,7 +1058,11 @@ export class SettingsView {
 
   _directionCard(cfg) {
     const dirs = [['up', ['Su', 'Up']], ['down', ['Giù', 'Down']],
-                  ['left', ['Sinistra', 'Left']], ['right', ['Destra', 'Right']]];
+                  ['left', ['Sinistra', 'Left']], ['right', ['Destra', 'Right']],
+                  // L'apertura ha soglia e guadagno propri come gli altri
+                  // canali: è misurata in multipli del proprio rumore.
+                  ['wide', ['Occhio spalancato', 'Eye wide open']],
+                  ['narrow', ['Occhio socchiuso', 'Eye narrowed']]];
     const rows = [];
     for (const [id, nome] of dirs) {
       const row = h('div', 'dir-row');

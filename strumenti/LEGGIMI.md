@@ -14,7 +14,7 @@ per davvero.
 
 | | `avvia-mouse.bat` | `aurora-mouse.py` | `aurora-esp32.ino` |
 |---|---|---|---|
-| Sistema | **solo Windows** | Windows, macOS, Linux | tutto, anche TV e console |
+| Sistema | **solo Windows** | Windows, macOS, Linux | tutto: anche **Chromebook**, TV e console |
 | Cosa installare | **niente** | due comandi `pip` | una scheda ESP32-S3 |
 | Come si avvia | doppio clic | da terminale | si infila nell'USB |
 | Permessi | nessuno | su macOS l'accessibilità | nessuno |
@@ -34,6 +34,31 @@ lo consente **per quel solo avvio**, senza cambiare nulla nel sistema.
 ### Su macOS o Linux
 
 Usa `aurora-mouse.py`: fa esattamente le stesse cose.
+
+### Su Chromebook: la scheda è l'unica strada
+
+⚠️ Su ChromeOS **nessun programma può muovere il cursore**, e non è un
+limite aggirabile con un programma diverso.
+
+Il contenitore Linux (Crostini) esiste su quasi tutti i Chromebook e
+può eseguire `aurora-mouse.py`, ma quel contenitore è isolato dal
+sistema: il cursore che muoverebbe è solo quello delle finestre Linux,
+non quello di ChromeOS. Lo stesso vale per le app Android. Non è un
+problema di permessi da concedere: è la separazione su cui ChromeOS è
+costruito.
+
+**La scheda ESP32 invece funziona perfettamente**, e senza installare
+nulla: ChromeOS la vede come un mouse USB qualunque, esattamente come
+vedrebbe un mouse comprato in negozio. Aurora le parla via seriale
+dallo stesso cavo, e Chrome su ChromeOS supporta Web Serial.
+
+Un cavo, nessun programma, nessun permesso.
+
+💡 **Un aiuto in più che ChromeOS offre già**: nelle impostazioni di
+accessibilità c'è il *clic automatico*, che clicca da solo dove il
+cursore si ferma per un tempo scelto. Attivandolo, la scheda deve
+solo MUOVERE il cursore — dei clic si occupa il sistema. Meno lavoro
+per il dispositivo e un comando in meno da imparare.
 
 ### La scheda ESP32
 

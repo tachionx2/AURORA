@@ -380,7 +380,7 @@ export class BlinkDetector {
      * per quasi metà. Più in basso è una chiusura vera, e va contata.
      * Nei dati reali l'occhio che si stringeva guardando in alto stava
      * al 54% del riposo; una chiusura volontaria scende al 13%. */
-    this.smentiSopra = 0.45;
+    this.smentiSopra = 0.20;
     this.smentiti = 0;
     this.tSottoSoglia = null;        // da quando siamo sotto soglia
     // Soglia fissa, quando l'auto-calibrazione è spenta. La logica di

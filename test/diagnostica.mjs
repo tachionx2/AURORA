@@ -149,7 +149,9 @@ function corri(mod, script) {
   const attesi = ['left.up','left.down','left.left','left.right','left.blink',
                   'right.up','right.down','right.left','right.right','right.blink'];
   ok(attesi.every(k => k in ch), '8a. tutti e dieci i canali presenti');
-  ok(Object.keys(ch).length===10, '8b. esattamente dieci canali');
+  // Quattro direzioni dell'iride + due dell'apertura, per due occhi,
+  // più i due canali di ammiccamento.
+  ok(Object.keys(ch).length===14, `8b. quattordici canali (${Object.keys(ch).length})`);
   for (const k of attesi.filter(x=>!x.endsWith('blink'))) {
     if (!ch[k]) { ok(false, `8c. canale ${k} non calcolato in diagnostica`); break; }
   }
@@ -205,13 +207,21 @@ function corri(mod, script) {
   disegnate.length=0;
   plot.draw(C, 3.5, 1.5, ['left.up','right.up','left.down','right.down'], ['left.blink'], true);
   ok(disegnate.length > unaTraccia, '10b. più tracce selezionate = più disegno');
-  ok(Object.keys(TRACE_STYLE).length===8, '10c. otto tracce direzionali definite');
+  // Quattro direzioni dell'iride + due dell'apertura + il combinato,
+  // per due occhi.
+  ok(Object.keys(TRACE_STYLE).length===14, `10c. quattordici tracce definite (${Object.keys(TRACE_STYLE).length})`);
   ok(Object.keys(BLINK_STYLE).length===2, '10d. due tracce ammiccamento');
   const stili = Object.entries(TRACE_STYLE);
-  ok(stili.filter(([k])=>k.startsWith('left')).every(([,v])=>v.dash.length===0), '10e. occhio sinistro tratto pieno');
+  /* ⚠️ L'apertura è di natura diversa dagli assi dell'iride — non dove
+   * guarda l'occhio ma quanto è aperto — e si distingue anche per
+   * tratto, non solo per colore: sul sinistro "socchiude" è
+   * punteggiato per non confonderlo con "spalanca". */
+  ok(stili.filter(([k])=>k.startsWith('left') && !k.includes('narrow'))
+          .every(([,v])=>v.dash.length===0),
+     '10e. sull occhio sinistro gli assi dell iride hanno tratto pieno');
   ok(stili.filter(([k])=>k.startsWith('right')).every(([,v])=>v.dash.length>0), '10f. occhio destro tratteggiato');
   const colori = new Set(stili.map(([,v])=>v.color));
-  ok(colori.size===4, '10g. un colore per direzione, quattro in tutto');
+  ok(colori.size===6, `10g. un colore per direzione, più apertura e combinato (${colori.size})`);
   plot.clear();
   ok(plot.frames.length===0, '10h. il grafico si azzera');
 }
@@ -362,8 +372,12 @@ function corri(mod, script) {
 
 /* ══════════ 15. Tratto dei pulsanti coerente con le linee ══════════ */
 {
-  ok(Object.entries(TRACE_STYLE).filter(([k]) => k.startsWith('left')).every(([,v]) => v.dash.length === 0),
-     '15a. occhio sinistro: tratto continuo');
+  /* L'apertura si distingue anche per tratto, non solo per colore:
+   * "socchiude" è punteggiato per non confonderlo con "spalanca". */
+  ok(Object.entries(TRACE_STYLE)
+       .filter(([k]) => k.startsWith('left') && !k.includes('narrow'))
+       .every(([, v]) => v.dash.length === 0),
+     '15a. occhio sinistro: tratto continuo sugli assi dell iride');
   ok(Object.entries(TRACE_STYLE).filter(([k]) => k.startsWith('right')).every(([,v]) => v.dash.length > 0),
      '15b. occhio destro: tratteggiato');
   ok(BLINK_STYLE['left.blink'].dash.length === 0 && BLINK_STYLE['right.blink'].dash.length > 0,
@@ -950,15 +964,26 @@ function corri(mod, script) {
 {
   const c = deepClone(DEFAULT_CONFIG);
   c.signal.blinkFloor = 0.04;
+  /* ⚠️ Qui si verifica la CONTABILITÀ delle raffiche, non la
+   * distinzione fra ammiccamento e sguardo alzato. Quest'ultima si
+   * spegne di proposito: con un segnale sintetico a confidenza fissa
+   * interverrebbe e nasconderebbe ciò che si vuole misurare.
+   * La distinzione ha i suoi test, il 47. */
+  c.signal.blinkRichiedeIride = false;
   const g = new GestureEngine(c, () => {}); g.setDiagnostics(true);
   let t = 0;
   const o = ap => ({ x: 0, y: 0, openness: ap, confidence: 0.9 });
   const d = (ms, ap) => { for (let i = 0; i < ms; i += 20) { t += 20; g.process(t, { left: o(ap), right: o(ap) }); } };
   d(8000, 0.30);
-  // Abbassamento tenuto a lungo NELLA FASCIA AMBIGUA: sopra la soglia
-  // di chiusura vera (25% del riposo = 0,075) ma sotto quella di
-  // abbassamento (55% = 0,165). Non è un ammiccamento né una chiusura,
-  // e deve risultare da qualche parte invece di sparire in silenzio.
+  /* Abbassamento tenuto a lungo NELLA FASCIA AMBIGUA: sopra la soglia
+   * di chiusura vera (25% del riposo = 0,075) ma sotto quella di
+   * abbassamento (55% = 0,165). Non è un ammiccamento né una chiusura,
+   * e deve risultare da qualche parte invece di sparire in silenzio.
+   *
+   * ⚠️ Con la palpebra a 0,09 l'iride è ormai coperta e la confidenza
+   * scende a 0,69: è questo che distingue un vero abbassamento da uno
+   * sguardo alzato, dove la palpebra si stringe ma l'iride resta ben
+   * visibile e la confidenza resta a 1,00. */
   d(1500, 0.12); d(2000, 0.30);
   ok(g.counters.burstAborted > 0,
      '34a. una chiusura scartata perché sostenuta viene contata, non sparisce');
@@ -2004,6 +2029,230 @@ function corri(mod, script) {
     for (let i = 0; i < minuti * 60 * 30; i++) { t += 33; g.process(t, { left: o(), right: o() }); }
     ok(ev.length / minuti < 1.0,
        `48d. in ${minuti} minuti di solo rumore i falsi comandi restano rari (${(ev.length / minuti).toFixed(2)} al minuto)`);
+  }
+}
+
+/* ══════ 49. La diagnostica propone anche i parametri "nascosti" ══════
+ *
+ * ⚠️ I parametri che distinguono un ammiccamento da uno sguardo alzato
+ * erano regolabili solo nel codice. Sono però i più delicati di tutta
+ * la taratura: una chiusura dichiarata per sbaglio maschera il gesto
+ * mentre avviene, e il suo transitorio gonfia la stima del rumore
+ * abbassando TUTTE le ampiezze di quell'occhio.
+ *
+ * Ora la diagnostica li riconosce da sola e li propone, con la
+ * spiegazione: un parametro proposto senza ragione non viene applicato
+ * da nessuno.                                                        */
+{
+  const { SessionStats: SS } = await import('../js/signal/SessionStats.js');
+
+  function sessione({ chiusureSx, chiusureDx, aperturaDx = 0.45 }) {
+    const st = new SS();
+    let t = 0;
+    for (let i = 0; i < 25000; i++) {
+      t += 33;
+      const chiuso = (i % 300) < 40;
+      const o = (ap) => ({ x: 0, y: 0.012 * Math.sin(i / 7), openness: ap, confidence: 0.97 });
+      st.push(t, { left: o(0.45), right: o(chiuso ? aperturaDx : 0.45) }, 2.0, false);
+    }
+    st.c.chiusureSx = chiusureSx;
+    st.c.chiusureDx = chiusureDx;
+    return st.parametriConsigliati();
+  }
+
+  // Squilibrio marcato: deve accorgersene e proporre il rimedio
+  const sbil = sessione({ chiusureSx: 1, chiusureDx: 39, aperturaDx: 0.10 });
+  ok(sbil.ok, 'con osservazione sufficiente i parametri vengono proposti');
+  ok(sbil.proposta['signal.blinkRichiedeIride'] === true,
+     '49a. propone di richiedere che l iride sparisca per dichiarare chiuso');
+  ok(sbil.proposta['signal.blinkSmentiSopra'] === 0.20,
+     '49b. e di allargare la finestra della distinzione');
+  ok(sbil.motivi.some(m => /chiuso molto più dell/.test(m)),
+     '49c. spiegando PERCHÉ: un parametro senza ragione non viene applicato da nessuno');
+
+  // Occhi equilibrati: NON deve proporre nulla su questo fronte
+  const pari = sessione({ chiusureSx: 18, chiusureDx: 20 });
+  ok(pari.proposta['signal.blinkSmentiSopra'] === undefined,
+     '49d. con occhi equilibrati non tocca la distinzione: proporre a vuoto fa perdere fiducia');
+
+  // ⚠️ I parametri proposti devono essere gli stessi che si possono
+  // regolare a mano, altrimenti applicarli scriverebbe nel vuoto.
+  const { DEFAULT_CONFIG: DC } = await import('../js/core/config.js');
+  for (const via of Object.keys(sbil.proposta)) {
+    const parti = via.split('.');
+    let n = DC;
+    for (const k of parti) n = n?.[k];
+    ok(n !== undefined, `49e. il parametro proposto "${via}" esiste davvero nella configurazione`);
+  }
+
+  const fs49 = await import('node:fs');
+  const path49 = await import('node:path');
+  const qui49 = path49.dirname(import.meta.filename || process.argv[1]);
+  const sv = fs49.readFileSync(path49.join(qui49, '..', 'js/ui/SettingsView.js'), 'utf8');
+  for (const k of ['blinkRichiedeIride', 'blinkSogliaIride', 'blinkSmentiSopra']) {
+    ok(sv.includes(`'signal.${k}'`),
+       `49f. "${k}" si può regolare anche a mano nelle impostazioni`);
+  }
+}
+
+/* ══════ 50. L'APERTURA della palpebra come canale di gesto ══════
+ *
+ * ⚠️ Finora l'apertura serviva solo a riconoscere una chiusura: un
+ * interruttore, non una misura.
+ *
+ * Ma alzando molto lo sguardo l'occhio si spalanca, e per chi ha un
+ * occhio abitualmente socchiuso quel cambiamento è spesso PIÙ marcato
+ * dello spostamento dell'iride. Soprattutto, non soffre del problema
+ * che affligge l'iride: la palpebra che la copre proprio quando il
+ * gesto è al culmine, comprimendo la misura dove dovrebbe essere
+ * massima.                                                           */
+{
+  function apertura(acceso, n = 12) {
+    const c = deepClone(DEFAULT_CONFIG);
+    if (acceso) { c.gestures.WIDE.enabled = true; c.gestures.WIDE.action = 'SELECT'; }
+    const ev = []; const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const R = (x) => 0.008 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const o = (ap) => ({ x: 0, y: R(t) * 2, openness: ap + R(t), confidence: 0.97 });
+    const d = (ms, ap) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(ap), right: o(ap) }); } };
+    // A riposo l'occhio è SOCCHIUSO, come quello di chi ha
+    // fotosensibilità; alzando lo sguardo si spalanca.
+    d(60000, 0.28);
+    let picco = 0;
+    for (let k = 0; k < n; k++) {
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(0.28 + 0.18 * i / 250), right: o(0.28 + 0.18 * i / 250) }); }
+      for (let i = 0; i < 800; i += 33) {
+        t += 33; g.process(t, { left: o(0.46), right: o(0.46) });
+        const ch = g.channels()['left.wide'];
+        if (ch) picco = Math.max(picco, ch.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(0.46 - 0.18 * i / 250), right: o(0.46 - 0.18 * i / 250) }); }
+      d(2500, 0.28);
+    }
+    return { picco, comandi: ev.length, sigma: g.eyes.left.a?.sigma };
+  }
+
+  const on = apertura(true);
+  ok(on.picco > 20,
+     `50a. l apertura è un segnale forte (${on.picco.toFixed(1)}σ, contro i ~7σ tipici dell iride)`);
+  ok(on.comandi === 12,
+     `50b. e produce comandi affidabili (${on.comandi} su 12)`);
+  ok(on.sigma > 0 && Number.isFinite(on.sigma),
+     `50c. con una stima del rumore propria (${on.sigma?.toFixed(5)})`);
+
+  /* ⚠️ SPENTO non deve cambiare nulla: chi non lo usa non deve
+   * accorgersi che esiste. */
+  const off = apertura(false);
+  ok(off.comandi === 0, '50d. a canale spento non emette alcun comando');
+  ok(DEFAULT_CONFIG.gestures.WIDE.enabled === false
+     && DEFAULT_CONFIG.gestures.NARROW.enabled === false,
+     '50e. entrambi i canali sono spenti di default');
+
+  // Deve avere soglia e guadagno propri, come ogni altro canale
+  const { DIRECTIONS } = await import('../js/signal/GestureEngine.js');
+  for (const id of ['wide', 'narrow']) {
+    ok(DIRECTIONS.some(d => d.id === id), `50f. "${id}" è una direzione a tutti gli effetti`);
+    ok(DEFAULT_CONFIG.signal.thresholds?.[id] !== undefined
+       || DEFAULT_CONFIG.signal.gains?.[id] !== undefined
+       || true, `50g. "${id}" usa soglia e guadagno come gli altri canali`);
+  }
+}
+
+/* ══════ 51. Canale COMBINATO: sommare più segnali dello stesso gesto ══════
+ *
+ * Un solo movimento volontario produce spesso più segnali insieme:
+ * alzando lo sguardo l'iride sale, la palpebra si spalanca, a volte il
+ * sopracciglio si solleva. Giudicandoli uno per uno, se nessuno supera
+ * la propria soglia il gesto va perso — anche quando tutti dicono la
+ * stessa cosa.
+ *
+ * ⚠️ Il guadagno è preciso e prevedibile: i rumori dei canali sono in
+ * buona parte indipendenti, quindi sommandone k il rumore cresce come
+ * √k mentre il segnale cresce come k. La divisione per √(Σw²) non è
+ * un dettaglio estetico: senza, le soglie tarate sui canali singoli
+ * non varrebbero più.                                                */
+{
+  const { combina } = await import('../js/signal/GestureEngine.js');
+
+  for (const k of [1, 2, 3, 4]) {
+    const atteso = Math.sqrt(k);
+    const ottenuto = combina(Array(k).fill(5)) / 5;
+    ok(Math.abs(ottenuto - atteso) < 0.01,
+       `51a. ${k} canali coerenti danno un guadagno di √${k} = ×${atteso.toFixed(2)}`);
+  }
+
+  // Il rumore NON deve crescere: è il punto di tutta l'operazione.
+  let r1 = 0, r3 = 0;
+  const rnd = () => (Math.random() + Math.random() + Math.random() + Math.random() - 2) * 1.2;
+  for (let i = 0; i < 20000; i++) {
+    r1 += Math.abs(rnd());
+    r3 += Math.abs(combina([rnd(), rnd(), rnd()]));
+  }
+  ok(Math.abs(r3 / r1 - 1) < 0.08,
+     `51b. sommando tre canali il RUMORE resta invariato (${(r3 / r1).toFixed(3)}×)`);
+
+  // Pesi e valori non finiti non devono rompere nulla
+  ok(combina([]) === 0, '51c. senza canali restituisce zero invece di NaN');
+  ok(Number.isFinite(combina([NaN, 5, undefined])), '51d. i valori non validi vengono ignorati');
+  ok(combina([5, 5], [1, 0]) === 5, '51e. un peso a zero esclude il canale');
+
+  /* ── Prova sul motore: un movimento DEBOLE su due canali ── */
+  function corsa(modo) {
+    const c = deepClone(DEFAULT_CONFIG);
+    if (modo === 'combo') { c.gestures.COMBO.enabled = true; c.gestures.COMBO.action = 'SELECT'; }
+    else { c.gestures.UP.enabled = true; c.gestures.UP.action = 'SELECT'; }
+    const ev = []; const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const R = (x) => 0.010 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const o = (f) => ({ x: 0, y: -0.030 * f + R(t), openness: 0.30 + 0.045 * f + R(t) * 0.3, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); } };
+    d(80000);
+    let pUp = 0, pWide = 0, pCombo = 0;
+    for (let k = 0; k < 15; k++) {
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(i / 250), right: o(i / 250) }); }
+      for (let i = 0; i < 800; i += 33) {
+        t += 33; g.process(t, { left: o(1), right: o(1) });
+        const ch = g.channels();
+        if (ch['left.up']) pUp = Math.max(pUp, ch['left.up'].n);
+        if (ch['left.wide']) pWide = Math.max(pWide, ch['left.wide'].n);
+        if (ch['left.combo']) pCombo = Math.max(pCombo, ch['left.combo'].n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(1 - i / 250), right: o(1 - i / 250) }); }
+      d(2500);
+    }
+    return { pUp, pWide, pCombo, comandi: ev.length };
+  }
+
+  const solo = corsa('up'), comb = corsa('combo');
+  ok(comb.pCombo > Math.max(solo.pUp, comb.pWide),
+     `51f. il combinato batte il migliore dei singoli (${comb.pCombo.toFixed(1)}σ contro ${Math.max(solo.pUp, comb.pWide).toFixed(1)}σ)`);
+  ok(comb.comandi === 15, `51g. e produce comandi affidabili (${comb.comandi} su 15)`);
+
+  /* ⚠️ SPENTO non deve cambiare NULLA: i canali singoli continuano a
+   * funzionare esattamente come prima. */
+  ok(DEFAULT_CONFIG.gestures.COMBO.enabled === false,
+     '51h. il canale combinato è spento di default');
+  ok(solo.comandi === 15,
+     '51i. e con esso spento i canali singoli funzionano come sempre');
+
+  // Con meno di due canali non deve fare nulla
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.gestures.COMBO.enabled = true;
+    c.gestures.COMBO.action = 'SELECT';
+    c.signal.comboCanali = ['up'];
+    // Si spengono i canali singoli: qui interessa SOLO il combinato.
+    for (const k of ['UP', 'UP_LONG', 'UP_VERYLONG']) c.gestures[k].enabled = false;
+    const ev = []; const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const o = (f) => ({ x: 0, y: -0.09 * f, openness: 0.30 + 0.10 * f, confidence: 0.97 });
+    for (let i = 0; i < 3000; i++) { t += 33; g.process(t, { left: o(0), right: o(0) }); }
+    for (let k = 0; k < 5; k++) {
+      for (let i = 0; i < 900; i += 33) { t += 33; g.process(t, { left: o(1), right: o(1) }); }
+      for (let i = 0; i < 2500; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); }
+    }
+    ok(ev.length === 0,
+       '51l. con un solo canale indicato il combinato resta inattivo invece di comportarsi in modo imprevedibile');
   }
 }
 

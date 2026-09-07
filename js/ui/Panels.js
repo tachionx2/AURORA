@@ -230,9 +230,41 @@ export class DebugView {
         const pr = (vr + sr) ? Math.round(100 * vr / (vr + sr)) : 0;
         return `${pl}% / ${pr}%`;
       })()],
+      /* ⚠️ Schiacciamento dell'iride: quanto la palpebra la copre.
+       *
+       * È il numero da guardare per decidere se accendere la
+       * ricostruzione del centro. A iride intera vale circa 1; più
+       * scende, più la palpebra sta tagliando. La soglia va messa
+       * SOTTO il valore che si legge a occhio in posizione normale e
+       * SOPRA quello che si legge a sguardo alzato. */
+      ['Palpebra copre iride SX / DX', (() => {
+        const m = (lato) => {
+          const a = this.app.vision?.rgb?.stato?.[lato]?.copSopra;
+          if (!a?.length) return '—';
+          const v = a.reduce((x, y) => x + y, 0) / a.length;
+          return (v * 100).toFixed(0) + '%';
+        };
+        return `${m('left')} / ${m('right')}`;
+      })()],
+      ['Iride corretta SX / DX', (() => {
+        const q = (lato) => {
+          const st = this.app.vision?.rgb?.stato?.[lato];
+          if (!st?.totali) return '—';
+          return Math.round(100 * (st.corretti || 0) / st.totali) + '%';
+        };
+        return `${q('left')} / ${q('right')}`;
+      })()],
       ['Sigma SX / DX', `${(this.app.gestures?.eyes?.left?.y?.sigma ?? 0).toFixed(5)} / ${(this.app.gestures?.eyes?.right?.y?.sigma ?? 0).toFixed(5)}`],
       ['Baseline SX / DX', `${(this.app.gestures?.eyes?.left?.y?.baseline ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.baseline ?? 0).toFixed(4)}`],
-      ['Segnale grezzo SX', `${(this.app.gestures?.eyes?.left?.y?.smooth ?? 0).toFixed(4)}`],
+      /* ⚠️ Segnale grezzo per ENTRAMBI gli occhi.
+       *
+       * È il numero che distingue le due cause possibili quando un
+       * occhio mostra un'ampiezza minore: se il grezzo è simile e solo
+       * il sigma differisce, il movimento è uguale e il problema sta
+       * nella stima del rumore; se il grezzo differisce, allora è il
+       * rilevamento a vedere davvero un movimento più piccolo. */
+      ['Segnale grezzo SX / DX', `${(this.app.gestures?.eyes?.left?.y?.smooth ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.smooth ?? 0).toFixed(4)}`],
+      ['Scostamento SX / DX', `${(this.app.gestures?.eyes?.left?.y?.disp ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.disp ?? 0).toFixed(4)}`],
       ['Viso soppressi', g.visoSoppressi ?? 0],
       ['Apertura riposo SX', bs.left.openRef !== null ? bs.left.openRef.toFixed(3) : 'calibrando…'],
       ['Soglia chiusura SX', bs.left.calibrated ? bs.left.threshold.toFixed(3) : '—'],
@@ -253,7 +285,8 @@ export class DebugView {
     const ch = this.app.gestures.channels();
     for (const eye of ['left', 'right']) {
       const tag = eye === 'left' ? 'SX' : 'DX';
-      for (const [d, arrow] of [['up','↑'],['down','↓'],['left','←'],['right','→']]) {
+      for (const [d, arrow] of [['up','↑'],['down','↓'],['left','←'],['right','→'],
+                                ['wide','⬍+'],['narrow','⬍−'],['combo','Σ']]) {
         const c = ch[`${eye}.${d}`];
         if (!c) continue;
         items.push([`${tag} ${arrow}`, `${c.n.toFixed(2)}σ${c.active ? ' ●' : ''}`]);

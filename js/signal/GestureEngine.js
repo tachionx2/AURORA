@@ -13,7 +13,24 @@
 import { MedianWindow, LowPass, AdaptiveBaseline, Hysteresis, BlinkDetector, BlinkBurst, percentile } from './filters.js';
 
 /** Assi monitorati: uno stato di filtri indipendente per ciascuno. */
-const AXES = ['y', 'x'];
+/* ⚠️ TRE assi, non due.
+ *
+ * 'a' è l'APERTURA della palpebra, ed è un'informazione che finora
+ * veniva usata solo per riconoscere una chiusura — cioè come
+ * interruttore, non come misura.
+ *
+ * Ma alzando molto lo sguardo l'occhio si spalanca: la distanza fra le
+ * palpebre cresce in modo netto e ben visibile. Per chi ha un occhio
+ * abitualmente socchiuso, quel cambiamento è spesso PIÙ marcato dello
+ * spostamento dell'iride — e per giunta non soffre del problema che
+ * affligge l'iride, cioè la palpebra che la copre proprio quando il
+ * gesto è al massimo.
+ *
+ * Trattandola come un asse a sé, l'apertura ottiene tutto ciò che
+ * hanno gli altri: baseline propria, stima del rumore propria, soglia,
+ * guadagno, isteresi. Ed è misurata in multipli del proprio rumore,
+ * quindi confrontabile con gli altri canali. */
+const AXES = ['y', 'x', 'a'];
 
 /**
  * Canali del viso: espressione → canale di gesto.
@@ -39,8 +56,47 @@ const DIR_CHECKS = [
   { axis: 'y', sign: +1, id: 'down',  keys: ['DOWN'] },
   { axis: 'x', sign: -1, id: 'left',  keys: ['LEFT'] },
   { axis: 'x', sign: +1, id: 'right', keys: ['RIGHT'] },
+  /* Apertura: si spalanca (segno +) o si socchiude (segno −).
+   * Spenti di default come ogni canale nuovo: chi non li usa non deve
+   * accorgersi che esistono. */
+  { axis: 'a', sign: +1, id: 'wide',  keys: ['WIDE'] },
+  { axis: 'a', sign: -1, id: 'narrow', keys: ['NARROW'] },
 ];
 export const DIRECTIONS = DIR_CHECKS.map(d => ({ id: d.id, axis: d.axis, sign: d.sign }));
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * CANALE COMBINATO
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Un solo movimento volontario produce spesso PIÙ segnali insieme:
+ * alzando lo sguardo l'iride sale, la palpebra si spalanca, e a volte
+ * il sopracciglio si solleva. Finora ciascuno veniva giudicato da
+ * solo, e se nessuno superava la propria soglia il gesto andava perso
+ * — anche quando tutti e tre dicevano la stessa cosa.
+ *
+ * Sommandoli si guadagna in modo preciso e prevedibile. I rumori dei
+ * canali sono in buona parte indipendenti, quindi sommando k segnali
+ * il rumore cresce come la RADICE di k mentre il segnale cresce come
+ * k: il rapporto migliora di √k. Con due canali si guadagna il 41%,
+ * con tre il 73%.
+ *
+ * ⚠️ La divisione per √(Σw²) non è un dettaglio estetico: senza, la
+ * somma avrebbe un rumore più grande e le soglie tarate sui canali
+ * singoli non varrebbero più. Così invece il canale combinato si
+ * misura nella stessa unità di tutti gli altri, e le soglie restano
+ * confrontabili.
+ */
+export function combina(valori, pesi) {
+  let num = 0, den = 0;
+  for (let i = 0; i < valori.length; i++) {
+    const v = valori[i], w = pesi?.[i] ?? 1;
+    if (!Number.isFinite(v) || w === 0) continue;
+    num += w * v;
+    den += w * w;
+  }
+  return den > 0 ? num / Math.sqrt(den) : 0;
+}
 
 class AxisState {
   constructor(cfg) {
@@ -293,6 +349,58 @@ export class GestureEngine {
     }
   }
 
+  /**
+   * Valuta il canale combinato: somma i canali scelti e li giudica
+   * come un gesto a sé.
+   *
+   * ⚠️ Non tocca in alcun modo i canali singoli, che continuano a
+   * funzionare esattamente come prima. A combinazione spenta questo
+   * metodo esce subito.
+   */
+  _valutaCombinato(t, g, inGioco, out) {
+    const K = this.cfg.gestures?.COMBO;
+    const sorg = this.cfg.signal?.comboCanali;
+    if (!K?.enabled || !Array.isArray(sorg) || sorg.length < 2) return;
+
+    const ch = this.channels();
+    for (const eye of ['left', 'right']) {
+      const valori = [], pesi = [];
+      for (const id of sorg) {
+        // Un canale del viso o una direzione: entrambi vanno bene.
+        const c1 = ch[`${eye}.${id}`] || ch[id];
+        if (!c1) continue;
+        valori.push(c1.n);
+        pesi.push(this.cfg.signal?.comboPesi?.[id] ?? 1);
+      }
+      if (valori.length < 2) continue;
+
+      const n = combina(valori, pesi);
+      this._combo ||= {};
+      this._combo[eye] ||= new Hysteresis(this.cfg.signal.thresholdOn, this.cfg.signal.thresholdOff);
+      const hyst = this._combo[eye];
+      hyst.onK = this.sogliaDi('combo') ?? this.cfg.signal.thresholdOn;
+      hyst.offK = this.cfg.signal.thresholdOff;
+      // Il valore è già in multipli del rumore: si passa 1 come scala.
+      const ev = hyst.update(n, 1);
+
+      this._comboN ||= {};
+      this._comboN[eye] = n;
+
+      if (ev === 'rise') {
+        this._comboDa ||= {};
+        this._comboDa[eye] = t;
+      } else if (ev === 'fall' && this._comboDa?.[eye] != null) {
+        const dur = t - this._comboDa[eye];
+        this._comboDa[eye] = null;
+        out.candidates.push({ eye, axis: 'combo', sign: +1, phase: 'fall', durMs: dur, t });
+        if (inGioco.includes(eye)) {
+          this._resolve(t, eye, { axis: 'combo', sign: +1, id: 'combo', keys: ['COMBO'] },
+                        dur, ['COMBO'], false, out);
+        }
+      }
+    }
+  }
+
   /** Soglia di un'espressione, o quella globale se non impostata. */
   sogliaEspr(id) {
     const v = this.cfg.signal.thresholdExpr?.[id];
@@ -360,6 +468,8 @@ export class GestureEngine {
       yPos: g.DOWN?.enabled,
       xNeg: g.LEFT?.enabled,
       xPos: g.RIGHT?.enabled,
+      aPos: g.WIDE?.enabled,
+      aNeg: g.NARROW?.enabled,
       lid: g.BLINK?.enabled || g.DOUBLE_BLINK?.enabled || g.TRIPLE_BLINK?.enabled || g.LONG_CLOSE?.enabled,
     };
   }
@@ -450,7 +560,10 @@ export class GestureEngine {
       for (const axis of AXES) {
         if (!need[axis]) { st[axis].valid = false; res.axes[axis] = null; continue; }
         const A = st[axis];
-        A.raw = o[axis];
+        /* L'apertura arriva in un campo con un altro nome: è la stessa
+         * misura che serve al riconoscimento della chiusura, qui però
+         * usata come segnale continuo invece che come interruttore. */
+        A.raw = axis === 'a' ? o.openness : o[axis];
         A.smooth = A.lp.push(t, A.median.push(t, A.raw));
         /* ── Baseline alimentata solo dalla QUIETE ──
          *
@@ -620,7 +733,21 @@ export class GestureEngine {
   _neededAxes() {
     const d = this._enabledDirs();
     const diag = this.cfg.ui.debugMode || this.diagnostics;
-    return { y: diag || d.yNeg || d.yPos, x: diag || d.xNeg || d.xPos };
+    /* ⚠️ Il canale combinato ha bisogno dei suoi ingressi.
+     *
+     * Gli assi si calcolano solo se qualcuno li usa — è ciò che
+     * mantiene leggero il programma. Ma il combinato li usa
+     * indirettamente: senza questa riga sommava canali mai calcolati e
+     * restava a zero, silenziosamente. */
+    const need = { y: diag || d.yNeg || d.yPos, x: diag || d.xNeg || d.xPos,
+                   a: diag || d.aPos || d.aNeg };
+    if (this.cfg.gestures?.COMBO?.enabled) {
+      for (const id of (this.cfg.signal?.comboCanali || [])) {
+        const dir = DIR_CHECKS.find(c => c.id === id);
+        if (dir) need[dir.axis] = true;
+      }
+    }
+    return need;
   }
 
   _blinkEnabled() {
@@ -659,6 +786,12 @@ export class GestureEngine {
      * la propria taratura, anche quando non è lui a comandare.
      * L'emissione resta riservata a quelli in gioco. */
     const inGioco = this._eyesInPlay();
+
+    /* ── Canale combinato ──
+     * Un solo movimento produce spesso più segnali insieme. Sommandoli
+     * il rapporto segnale-rumore migliora della radice del numero di
+     * canali: due danno +41%, tre +73%. */
+    this._valutaCombinato(t, g, inGioco, out);
 
     for (const eye of ['left', 'right']) {
       for (const c of DIR_CHECKS) {
@@ -1003,6 +1136,19 @@ export class GestureEngine {
    */
   channels() {
     const outs = {};
+    // Il combinato si aggiunge in coda, così è visibile in diagnostica
+    // e tracciabile nel grafico come ogni altro canale.
+    if (this._comboN) {
+      for (const eye of ['left', 'right']) {
+        if (this._comboN[eye] == null) continue;
+        outs[`${eye}.combo`] = {
+          n: this._comboN[eye], nRaw: this._comboN[eye],
+          soglia: this.sogliaDi('combo') ?? this.cfg.signal.thresholdOn,
+          guadagno: 1, active: !!this._combo?.[eye]?.active,
+          sigma: 1, baseline: 0,
+        };
+      }
+    }
     for (const eye of ['left', 'right']) {
       for (const d of DIR_CHECKS) {
         const A = this.eyes[eye][d.axis];

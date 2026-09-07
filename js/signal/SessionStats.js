@@ -309,6 +309,25 @@ export class SessionStats {
         confidenzaMediana: this.confidenza[eye].percentile(0.5),
         confidenza10: this.confidenza[eye].percentile(0.1),
         aperturaRiposo: this.apertura[eye].percentile(0.85),
+        /* ⚠️ ESCURSIONE dell'apertura, non solo il riposo.
+         *
+         * Alzando lo sguardo l'occhio si spalanca: la differenza fra
+         * quanto si apre al massimo e quanto sta a riposo dice se
+         * quell'occhio può comandare con l'apertura. Per chi ha un
+         * occhio abitualmente socchiuso questa escursione è spesso più
+         * ampia dello spostamento dell'iride. */
+        aperturaMin: this.apertura[eye].percentile(0.05),
+        aperturaMax: this.apertura[eye].percentile(0.97),
+        /* ⚠️ Il riferimento è la MEDIANA, non l'85° percentile.
+         *
+         * L'85° percentile descrive l'occhio ben aperto, ed è giusto
+         * per decidere se è chiuso. Ma chi spalanca l'occhio per
+         * comandare ci sta anche un terzo del tempo: quel percentile
+         * finisce DENTRO il gesto, e l'escursione risulta zero.
+         * La mediana invece cade nel riposo, dove la persona sta la
+         * maggior parte del tempo. */
+        escursioneApertura: Math.max(0,
+          this.apertura[eye].percentile(0.97) - this.apertura[eye].percentile(0.50)),
         // Il minimo OSSERVATO, non un percentile: gli ammiccamenti sono
         // pochi per definizione — poche decine di millisecondi ogni
         // pochi secondi — e un percentile al 3% li manca del tutto.
@@ -432,6 +451,77 @@ export class SessionStats {
       }
     } else {
       motivi.push('pochi ammiccamenti osservati: soglie di chiusura lasciate come sono');
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+     * SQUILIBRIO FRA I DUE OCCHI
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ È la diagnosi che mancava, e che avrebbe risparmiato giorni.
+     *
+     * Quando un occhio viene dichiarato chiuso molto più dell'altro, e
+     * la sua confidenza resta comunque alta, quasi sempre non sta
+     * ammiccando: sta stringendo la palpebra perché lo sguardo va in
+     * alto, o perché quell'occhio è abitualmente socchiuso. Ogni falsa
+     * chiusura maschera il gesto proprio mentre avviene, e il suo
+     * transitorio gonfia la stima del rumore: da lì l'ampiezza di
+     * quell'occhio cala e non risale più.
+     *
+     * Si propone quindi di allargare la distinzione, che è il rimedio
+     * diretto, e lo si SPIEGA — perché un parametro proposto senza
+     * ragione non viene applicato da nessuno.
+     */
+    {
+      const cs = this.c.chiusureSx || 0, cd = this.c.chiusureDx || 0;
+      const tot = cs + cd;
+      const sbil = tot > 6 ? Math.abs(cs - cd) / tot : 0;
+      const confBassa = Math.min(E.confidenza10 ?? 1, 1);
+      if (sbil > 0.6) {
+        const molti = cs > cd ? 'sinistro' : 'destro';
+        p['signal.blinkRichiedeIride'] = true;
+        p['signal.blinkSmentiSopra'] = 0.20;
+        motivi.push(
+          `l'occhio ${molti} risulta chiuso molto più dell'altro (${Math.max(cs, cd)} contro ${Math.min(cs, cd)}): `
+          + 'quasi certamente stringe la palpebra invece di ammiccare, si allarga la distinzione');
+        if (confBassa > 0.7) {
+          p['signal.blinkSogliaIride'] = Math.max(0.35, Math.round((confBassa - 0.25) * 20) / 20);
+          motivi.push(`confidenza alta anche nelle presunte chiusure (${confBassa.toFixed(2)}): soglia dell'iride adeguata`);
+        }
+      }
+    }
+
+    /* Ampiezze molto diverse fra i due occhi a parità di movimento:
+     * segnala la copertura della palpebra, che fa misurare al ribasso
+     * proprio l'occhio più socchiuso. */
+    {
+      const aS = r.perOcchio?.left?.ampiezzaMediana || 0;
+      const aD = r.perOcchio?.right?.ampiezzaMediana || 0;
+      if (aS > 0 && aD > 0) {
+        const rapporto = Math.min(aS, aD) / Math.max(aS, aD);
+        if (rapporto < 0.7) {
+          const debole = aS < aD ? 'sinistro' : 'destro';
+          motivi.push(
+            `ampiezza dell'occhio ${debole} al ${(rapporto * 100).toFixed(0)}% dell'altro: `
+            + 'guarda in diagnostica "Palpebra copre iride" — se su quell\'occhio è alta, '
+            + 'accendi la compensazione della palpebra');
+        }
+      }
+    }
+
+    /* ── L'apertura come canale di comando ──
+     * Se l'escursione è ampia rispetto al riposo, quel canale è
+     * utilizzabile — e per chi ha un occhio socchiuso spesso è il
+     * migliore. Si segnala, senza accenderlo d'ufficio: assegnare un
+     * comando è una decisione di chi assiste. */
+    for (const eye of ['left', 'right']) {
+      const E2 = r.perOcchio?.[eye];
+      if (!E2 || !E2.aperturaRiposo) continue;
+      const rel = E2.escursioneApertura / Math.max(1e-6, E2.aperturaRiposo);
+      if (rel > 0.15) {
+        motivi.push(
+          `apertura dell'occhio ${eye === 'left' ? 'sinistro' : 'destro'}: si spalanca del `
+          + `${(rel * 100).toFixed(0)}% oltre il riposo — canale "Occhio spalancato" utilizzabile`);
+      }
     }
 
     // Confidenza minima: si può solo abbassare, mai alzare.

@@ -91,7 +91,10 @@ ok(!err, 'il ciclo di osservazione non lancia eccezioni ('+err+')');
 ok(drawn.eyeLeft>0, 'occhio SINISTRO disegnato ('+drawn.eyeLeft+' fotogrammi)');
 ok(drawn.eyeRight>0, 'occhio DESTRO disegnato ('+drawn.eyeRight+' fotogrammi)');
 ok(/segnale|nessun/.test(label||''), 'stato del segnale tradotto: "'+label+'"');
-ok(Object.keys(gestures.channels()).length===10, 'dieci canali diagnostici');
+// Quattro direzioni dell'iride + due dell'apertura, per due occhi,
+// più i due canali di ammiccamento.
+ok(Object.keys(gestures.channels()).length===14,
+   `quattordici canali diagnostici (${Object.keys(gestures.channels()).length})`);
 ok(plot.frames.length===60, 'grafico alimentato per ogni fotogramma');
 
 // Nessun occhio rilevato: non deve rompersi
@@ -260,87 +263,83 @@ setLanguage('it');
   ok(s.ev.length === 0, 'nessun evento spurio a canali del viso spenti');
 }
 
-/* ── Iride coperta dalla palpebra: chi alza molto lo sguardo ──
+/* ── Quanto la palpebra copre l'iride ──
  *
- * ⚠️ Chi ha muscoli oculari forti alza lo sguardo fino a portare la
- * pupilla quasi sotto la palpebra superiore. Proprio in fondo alla
- * corsa — dove il movimento è più ampio e più utile — l'iride viene
- * coperta, il centro stimato scivola verso il basso, e il movimento
- * risulta più piccolo di quanto sia davvero.
+ * ⚠️ La prima misura confrontava il raggio verticale con quello
+ * orizzontale — lo "schiacciamento". Misurata su volti veri non
+ * discriminava: 0,85 a occhio rilassato e 0,90 a sguardo alzato, cioè
+ * cambiava nella direzione sbagliata e di pochissimo.
  *
- * La palpebra taglia in orizzontale: i punti laterali dell'iride non
- * vengono mai coperti, quindi il raggio da lato a lato resta
- * attendibile e permette di ricostruire dove sta il centro vero.     */
+ * Il motivo è istruttivo: il modello restituisce SEMPRE un cerchio
+ * completo, anche quando metà iride non si vede. Quella misura
+ * descriveva ciò che il modello aveva dedotto, non ciò che era
+ * davvero visibile.
+ *
+ * Questa guarda invece la geometria: dove sta il bordo della palpebra
+ * rispetto al centro dell'iride. Alzando lo sguardo l'iride sale verso
+ * una palpebra che resta ferma, quindi il numero cambia molto e nella
+ * direzione giusta.                                                  */
 {
   const { RgbTracker: RT2, EYE_LM: LM2 } = await import('../js/vision/RgbTracker.js');
   const { DEFAULT_CONFIG: DC2, deepClone: dc2 } = await import('../js/core/config.js');
   const Wq = 640, Hq = 480;
 
-  // Volto sintetico con iride TAGLIATA: il modello restituisce un
-  // cerchio più piccolo e spostato in basso, come fa in realtà.
-  function voltoTagliato(alzata, taglio) {
+  function volto(alzata) {
     const p = new Array(478).fill(null).map(() => ({ x: 0, y: 0, z: 0 }));
     const n = (x, y) => ({ x: x / Wq, y: y / Hq, z: 0 });
     const occhio = (M, cx) => {
       p[M.inner] = n(cx - 15, 240); p[M.outer] = n(cx + 15, 240);
-      p[M.upper] = n(cx, 232); p[M.lower] = n(cx, 248);
+      // Palpebre FERME: è l'iride che sale verso di loro.
+      p[M.upper] = n(cx, 232); p[M.lower] = n(cx, 250);
       const r = 6, iy = 240 - alzata;
-      const rSopra = r * (1 - taglio);
-      const cv = iy + (r - rSopra) / 2;
-      p[M.iris[0]] = n(cx, cv);
-      p[M.iris[1]] = n(cx - r, cv);
-      p[M.iris[2]] = n(cx, iy - rSopra);
-      p[M.iris[3]] = n(cx + r, cv);
-      p[M.iris[4]] = n(cx, iy + r);
+      p[M.iris[0]] = n(cx, iy); p[M.iris[1]] = n(cx - r, iy);
+      p[M.iris[2]] = n(cx, iy - r); p[M.iris[3]] = n(cx + r, iy); p[M.iris[4]] = n(cx, iy + r);
     };
     occhio(LM2.right, 200); occhio(LM2.left, 440);
     return { faceLandmarks: [p] };
   }
 
-  const misura = (corr) => {
-    const c = dc2(DC2);
-    c.detection.irisOcclusionFix = corr;
+  const misura = (alzate, mod) => {
+    const c = dc2(DC2); mod?.(c);
     const tr = new RT2(c); tr.ready = true;
     tr.landmarker = { detectForVideo: () => tr._r };
-    return [[0, 0], [3, 0], [6, 0.2], [9, 0.45], [11, 0.65], [12, 0.8]].map(([a, t]) => {
-      tr._r = voltoTagliato(a, t);
-      return { a, t, y: tr.detect({}, 1000, Wq, Hq).left.y, vero: -a / 3 * 0.1 };
+    return alzate.map((a, i) => {
+      tr._r = volto(a);
+      const r = tr.detect({}, 1000 + i * 33, Wq, Hq);
+      const arr = tr.stato.left.copSopra;
+      return { a, cop: arr[arr.length - 1], y: r.left.y };
     });
   };
 
-  const senza = misura(false), con = misura(true);
-
-  // Senza taglio la correzione NON deve toccare nulla: correggere
-  // quando non serve sposterebbe il segno di continuo.
-  for (let i = 0; i < 2; i++) {
-    ok(Math.abs(con[i].y - senza[i].y) < 1e-9,
-       `iride intera (${con[i].a}px): la correzione non interviene`);
+  const m = misura([0, 2, 4, 6, 8, 10]);
+  ok(m[0].cop < 0.05, `a occhio rilassato la palpebra non copre (${(m[0].cop * 100).toFixed(0)}%)`);
+  ok(m[5].cop > 0.5, `a sguardo molto alzato copre molto (${(m[5].cop * 100).toFixed(0)}%)`);
+  for (let i = 1; i < m.length; i++) {
+    ok(m[i].cop >= m[i - 1].cop,
+       `la copertura cresce con l alzata (${m[i].a}px: ${(m[i].cop * 100).toFixed(0)}%)`);
   }
+  ok(m[5].cop - m[0].cop > 0.4,
+     `la misura DISCRIMINA: dal ${(m[0].cop * 100).toFixed(0)}% al ${(m[5].cop * 100).toFixed(0)}%`);
 
-  // Con taglio forte deve recuperare il movimento perduto
-  for (const i of [3, 4, 5]) {
-    const eS = Math.abs(senza[i].y - senza[i].vero);
-    const eC = Math.abs(con[i].y - con[i].vero);
-    ok(eC < eS * 0.4,
-       `taglio ${(con[i].t * 100).toFixed(0)}%: errore da ${eS.toFixed(4)} a ${eC.toFixed(4)}`);
-    ok(Math.abs(con[i].y) > Math.abs(senza[i].y),
-       `taglio ${(con[i].t * 100).toFixed(0)}%: il movimento recuperato è più ampio, non più piccolo`);
-  }
+  /* ⚠️ Spenta, la compensazione non deve toccare NULLA.
+   * Era il difetto che aveva fatto crollare tutte le ampiezze. */
+  const senza = misura([0, 4, 8], c => { c.detection.irisOcclusionFix = false; });
+  const con = misura([0, 4, 8], c => {
+    c.detection.irisOcclusionFix = true;
+    c.detection.irisOcclusionSoglia = 0.10;
+  });
+  ok(Math.abs(con[0].y - senza[0].y) < 1e-9,
+     'a occhio rilassato la compensazione non interviene');
+  ok(Math.abs(con[2].y) > Math.abs(senza[2].y),
+     `a sguardo alzato compensa, aumentando il movimento misurato (${senza[2].y.toFixed(4)} → ${con[2].y.toFixed(4)})`);
 
-  const totS = senza.reduce((a, x) => a + Math.abs(x.y - x.vero), 0);
-  const totC = con.reduce((a, x) => a + Math.abs(x.y - x.vero), 0);
-  ok(totC < totS * 0.3,
-     `errore complessivo ridotto del ${((1 - totC / totS) * 100).toFixed(0)}%`);
-
-  // ⚠️ Il calcolo della posizione deve avvenire DOPO la correzione:
-  // prima veniva prodotto il numero e poi si correggeva il centro, e
-  // la correzione non cambiava nulla. Un errore silenzioso.
-  const fsQ = await import('node:fs');
-  const pathQ = await import('node:path');
-  const quiQ = pathQ.dirname(import.meta.filename || process.argv[1]);
-  const srcQ = fsQ.readFileSync(pathQ.join(quiQ, '..', 'js/vision/RgbTracker.js'), 'utf8');
-  ok(srcQ.indexOf('correzione !== 0') < srcQ.indexOf('const nx = -specchio'),
-     'la posizione si calcola DOPO la correzione del centro, altrimenti non servirebbe a nulla');
+  // Il tetto di sicurezza deve reggere anche con una forza assurda
+  const estremo = misura([10], c => {
+    c.detection.irisOcclusionFix = true;
+    c.detection.irisOcclusionForza = 99;
+  });
+  ok(Number.isFinite(estremo[0].y) && Math.abs(estremo[0].y) < 2,
+     `il tetto impedisce di far volare il segno (${estremo[0].y.toFixed(4)})`);
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

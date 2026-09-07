@@ -1274,5 +1274,63 @@ app.goto('parla');
      'il grafico non viene mai azzerato: azzerarlo faceva sembrare che tutto ricominciasse');
 }
 
+/* ═══════════ Un video caricato non è la telecamera ═══════════
+ *
+ * ⚠️ Il pulsante guardava solo se l'analisi era attiva, quindi
+ * caricando un video diceva "Ferma camera" a chi non l'aveva mai
+ * accesa — e premendolo si fermava il video credendo di spegnere una
+ * telecamera che non era mai partita.                              */
+{
+  const fsC = await import('node:fs');
+  const pathC = await import('node:path');
+  const quiC = pathC.dirname(import.meta.filename || process.argv[1]);
+  const mainC = fsC.readFileSync(pathC.join(quiC, '..', 'js/main.js'), 'utf8');
+
+  const blocco = mainC.slice(mainC.indexOf('updateCamButton() {'),
+                             mainC.indexOf('updateCamButton() {') + 1400);
+  ok(/typeof this\.vision\.source\?\.togglePlay === 'function'/.test(blocco),
+     'il pulsante distingue un video caricato dalla telecamera');
+  ok(/status === 'attiva' && !daFile/.test(blocco),
+     'e con un video non dice "Ferma camera"');
+
+  /* Anche i CONTATORI devono mostrare il grezzo di ENTRAMBI gli occhi:
+   * è il numero che distingue "il movimento è davvero più piccolo" da
+   * "il metro di quell'occhio è diverso". */
+  const panelsC = fsC.readFileSync(pathC.join(quiC, '..', 'js/ui/Panels.js'), 'utf8');
+  ok(/Segnale grezzo SX \/ DX/.test(panelsC),
+     'il segnale grezzo è mostrato per entrambi gli occhi');
+  ok(/Scostamento SX \/ DX/.test(panelsC),
+     'e così lo scostamento dalla propria baseline');
+  ok(/Palpebra copre iride SX \/ DX/.test(panelsC),
+     'e la copertura della palpebra');
+}
+
+/* ═══════════ Nessuno stato per-occhio sopravvive alla sessione ═══════════
+ *
+ * ⚠️ Se una taratura andata male restasse memorizzata, ricomparirebbe
+ * al riavvio anche cambiando persona o sorgente — e si cercherebbe il
+ * difetto nel posto sbagliato.                                       */
+{
+  const fsS = await import('node:fs');
+  const pathS = await import('node:path');
+  const quiS = pathS.dirname(import.meta.filename || process.argv[1]);
+  const tutti = [];
+  const scorri = (dir) => {
+    for (const e of fsS.readdirSync(dir, { withFileTypes: true })) {
+      const p = pathS.join(dir, e.name);
+      if (e.isDirectory()) scorri(p);
+      else if (e.name.endsWith('.js')) tutti.push(fsS.readFileSync(p, 'utf8'));
+    }
+  };
+  scorri(pathS.join(quiS, '..', 'js'));
+  const chiavi = new Set();
+  for (const src of tutti) {
+    for (const m of src.matchAll(/localStorage\.setItem\(\s*'([^']+)'/g)) chiavi.add(m[1]);
+  }
+  const sospette = [...chiavi].filter(k => /sigma|baseline|rumore|noise|eye|occhio/i.test(k));
+  ok(sospette.length === 0,
+     `nessuna stima per-occhio viene memorizzata fra le sessioni (chiavi: ${[...chiavi].join(', ')})`);
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

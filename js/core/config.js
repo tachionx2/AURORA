@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 31;
+export const CONFIG_VERSION = 34;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -96,6 +96,16 @@ export const GESTURE_CHANNELS = {
   DOWN:          { label: 'Occhio in basso',     axis: 'y', dir: +1, kind: 'dwell' },
   LEFT:          { label: 'Occhio a sinistra',   axis: 'x', dir: -1, kind: 'dwell' },
   RIGHT:         { label: 'Occhio a destra',     axis: 'x', dir: +1, kind: 'dwell' },
+  /* ⚠️ L'apertura come GESTO, non solo come rilevatore di chiusura.
+   *
+   * Alzando molto lo sguardo l'occhio si spalanca: la distanza fra le
+   * palpebre cresce in modo netto. Per chi ha un occhio abitualmente
+   * socchiuso quel cambiamento è spesso PIÙ marcato dello spostamento
+   * dell'iride — misurato, oltre quattro volte tanto — e soprattutto
+   * non soffre del problema che affligge l'iride: la palpebra che la
+   * copre proprio quando il gesto è al culmine. */
+  WIDE:          { label: 'Occhio spalancato',   axis: 'a', dir: +1, kind: 'dwell' },
+  NARROW:        { label: 'Occhio socchiuso',    axis: 'a', dir: -1, kind: 'dwell' },
   BLINK:         { label: 'Ammiccamento',        axis: 'lid', dir: +1, kind: 'pulse' },
   DOUBLE_BLINK:  { label: 'Doppio ammiccamento', axis: 'lid', dir: +1, kind: 'pulse', count: 2 },
   TRIPLE_BLINK:  { label: 'Triplo ammiccamento', axis: 'lid', dir: +1, kind: 'pulse', count: 3 },
@@ -208,7 +218,14 @@ export const DEFAULT_CONFIG = {
      * Va riattivata solo dopo aver verificato in diagnostica quanto
      * spesso interviene: se interviene sempre, la soglia è sbagliata. */
     irisOcclusionFix: false,
-    irisOcclusionSoglia: 0.78,
+    /* Copertura oltre la quale si comincia a correggere. Un po' di
+     * palpebra sopra l'iride c'è sempre: correggerla sposterebbe il
+     * segno di continuo. */
+    irisOcclusionSoglia: 0.10,
+    // Quanta parte della copertura eccedente viene compensata.
+    irisOcclusionForza: 0.5,
+    // Tetto assoluto, in frazione del raggio dell'iride.
+    irisOcclusionMax: 0.6,
     // ── Canali del viso (bocca, labbra, guance, sopracciglia) ──
     // Interruttore generale. SPENTO: MediaPipe non calcola nemmeno le
     // espressioni, quindi il costo aggiuntivo è esattamente zero e il
@@ -250,6 +267,19 @@ export const DEFAULT_CONFIG = {
      * protezione, è un blocco. Riattivarla solo dopo averla verificata
      * con rumore realistico. */
     baselineFreezeSigma: 0,
+    /* ── Quali canali sommare nel canale combinato ──
+     *
+     * Un solo movimento volontario produce spesso più segnali insieme:
+     * alzando lo sguardo l'iride sale, la palpebra si spalanca, e a
+     * volte il sopracciglio si solleva. Sommandoli il rapporto
+     * segnale-rumore migliora della RADICE del numero di canali: due
+     * danno +41%, tre +73%.
+     *
+     * Si possono indicare direzioni ('up', 'wide', 'down'…) e canali
+     * del viso ('browUp'…). I pesi permettono di dare più importanza
+     * al canale più affidabile per quella persona. */
+    comboCanali: ['up', 'wide'],
+    comboPesi: {},
     baselineFreezeMaxMs: 20000,
     baselineFreezeDuringGesture: true,   // CRITICO: vedi nota in filters.js
     thresholdOn: 3.5,            // in sigma
@@ -318,9 +348,20 @@ export const DEFAULT_CONFIG = {
      * Si richiede quindi anche che l'iride non si veda più. */
     blinkRichiedeIride: true,
     blinkSogliaIride: 0.55,
-    // Zona di smentimento: solo un occhio ancora aperto per quasi
-    // metà. Più in basso è una chiusura vera e va contata.
-    blinkSmentiSopra: 0.45,
+    /* ⚠️ Zona di smentimento, allargata dopo i dati reali.
+     *
+     * A 0,45 la finestra era 0,196–0,239 su un riposo di 0,435:
+     * troppo stretta. Alzando molto lo sguardo la palpebra portava
+     * l'apertura sotto 0,196 e la chiusura veniva dichiarata lo
+     * stesso — trentasette ammiccamenti fantasma in tre minuti su un
+     * occhio, zero sull'altro.
+     *
+     * A 0,20 la finestra copre quasi tutto ciò che sta sopra il
+     * pavimento assoluto. La sicurezza non viene dal restringere la
+     * finestra ma dalle altre due condizioni: il pavimento, che un
+     * ammiccamento vero attraversa sempre, e la confidenza, che in un
+     * ammiccamento vero crolla perché l'iride sparisce. */
+    blinkSmentiSopra: 0.20,
     blinkSustainedMs: 500,       // oltre: non è un ammiccamento
 
     // ── Soglie e guadagni PER DIREZIONE ──
@@ -358,6 +399,13 @@ export const DEFAULT_CONFIG = {
     DOWN:         { enabled: false, action: 'UNDO',   dwellMs: 400,  maxMs: 2200 },
     LEFT:         { enabled: false, action: 'BACK',   dwellMs: 400,  maxMs: 2200 },
     RIGHT:        { enabled: false, action: 'NEXT',   dwellMs: 400,  maxMs: 2200 },
+    // Spenti di default: chi non li usa non deve accorgersi che esistono.
+    WIDE:         { enabled: false, action: 'NONE',   dwellMs: 400,  maxMs: 2600 },
+    NARROW:       { enabled: false, action: 'NONE',   dwellMs: 400,  maxMs: 2600 },
+    /* ── Canale COMBINATO ──
+     * Somma più canali che descrivono lo stesso movimento. Spento di
+     * default: chi non lo usa non deve accorgersi che esiste. */
+    COMBO:        { enabled: false, action: 'NONE',   dwellMs: 400,  maxMs: 2600 },
     BLINK:        { enabled: false, action: 'SELECT', dwellMs: 80,   maxMs: 400 },
     DOUBLE_BLINK: { enabled: false, action: 'UNDO',   dwellMs: 80,   maxMs: 700 },
     TRIPLE_BLINK: { enabled: false, action: 'SPEAK',  dwellMs: 80,   maxMs: 1100 },
@@ -803,7 +851,32 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
-  if (v < 31 && c.detection && c.detection.irisOcclusionSoglia === undefined) c.detection.irisOcclusionSoglia = 0.78;
+  if (v < 34) {
+    if (c.gestures && !c.gestures.COMBO) {
+      c.gestures.COMBO = { enabled: false, action: 'NONE', dwellMs: 400, maxMs: 2600 };
+    }
+    if (c.signal && !c.signal.comboCanali) c.signal.comboCanali = ['up', 'wide'];
+    if (c.signal && !c.signal.comboPesi) c.signal.comboPesi = {};
+  }
+  if (v < 33 && c.gestures) {
+    // Canali dell'apertura: spenti, come ogni novità.
+    if (!c.gestures.WIDE) c.gestures.WIDE = { enabled: false, action: 'NONE', dwellMs: 400, maxMs: 2600 };
+    if (!c.gestures.NARROW) c.gestures.NARROW = { enabled: false, action: 'NONE', dwellMs: 400, maxMs: 2600 };
+  }
+  if (v < 32 && c.detection) {
+    /* ⚠️ La vecchia soglia (0,78) apparteneva a una misura DIVERSA —
+     * lo schiacciamento dell'iride — che sui volti veri non
+     * discriminava. La nuova misura è la copertura della palpebra, con
+     * scala opposta: vicina a zero a occhio rilassato.
+     *
+     * Conservare il vecchio valore darebbe una compensazione sempre
+     * attiva e al massimo: esattamente il difetto che aveva fatto
+     * crollare tutte le ampiezze. Va sostituito, non migrato. */
+    if (c.detection.irisOcclusionSoglia === undefined
+        || c.detection.irisOcclusionSoglia > 0.6) c.detection.irisOcclusionSoglia = 0.10;
+    if (c.detection.irisOcclusionForza === undefined) c.detection.irisOcclusionForza = 0.5;
+    if (c.detection.irisOcclusionMax === undefined) c.detection.irisOcclusionMax = 0.6;
+  }
   if (v < 31 && c.ui) {
     if (c.ui.diagAlways === undefined) c.ui.diagAlways = false;
     if (c.ui.miniLarghezza === undefined) c.ui.miniLarghezza = 250;

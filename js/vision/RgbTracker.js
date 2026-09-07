@@ -301,70 +301,78 @@ export class RgbTracker {
        * serve sposterebbe il segno di continuo, che è peggio del
        * problema che cura.
        */
+      /* ══════════════════════════════════════════════════════════════
+       * QUANTO LA PALPEBRA COPRE L'IRIDE
+       * ══════════════════════════════════════════════════════════════
+       *
+       * ⚠️ La prima misura confrontava il raggio verticale con quello
+       * orizzontale — lo "schiacciamento". Misurata su volti veri non
+       * discrimina: 0,85 a occhio rilassato e 0,90 a sguardo alzato,
+       * cioè cambia nella direzione sbagliata e di pochissimo. Il
+       * motivo è che il modello restituisce SEMPRE un cerchio
+       * completo, anche quando metà iride non si vede: non è una
+       * misura di ciò che è visibile, ma di ciò che il modello ha
+       * dedotto.
+       *
+       * Questa invece guarda la geometria vera: dove sta il bordo
+       * della palpebra rispetto al centro dell'iride. Se la palpebra
+       * dista dal centro meno del raggio, sta tagliando — e quanto
+       * meno dista, tanto più copre. Alzando lo sguardo l'iride sale
+       * verso una palpebra che resta ferma, quindi il numero cambia
+       * molto e nella direzione giusta.
+       */
+      let coperturaSopra = 0, coperturaSotto = 0;
       let correzione = 0;
-      if (this.cfg.detection?.irisOcclusionFix !== false && M.iris.length >= 5) {
-        // Proiezione dei punti del perimetro sugli assi DELL'OCCHIO:
-        // u lungo la rima palpebrale, v perpendicolare.
+      if (M.iris.length >= 5) {
         const proiez = [];
         for (let i = 1; i < M.iris.length; i++) {
           const p = P(M.iris[i]);
           const dx2 = p.x - ix, dy2 = p.y - iy;
           proiez.push({ u: dx2 * ux + dy2 * uy, v: dx2 * vx + dy2 * vy });
         }
-        // Raggio orizzontale: la media dei due scostamenti laterali.
-        // Non è mai tagliato dalla palpebra.
+        // Raggio orizzontale: la palpebra non lo tocca mai.
         const lat = proiez.map(q => Math.abs(q.u)).sort((a, b) => b - a);
-        const rOriz = lat.length >= 2 ? (lat[0] + lat[1]) / 2 : 0;
-        // Estremi verticali: quanto l'iride si estende sopra e sotto.
-        const vs = proiez.map(q => q.v);
-        const alto = Math.min(...vs);      // negativo = verso l'alto
-        const basso = Math.max(...vs);
+        const r = lat.length >= 2 ? (lat[0] + lat[1]) / 2 : 0;
 
-        if (rOriz > 1e-6) {
-          /* ⚠️ Il segno del taglio NON è un'asimmetria fra alto e basso.
-           *
-           * Il modello restituisce comunque un cerchio simmetrico
-           * attorno al proprio centro: coprendo l'iride in alto, quel
-           * cerchio diventa più PICCOLO in verticale e scivola verso il
-           * basso, ma resta simmetrico. Cercare un'asimmetria fra i due
-           * bordi non trova nulla — l'ho verificato, e la correzione non
-           * scattava mai.
-           *
-           * Il segno vero è lo SCHIACCIAMENTO: il raggio verticale
-           * diventa più corto di quello orizzontale, che la palpebra non
-           * tocca mai. */
-          const rVert = (Math.abs(alto) + Math.abs(basso)) / 2;
-          const schiacciamento = rVert / rOriz;
+        if (r > 1e-6) {
+          // Distanza dal centro dell'iride ai bordi palpebrali, lungo
+          // l'asse verticale dell'occhio. +v punta verso il basso.
+          const su = P(M.upper), giu = P(M.lower);
+          const dSu = -(((su.x - ix) * vx) + ((su.y - iy) * vy));   // sopra
+          const dGiu = ((giu.x - ix) * vx) + ((giu.y - iy) * vy);   // sotto
 
-          // Si conta SEMPRE quanto l'iride risulta schiacciata, anche a
-          // correzione spenta: è il numero che dice se la soglia è
-          // sensata prima ancora di accenderla.
-          const S2 = this.stato[side];
-          S2.schiacc = (S2.schiacc || []);
-          S2.schiacc.push(schiacciamento);
-          if (S2.schiacc.length > 120) S2.schiacc.shift();
+          coperturaSopra = Math.max(0, Math.min(1, (r - dSu) / (2 * r)));
+          coperturaSotto = Math.max(0, Math.min(1, (r - dGiu) / (2 * r)));
 
-          if (schiacciamento < (this.cfg.detection?.irisOcclusionSoglia ?? 0.78)) {
-            S2.corretti = (S2.corretti || 0) + 1;
-            /* Quale palpebra sta tagliando? Lo dice la vicinanza: si
-             * guarda quale bordo dell'occhio è più prossimo all'iride
-             * lungo l'asse verticale. */
-            const su = P(M.upper), giu = P(M.lower);
-            const vSu = (su.x - ix) * vx + (su.y - iy) * vy;
-            const vGiu = (giu.x - ix) * vx + (giu.y - iy) * vy;
-            const tagliaSopra = Math.abs(vSu) < Math.abs(vGiu);
-
-            /* Il bordo NON tagliato è affidabile: il centro vero sta
-             * esattamente un raggio orizzontale più in là. */
-            correzione = tagliaSopra ? (basso - rOriz) : (alto + rOriz);
+          const D = this.cfg.detection || {};
+          if (D.irisOcclusionFix && (coperturaSopra > 0 || coperturaSotto > 0)) {
+            const soglia = D.irisOcclusionSoglia ?? 0.10;
+            const forza = D.irisOcclusionForza ?? 0.5;
+            /* Si compensa solo la copertura ECCEDENTE la soglia: un
+             * po' di palpebra sopra l'iride c'è sempre, anche a occhio
+             * rilassato, e correggere quella sposterebbe il segno di
+             * continuo. */
+            const netSopra = Math.max(0, coperturaSopra - soglia);
+            const netSotto = Math.max(0, coperturaSotto - soglia);
+            // Coperta sopra → il centro vero sta più in alto (v negativo).
+            correzione = (netSotto - netSopra) * 2 * r * forza;
+            const max = r * (D.irisOcclusionMax ?? 0.6);
+            correzione = Math.max(-max, Math.min(max, correzione));
           }
-          S2.totali = (S2.totali || 0) + 1;
-          // Tetto di sicurezza: mai più di mezzo raggio, così un
-          // rilevamento sbagliato non può far volare il segno.
-          const max = rOriz * 0.5;
-          correzione = Math.max(-max, Math.min(max, correzione));
         }
       }
+
+      // Registrate per la diagnostica: sono i numeri con cui si decide
+      // se e quanto correggere.
+      {
+        const S2 = this.stato[side];
+        S2.copSopra = (S2.copSopra || []);
+        S2.copSopra.push(coperturaSopra);
+        if (S2.copSopra.length > 120) S2.copSopra.shift();
+        S2.totali = (S2.totali || 0) + 1;
+        if (correzione !== 0) S2.corretti = (S2.corretti || 0) + 1;
+      }
+
       if (correzione !== 0) {
         ix += correzione * vx;
         iy += correzione * vy;

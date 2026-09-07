@@ -272,6 +272,17 @@ export const TRACE_STYLE = {
   'right.down':  { color: '#5FD3A0', dash: [6, 4], label: 'DX ↓' },
   'right.left':  { color: '#6BA8FF', dash: [6, 4], label: 'DX ←' },
   'right.right': { color: '#C88BFF', dash: [6, 4], label: 'DX →' },
+  /* Apertura della palpebra: colore distinto dagli assi dell'iride,
+   * perché è una grandezza di natura diversa — non dove guarda
+   * l'occhio, ma quanto è aperto. */
+  'left.wide':    { color: '#FF8A5B', dash: [],     label: 'SX ⬍+' },
+  'left.narrow':  { color: '#FF8A5B', dash: [2, 3], label: 'SX ⬍−' },
+  'right.wide':   { color: '#FF8A5B', dash: [6, 4], label: 'DX ⬍+' },
+  'right.narrow': { color: '#FF8A5B', dash: [1, 4], label: 'DX ⬍−' },
+  // Canale combinato: colore proprio, perché non è un movimento ma la
+  // somma di più movimenti.
+  'left.combo':   { color: '#FFE24D', dash: [],     label: 'SX Σ' },
+  'right.combo':  { color: '#FFE24D', dash: [6, 4], label: 'DX Σ' },
 };
 
 /**

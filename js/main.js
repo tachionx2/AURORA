@@ -2648,7 +2648,14 @@ class App {
 
   /** Riflette lo stato reale della sorgente nei due punti dell'interfaccia. */
   updateCamButton() {
-    const on = this.vision.status === 'attiva';
+    /* ⚠️ Un video caricato NON è la telecamera.
+     *
+     * Il pulsante guardava solo se l'analisi era attiva, quindi
+     * caricando un video diceva "Ferma camera" a chi non l'aveva mai
+     * accesa — e premendolo si fermava il video credendo di spegnere
+     * una telecamera che non era mai partita. */
+    const daFile = typeof this.vision.source?.togglePlay === 'function';
+    const on = this.vision.status === 'attiva' && !daFile;
     // Il pulsante della scheda Punta è protetto SOLO quando spegne:
     // accendere non fa danni, spegnere toglie ogni comando alla persona.
     const ptc = document.getElementById('ptCam');
@@ -2661,6 +2668,13 @@ class App {
     const state = document.getElementById('camState');
     if (btn) btn.textContent = on ? t('btn.camStop') : t('btn.camStart');
     if (btn) btn.classList.toggle('btn-primary', !on);
+    // Analizzando un video, accendere la telecamera la sostituirebbe:
+    // si dice, invece di lasciarlo scoprire premendo.
+    if (btn) {
+      btn.title = daFile
+        ? 'Stai analizzando un video: avviare la telecamera lo sostituirà'
+        : '';
+    }
     if (state) {
       const L = this.cfg.ui.language === 'en';
       state.textContent = on
