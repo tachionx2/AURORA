@@ -220,6 +220,33 @@ export class GestureEngine {
     this.counters.lastRejectReason = null;
   }
 
+  /**
+   * Parametri di segnale del singolo occhio: quelli suoi se ci sono,
+   * altrimenti quelli generali.
+   *
+   * ⚠️ Le SOGLIE non fanno parte di questo: restano comuni di
+   * proposito, perché sono il criterio con cui si decide che un gesto
+   * è avvenuto e devono significare la stessa cosa per entrambi. È il
+   * guadagno per occhio a portare i due segnali sulla stessa scala.
+   */
+  _sig(eye) {
+    const s = this.cfg.signal;
+    const p = s.perOcchio?.[eye];
+    if (!p || !Object.keys(p).length) return s;
+    const fuori = { ...s, ...p };
+    // Le soglie non si sovrascrivono mai per occhio.
+    fuori.thresholdOn = s.thresholdOn;
+    fuori.thresholdOff = s.thresholdOff;
+    return fuori;
+  }
+
+  /** Confidenza minima del singolo occhio. */
+  _confMin(eye) {
+    const p = this.cfg.signal.perOcchio?.[eye];
+    const v = p?.minConfidence;
+    return (typeof v === 'number' && isFinite(v)) ? v : this.cfg.detection.minConfidence;
+  }
+
   _rebuild() {
     const s = this.cfg.signal;
     // ⚠️ Filtri più LEGGERI per le espressioni del viso.
@@ -236,8 +263,16 @@ export class GestureEngine {
     this.espr = {};
     for (const E of EXPR_CHECKS) this.espr[E.id] = new AxisState(sEspr);
     this._firmaFiltriCorrente = this._firmaFiltri(this.cfg);
-    this.eyes.left = Object.fromEntries(AXES.map(a => [a, new AxisState(s)]));
-    this.eyes.right = Object.fromEntries(AXES.map(a => [a, new AxisState(s)]));
+    /* ⚠️ Ogni occhio con i PROPRI parametri.
+     *
+     * Filtri, costante della baseline e stima del rumore possono avere
+     * bisogno di tarature diverse: un occhio più coperto o più obliquo
+     * ha un rumore diverso, e un filtro tarato sull'altro lo penalizza.
+     * Finora la diagnostica misurava sull'occhio migliore e applicava
+     * a entrambi. Vuoto significa "come il generale", quindi chi non
+     * li tocca non cambia nulla. */
+    this.eyes.left = Object.fromEntries(AXES.map(a => [a, new AxisState(this._sig('left'))]));
+    this.eyes.right = Object.fromEntries(AXES.map(a => [a, new AxisState(this._sig('right'))]));
     // Assestamento: finché baseline e sigma non hanno senso, il segnale
     // normalizzato è inaffidabile e produrrebbe scatti spuri. Si
     // continua a calcolare e a mostrare tutto, ma non si emettono gesti.
@@ -353,35 +388,31 @@ export class GestureEngine {
     if (congela) A.base.freeze(); else A.base.release();
 
     /* ══════════════════════════════════════════════════════════════
-     * LA STIMA DEL RUMORE SI SOSPENDE SU ENTRAMBI GLI OCCHI
+     * OGNI OCCHIO PER SÉ
      * ══════════════════════════════════════════════════════════════
      *
-     * ⚠️ È la correzione del difetto più ostinato di questo progetto.
+     * ⚠️ Qui avevo legato i due occhi, e i dati di una sessione reale
+     * mostrano il danno:
      *
-     * Quando un occhio è più debole — più coperto, più obliquo, meno
-     * illuminato — la sua ampiezza può non superare la soglia del
-     * gesto. Allora per lui il gesto non esiste, i suoi campioni non
-     * vengono esclusi dalla stima del rumore, e quella si gonfia: da
-     * lì l'ampiezza cala, il gesto scatta ancora meno, e non si
-     * risale più. Misurato: da 3,5σ a 2,0σ con il rumore cresciuto da
-     * 0,004 a 0,050, mentre l'altro occhio restava stabile.
+     *   887s  σ 0,00400/0,00400  ampiezza 28,8σ/26,9σ  congelati SXDX
+     *   889s  σ 0,04657/0,04535  ampiezza -0,8σ/-0,9σ  congelati ----
      *
-     * La via d'uscita sta in una legge della fisiologia: gli occhi
-     * ruotano SEMPRE insieme (legge di Hering). Un movimento dello
-     * sguardo è un evento di entrambi, anche quando uno solo lo
-     * mostra abbastanza da essere riconosciuto.
+     * I due occhi saltano NELLO STESSO ISTANTE, dal minimo a 0,046.
+     * Non è una coincidenza: la stima del rumore di un occhio veniva
+     * sospesa quando l'ALTRO riconosceva un gesto.
      *
-     * Quindi: se un occhio riconosce un gesto, per ENTRAMBI si sospende
-     * l'apprendimento del rumore. La baseline invece resta per occhio,
-     * perché quella descrive dove sta il riposo di ciascuno.
+     * L'idea aveva un fondamento — gli occhi ruotano insieme, e un
+     * movimento è un evento di entrambi. Ma la conseguenza è che il
+     * destro smetteva di misurare il proprio rumore nei momenti decisi
+     * dal sinistro, e quando i due riconoscono i gesti in modo diverso
+     * — cioè proprio quando uno è più debole — il più debole si
+     * ritrova con una stima costruita nei momenti sbagliati.
      *
-     * ⚠️ Non vale per gli ammiccamenti, che possono essere di un occhio
-     * solo: qui si parla di direzione dello sguardo.
+     * I due occhi devono essere indipendenti: baseline propria, stima
+     * propria, congelamento proprio. Se uno va bene e l'altro no, il
+     * primo non deve trascinare il secondo, né viceversa.
      */
-    for (const altro of ['left', 'right']) {
-      const B = this.eyes[altro]?.[axis];
-      if (B) B.base.congelaScala(congela);
-    }
+
   }
 
   /**
@@ -561,7 +592,7 @@ export class GestureEngine {
 
     for (const eye of ['left', 'right']) {
       const o = obs[eye];
-      if (!o || o.confidence < this.cfg.detection.minConfidence) {
+      if (!o || o.confidence < this._confMin(eye)) {
         /* ⚠️ Si CONTA lo scarto, per occhio.
          *
          * Un occhio i cui campioni vengono scartati spesso — luce
@@ -878,13 +909,41 @@ export class GestureEngine {
         /* I parametri della stima del rumore sono regolabili: si
          * applicano qui, a ogni fotogramma, così una modifica ha
          * effetto subito senza ricostruire nulla. */
+        /* I parametri della stima si applicano a ogni fotogramma, e
+         * sono quelli DI QUESTO OCCHIO. */
+        const sE = this._sig(eye);
         if (A.base?.scala) {
-          A.base.scala.perc = s.sigmaPercentile ?? 0.25;
-          A.base.scala.ritaratura = s.sigmaRitaratura ?? 1.577;
-          if (s.sigmaFinestraMs) A.base.scala.windowMs = s.sigmaFinestraMs;
+          A.base.scala.perc = sE.sigmaPercentile ?? 0.25;
+          A.base.scala.ritaratura = sE.sigmaRitaratura ?? 1.577;
+          if (sE.sigmaFinestraMs) A.base.scala.windowMs = sE.sigmaFinestraMs;
+          if (sE.minSigma) A.base.scala.minSigma = sE.minSigma;
         }
         const b = A.base.push(t, A.smooth);
         A.baseline = b.baseline;
+
+        /* ══════════════════════════════════════════════════════════
+         * MODALITÀ GREZZA
+         * ══════════════════════════════════════════════════════════
+         *
+         * Nessuna baseline che insegue, nessun rumore che si stima:
+         * un riposo FISSO misurato una volta e soglie in unità di
+         * spostamento. Serve quando i meccanismi adattivi falliscono,
+         * e serve soprattutto a poterlo VERIFICARE: se in modalità
+         * grezza il segnale è stabile, il problema sta nell'adattamento
+         * e non nel rilevamento.
+         */
+        if (s.modoGrezzo) {
+          if (A._riposoFisso == null) {
+            A._campioniRiposo = A._campioniRiposo || [];
+            A._campioniRiposo.push(A.smooth);
+            const bastano = Math.max(30, Math.round((s.modoGrezzoRiposoSec ?? 3) * 30));
+            if (A._campioniRiposo.length >= bastano) {
+              const ord = [...A._campioniRiposo].sort((p, q) => p - q);
+              A._riposoFisso = ord[ord.length >> 1];   // mediana dell'avvio
+            }
+          }
+          A.baseline = A._riposoFisso ?? A.smooth;
+        }
         /* ⚠️ Normalizzazione sul rumore: si può SPEGNERE.
          *
          * Accesa (predefinito), ogni gesto è misurato in multipli del
@@ -896,7 +955,9 @@ export class GestureEngine {
          * così irregolare che normalizzare confonde invece di aiutare.
          * ⚠️ Spegnendola le soglie vanno ritarate da capo: 3,5 non
          * vorrà più dire "tre volte e mezzo il rumore". */
-        A.sigma = s.normalizzaSuRumore === false
+        // In modalità grezza il denominatore è fisso: le soglie
+        // diventano spostamenti, non multipli del rumore.
+        A.sigma = (s.modoGrezzo || s.normalizzaSuRumore === false)
           ? Math.max(s.minSigma, s.sigmaFisso ?? 0.02)
           : b.sigma;
         A.disp = A.smooth - A.baseline;

@@ -2346,8 +2346,13 @@ function corri(mod, script) {
 
   const aggressivi = conFiltri(600, 0.8);
   const varAggr = (aggressivi.fin / aggressivi.ini - 1) * 100;
-  ok(varAggr < -25,
-     `52d. mentre con filtri dentro la banda del gesto crolla (${varAggr.toFixed(0)}%) — è la prova che il limite serve`);
+  /* ⚠️ Il confronto va fatto fra le DUE configurazioni, non contro una
+   * soglia fissa: le correzioni alla stima del rumore hanno reso il
+   * programma più tollerante anche ai filtri sbagliati, e un valore
+   * assoluto diventerebbe una verifica del passato invece che del
+   * comportamento. */
+  ok(varAggr < varSicuri - 10,
+     `52d. con filtri dentro la banda del gesto va comunque peggio (${varAggr.toFixed(0)}% contro ${varSicuri.toFixed(0)}%) — è la prova che il limite serve`);
 
   // Il comando di ritorno ai valori sicuri deve esistere
   const fs52 = await import('node:fs');
@@ -2963,6 +2968,256 @@ function corri(mod, script) {
   ok(fine > 8, `59d. e resta ben sopra la soglia (${fine.toFixed(1)}σ)`);
   ok(v[69].s < 0.02,
      `59e. la stima del rumore resta il rumore, non il gesto (${v[69].s.toFixed(4)})`);
+}
+
+/* ══════ 60. I DUE OCCHI DEVONO ESSERE INDIPENDENTI ══════
+ *
+ * ⚠️ Il registro di una sessione reale ha mostrato i due occhi
+ * collassare NELLO STESSO ISTANTE, allo stesso valore:
+ *
+ *   887s  σ 0,00400/0,00400  ampiezza 28,8σ/26,9σ  congelati SXDX
+ *   889s  σ 0,04657/0,04535  ampiezza -0,8σ/-0,9σ  congelati ----
+ *
+ * Non era una coincidenza: la stima del rumore di un occhio veniva
+ * sospesa quando l'ALTRO riconosceva un gesto. L'idea aveva un
+ * fondamento — gli occhi ruotano insieme — ma la conseguenza è che il
+ * più debole si ritrovava con una stima costruita nei momenti decisi
+ * dal più forte, cioè nei momenti sbagliati proprio per lui.
+ *
+ * Baseline propria, stima propria, congelamento proprio.            */
+{
+  const c = deepClone(DEFAULT_CONFIG);
+  const g = new GestureEngine(c, () => {});
+  let t = 0;
+  const R = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+  const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+  const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(-0.03), right: o(-0.03) }); } };
+  d(20000);
+  const v = [];
+  for (let k = 0; k < 50; k++) {
+    let ps = 0, pd = 0;
+    // Il destro si muove un TERZO del sinistro: è il caso in cui i due
+    // riconoscono i gesti in momenti diversi.
+    const q = (f) => g.process(t, { left: o(-0.03 - 0.14 * f), right: o(-0.03 - 0.045 * f) });
+    for (let i = 0; i < 300; i += 33) { t += 33; q(i / 300); }
+    for (let i = 0; i < 1100; i += 33) {
+      t += 33; q(1);
+      const a = g.channels()['left.up'], b = g.channels()['right.up'];
+      if (a) ps = Math.max(ps, a.n);
+      if (b) pd = Math.max(pd, b.n);
+    }
+    for (let i = 0; i < 300; i += 33) { t += 33; q(1 - i / 300); }
+    d(900);
+    v.push({ ps, pd, ss: g.eyes.left.y.sigma, sd: g.eyes.right.y.sigma });
+  }
+
+  const ini = v[2], fin = v[49];
+  ok(fin.pd > ini.pd * 0.8,
+     `60a. l occhio debole non viene trascinato dal forte (${ini.pd.toFixed(1)}σ → ${fin.pd.toFixed(1)}σ)`);
+  ok(fin.ps > ini.ps * 0.8,
+     `60b. e il forte resta forte (${ini.ps.toFixed(1)}σ → ${fin.ps.toFixed(1)}σ)`);
+  ok(fin.pd > 5, `60c. il debole resta usabile (${fin.pd.toFixed(1)}σ)`);
+
+  /* ⚠️ E nessun collasso SIMULTANEO: se le due stime saltano insieme
+   * allo stesso valore, c'è un accoppiamento da qualche parte. */
+  let simultanei = 0;
+  for (let i = 1; i < v.length; i++) {
+    const saltoSx = v[i].ss > v[i - 1].ss * 3;
+    const saltoDx = v[i].sd > v[i - 1].sd * 3;
+    if (saltoSx && saltoDx) simultanei++;
+  }
+  ok(simultanei === 0,
+     `60d. le due stime non saltano mai insieme (${simultanei} volte)`);
+
+  /* Il codice non deve contenere propagazione fra occhi del
+   * congelamento: è la forma che aveva l'accoppiamento. */
+  const fs60 = await import('node:fs');
+  const path60 = await import('node:path');
+  const qui60 = path60.dirname(import.meta.filename || process.argv[1]);
+  const src = fs60.readFileSync(path60.join(qui60, '..', 'js/signal/GestureEngine.js'), 'utf8');
+  const iC = src.indexOf('_congelaAsse(eye, axis, congela)');
+  const corpo = src.slice(iC, src.indexOf('\n  }', iC));
+  ok(!/for \(const altro of/.test(corpo),
+     '60e. il congelamento di un occhio non tocca l altro');
+}
+
+/* ══════ 61. Indipendenza dei due occhi, verificata ══════
+ *
+ * ⚠️ Ogni stato che si accumula dev'essere PER OCCHIO. Se anche uno
+ * solo fosse condiviso, la taratura buona per un occhio guasterebbe
+ * l'altro — ed è esattamente ciò che accadeva quando la stima del
+ * rumore di uno veniva sospesa dai gesti dell'altro.               */
+{
+  const g = new GestureEngine(deepClone(DEFAULT_CONFIG), () => {});
+  for (const asse of ['y', 'x', 'a']) {
+    const L = g.eyes.left[asse], R = g.eyes.right[asse];
+    for (const campo of ['median', 'lp', 'base', 'hyst']) {
+      ok(L[campo] !== R[campo],
+         `61a. asse ${asse}: "${campo}" è separato fra i due occhi`);
+    }
+    ok(L.base.scala !== R.base.scala,
+       `61b. asse ${asse}: anche la stima del rumore è separata`);
+  }
+  ok(g.blink.left !== g.blink.right, '61c. il rilevatore di chiusura è per occhio');
+  ok(g.burst.left !== g.burst.right, '61d. e così il conteggio delle raffiche');
+
+  /* ⚠️ La prova che conta: cambiando COMPLETAMENTE il comportamento di
+   * un occhio, l'altro non deve muovere di una cifra. */
+  function corsa(destroSiMuove) {
+    const gg = new GestureEngine(deepClone(DEFAULT_CONFIG), () => {});
+    let t = 0;
+    const R = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; gg.process(t, { left: o(-0.03), right: o(-0.03) }); } };
+    d(20000);
+    let ps = 0;
+    for (let k = 0; k < 40; k++) {
+      ps = 0;
+      const q = (f) => gg.process(t, {
+        left: o(-0.03 - 0.14 * f),
+        right: o(-0.03 - (destroSiMuove ? 0.14 : 0) * f),
+      });
+      for (let i = 0; i < 300; i += 33) { t += 33; q(i / 300); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; q(1);
+        const a = gg.channels()['left.up']; if (a) ps = Math.max(ps, a.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; q(1 - i / 300); }
+      d(900);
+    }
+    return { ps, ss: gg.eyes.left.y.sigma, bs: gg.eyes.left.y.baseline };
+  }
+  const con = corsa(true), senza = corsa(false);
+  ok(con.ps.toFixed(6) === senza.ps.toFixed(6),
+     `61e. il sinistro è IDENTICO che il destro si muova o no (${con.ps.toFixed(2)}σ)`);
+  ok(con.ss === senza.ss, '61f. compresa la sua stima del rumore');
+  ok(con.bs === senza.bs, '61g. e la sua baseline');
+}
+
+/* ══════ 62. Modalità grezza: nulla si adatta ══════
+ *
+ * Serve quando i meccanismi adattivi falliscono, e serve soprattutto a
+ * poterlo VERIFICARE: se in modalità grezza il segnale è stabile, il
+ * problema sta nell'adattamento e non nel rilevamento.              */
+{
+  function corsa(grezzo) {
+    const c = deepClone(DEFAULT_CONFIG);
+    if (grezzo) { c.signal.modoGrezzo = true; c.signal.sigmaFisso = 0.02; }
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000)
+                   + 0.010 * Math.sin(2 * Math.PI * 0.35 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(-0.03), right: o(-0.03) }); } };
+    d(4000);
+    const v = [];
+    for (let k = 0; k < 60; k++) {
+      if (k === 20) t += 82000;          // pausa del video
+      let p = 0;
+      for (let i = 0; i < 300; i += 33) { t += 33; g.process(t, { left: o(-0.03 - 0.14 * i / 300), right: o(-0.03 - 0.14 * i / 300) }); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; g.process(t, { left: o(-0.17), right: o(-0.17) });
+        const ch = g.channels()['left.up']; if (ch) p = Math.max(p, ch.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; g.process(t, { left: o(-0.17 + 0.14 * i / 300), right: o(-0.17 + 0.14 * i / 300) }); }
+      d(900);
+      v.push({ p, s: g.eyes.left.y.sigma, b: g.eyes.left.y.baseline });
+    }
+    return v;
+  }
+
+  const gz = corsa(true);
+  ok(gz.every(x => x.s === gz[0].s),
+     `62a. in modalità grezza la stima del rumore non cambia MAI (${gz[0].s})`);
+  ok(gz.every(x => x.b === gz[0].b),
+     `62b. e nemmeno la baseline (${gz[0].b.toFixed(4)})`);
+  ok(gz[59].p > gz[2].p * 0.8,
+     `62c. il segnale regge per tutta la sessione (${gz[2].p.toFixed(1)}σ → ${gz[59].p.toFixed(1)}σ)`);
+  ok(gz[21].p > gz[19].p * 0.8,
+     `62d. e una pausa del video non lo tocca (${gz[19].p.toFixed(1)}σ → ${gz[21].p.toFixed(1)}σ)`);
+  ok(DEFAULT_CONFIG.signal.modoGrezzo === false,
+     '62e. è spenta di default: chi non la usa non cambia comportamento');
+}
+
+/* ══════ 63. Parametri di segnale SEPARATI per occhio ══════
+ *
+ * ⚠️ Filtri, costante della baseline e stima del rumore possono avere
+ * bisogno di tarature diverse: un occhio più coperto o più obliquo ha
+ * un rumore diverso, e un filtro tarato sull'altro lo penalizza.
+ * Finora la diagnostica misurava sull'occhio migliore e applicava a
+ * entrambi.
+ *
+ * ⚠️ Le SOGLIE restano comuni di proposito: sono il criterio con cui
+ * si decide che un gesto è avvenuto e devono significare la stessa
+ * cosa per entrambi. È il guadagno per occhio a portare i due segnali
+ * sulla stessa scala, non la soglia a inseguirli.                   */
+{
+  const c = deepClone(DEFAULT_CONFIG);
+  c.signal.perOcchio.right = {
+    medianWindowMs: 400, lowPassHz: 3.0,
+    sigmaPercentile: 0.15, minConfidence: 0.25,
+  };
+  const g = new GestureEngine(c, () => {});
+
+  ok(g.eyes.left.y.median.windowMs === DEFAULT_CONFIG.signal.medianWindowMs,
+     `63a. il sinistro usa i valori generali (${g.eyes.left.y.median.windowMs} ms)`);
+  ok(g.eyes.right.y.median.windowMs === 400,
+     `63b. il destro usa i propri (${g.eyes.right.y.median.windowMs} ms)`);
+  ok(g._confMin('left') !== g._confMin('right'),
+     `63c. anche la confidenza minima è per occhio (${g._confMin('left')} contro ${g._confMin('right')})`);
+  ok(g._sig('left').sigmaPercentile !== g._sig('right').sigmaPercentile,
+     '63d. e il percentile della stima del rumore');
+
+  /* ⚠️ MA NON le soglie: devono restare identiche comunque. */
+  ok(g._sig('left').thresholdOn === g._sig('right').thresholdOn,
+     `63e. le soglie restano comuni (${g._sig('right').thresholdOn})`);
+  ok(g._sig('left').thresholdOff === g._sig('right').thresholdOff,
+     '63f. anche quella di rilascio');
+
+  // Anche forzandole per occhio, non devono passare
+  const c2 = deepClone(DEFAULT_CONFIG);
+  c2.signal.perOcchio.right = { thresholdOn: 99, thresholdOff: 50 };
+  const g2 = new GestureEngine(c2, () => {});
+  ok(g2._sig('right').thresholdOn === DEFAULT_CONFIG.signal.thresholdOn,
+     '63g. una soglia scritta per occhio viene ignorata di proposito');
+
+  /* Vuoto significa "come il generale": chi non li tocca non cambia. */
+  const g3 = new GestureEngine(deepClone(DEFAULT_CONFIG), () => {});
+  ok(g3._sig('left') === g3.cfg.signal && g3._sig('right') === g3.cfg.signal,
+     '63h. senza valori propri si usa direttamente la configurazione generale');
+
+  /* ⚠️ E dare parametri propri a un occhio non deve toccare l'altro. */
+  function corsa(perOcchio) {
+    const cc = deepClone(DEFAULT_CONFIG);
+    if (perOcchio) cc.signal.perOcchio.right = { sigmaPercentile: 0.15, sigmaRitaratura: 2.6, medianWindowMs: 350 };
+    const gg = new GestureEngine(cc, () => {});
+    let t = 0;
+    const RS = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const RD = (x) => 0.012 * Math.sin(2 * Math.PI * 1.1 * x / 1000);
+    const o = (y, r) => ({ x: 0, y: y + r, openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; gg.process(t, { left: o(-0.03, RS(t)), right: o(-0.03, RD(t)) }); } };
+    d(20000);
+    let ps = 0, pd = 0;
+    for (let k = 0; k < 40; k++) {
+      ps = 0; pd = 0;
+      const q = (f) => gg.process(t, { left: o(-0.03 - 0.14 * f, RS(t)), right: o(-0.03 - 0.14 * f, RD(t)) });
+      for (let i = 0; i < 300; i += 33) { t += 33; q(i / 300); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; q(1);
+        const a = gg.channels()['left.up'], b = gg.channels()['right.up'];
+        if (a) ps = Math.max(ps, a.n);
+        if (b) pd = Math.max(pd, b.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; q(1 - i / 300); }
+      d(900);
+    }
+    return { ps, pd };
+  }
+  const comuni = corsa(false), separati = corsa(true);
+  ok(comuni.ps.toFixed(3) === separati.ps.toFixed(3),
+     `63i. tarare il destro non tocca il sinistro (${comuni.ps.toFixed(1)}σ in entrambi i casi)`);
+  ok(separati.pd >= comuni.pd,
+     `63l. e il destro ci guadagna (${comuni.pd.toFixed(1)}σ → ${separati.pd.toFixed(1)}σ)`);
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

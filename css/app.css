@@ -1109,3 +1109,15 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
 }
 .combo-nome{font:600 .82rem var(--font);color:var(--text);line-height:1.2}
 .combo-voce.is-on .combo-nome{color:var(--accent)}
+
+/* Riga di regolazione per singolo occhio: etichetta, cursore, valore. */
+.set-row{
+  display:grid;grid-template-columns:1fr auto;align-items:center;
+  gap:.3rem .6rem;margin:.35rem 0;
+}
+.set-row label{font:500 .82rem var(--font);color:var(--text)}
+.set-row input[type=range]{grid-column:1/-1;width:100%}
+.set-row .val{
+  font:600 .78rem var(--mono);color:var(--accent);
+  font-variant-numeric:tabular-nums;
+}

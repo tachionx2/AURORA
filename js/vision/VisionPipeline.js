@@ -340,12 +340,23 @@ export class SignalPlot {
     // Scala verticale in SIGMA: è l'unità in cui ragionano le soglie,
     // quindi le linee di soglia restano orizzontali e confrontabili
     // fra tracce diverse.
+    /* ⚠️ La scala si adatta al segnale, e questo inganna l'occhio.
+     *
+     * Alzando la soglia da 3,5 a 10 le linee tratteggiate si spostano,
+     * ma il grafico si ridimensiona insieme a loro e il rapporto fra
+     * curva e soglie SEMBRA identico. Si conclude che le soglie non
+     * facciano nulla, mentre invece stanno facendo esattamente il loro
+     * lavoro.
+     *
+     * Si mostrano quindi i valori numerici sull'asse, così il
+     * ridimensionamento si vede invece di essere subito. */
     let lo = -1.5, hi = thrOn + 1.5;
     for (const f of this.frames)
       for (const id of traces) {
         const d = f.ch?.[id]; if (!d) continue;
         if (isFinite(d.n)) { lo = Math.min(lo, d.n - 0.5); hi = Math.max(hi, d.n + 0.5); }
       }
+    this.scalaLo = lo; this.scalaHi = hi;
     const Y = v => H - ((v - lo) / (hi - lo)) * H;
     const X = i => (i / (this.max - 1)) * W;
 

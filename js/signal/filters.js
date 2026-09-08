@@ -174,7 +174,30 @@ export class RobustScale {
       while (this.bufDiff.length > 600) this.bufDiff.shift();
     }
     if (Number.isFinite(scarto)) this.vPrec = scarto;
-    const taglio = t - this.windowMs;
+    /* ⚠️ La finestra si pota per NUMERO di campioni, non per età.
+     *
+     * Potandola per età, durante un congelamento prolungato — quando
+     * cioè non entra nulla — i campioni vecchi venivano scartati lo
+     * stesso e la finestra si svuotava. Alla ripresa la stima si
+     * ricalcolava su due secondi di dati freschi, e se quei due
+     * secondi contenevano un gesto prendeva il gesto per rumore.
+     *
+     * I dati di una sessione reale mostrano esattamente questo: sigma
+     * fermo al minimo 0,00400 per minuti — finestra vuota, stima mai
+     * aggiornata — e poi un salto improvviso a 0,046 su ENTRAMBI gli
+     * occhi nello stesso istante. Da lì il gesto non superava più la
+     * soglia e non si tornava più indietro.
+     *
+     * Potando per numero, la finestra conserva sempre gli ultimi
+     * seicento campioni di QUIETE, quale che sia il tempo che hanno
+     * impiegato ad accumularsi. Non si svuota mai, e la stima resta
+     * costruita su dati veri anziché sui primi che ricapitano.
+     *
+     * Resta una potatura per età, ma larghissima: cinque minuti,
+     * perché una stima costruita su com'era la persona mezz'ora prima
+     * non descrive più com'è adesso. */
+    while (this.buf.length > (this.maxCampioni ?? 600)) this.buf.shift();
+    const taglio = t - Math.max(this.windowMs, 300000);
     while (this.buf.length && this.buf[0].t < taglio) this.buf.shift();
     if (t - this.tLast < this.recomputeMs) return this.value;
     this.tLast = t;

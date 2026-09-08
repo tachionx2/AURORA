@@ -738,6 +738,82 @@ export class SessionStats {
       }
     }
 
+    /* ══════════════════════════════════════════════════════════════
+     * PARAMETRI MISURATI SEPARATAMENTE PER OGNI OCCHIO
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Finora la diagnostica misurava sull'occhio di riferimento e
+     * applicava a entrambi. Se i due hanno rumore o oscillazione
+     * diversi — e ne hanno, quando uno è più coperto o più obliquo —
+     * la taratura buona per il primo penalizza il secondo.
+     *
+     * Ogni occhio riceve quindi i propri filtri e la propria stima del
+     * rumore. Le SOGLIE restano comuni di proposito: sono il criterio
+     * con cui si decide che un gesto è avvenuto e devono significare
+     * la stessa cosa per entrambi; è il guadagno per occhio a portare
+     * i due segnali sulla stessa scala.
+     */
+    {
+      const per = {};
+      for (const eye of ['left', 'right']) {
+        const hR = this.grezzoRiposo[eye], hT = this.grezzoTutti[eye];
+        if (!hR || hR.tot < 300 || !hT || hT.tot < 400) continue;
+        const voci = {};
+
+        // Oscillazione di QUESTO occhio → suoi filtri.
+        const fE = r.perOcchio?.[eye]?.frequenzaMediana;
+        if (Number.isFinite(fE) && fE > 0.3) {
+          const dwell = this.cfgDwellMs || 400;
+          const medMax = clamp(Math.round(dwell / 2 / 50) * 50, 120, 350);
+          voci.medianWindowMs = clamp(Math.round(1500 / fE / 50) * 50, 120, medMax);
+          voci.lowPassHz = clamp(Math.round((fE / 3) * 10) / 10, 2.5, 6.0);
+        }
+
+        /* Percentile di QUESTO occhio: dipende da quanto tempo si
+         * muove, che può essere diverso fra i due — chi ha un occhio
+         * socchiuso lo apre solo per il gesto. */
+        const sigE = Math.max(1e-6, 1.4826 * hR.percentile(0.25) * 1.577);
+        let sopra = 0;
+        for (let i = 0; i < hT.n; i++) {
+          const centro = hT.min + (i + 0.5) * (hT.max - hT.min) / hT.n;
+          if (centro > sigE * 3) sopra += hT.bin[i];
+        }
+        const movE = sopra / hT.tot;
+        if (movE > 0.05) {
+          const quiete = 1 - movE;
+          const pc = clamp(Math.round(quiete * 0.6 * 100) / 100, 0.10, 0.40);
+          voci.sigmaPercentile = pc;
+          voci.sigmaRitaratura = Math.round((0.40 / pc) * 0.985 * 100) / 100;
+        }
+
+        // Confidenza minima di QUESTO occhio.
+        const cE = r.perOcchio?.[eye]?.confidenza10;
+        if (Number.isFinite(cE)) {
+          voci.minConfidence = clamp(Math.round(cE * 0.7 * 100) / 100, 0.15, 0.40);
+        }
+
+        if (Object.keys(voci).length) per[eye] = voci;
+      }
+
+      if (per.left || per.right) {
+        p['signal.perOcchio'] = { left: per.left || {}, right: per.right || {} };
+        const desc = (e) => {
+          const v = per[e];
+          if (!v) return null;
+          const parti = [];
+          if (v.medianWindowMs) parti.push(`mediana ${v.medianWindowMs} ms`);
+          if (v.lowPassHz) parti.push(`filtro ${v.lowPassHz} Hz`);
+          if (v.sigmaPercentile) parti.push(`quiete ${(v.sigmaPercentile * 100).toFixed(0)}%`);
+          return parti.length ? `${e === 'left' ? 'sinistro' : 'destro'}: ${parti.join(', ')}` : null;
+        };
+        const d1 = desc('left'), d2 = desc('right');
+        motivi.push(
+          'parametri misurati SEPARATAMENTE per i due occhi — '
+          + [d1, d2].filter(Boolean).join(' · ')
+          + ' (le soglie restano comuni, è il guadagno a pareggiarli)');
+      }
+    }
+
     /* ── L'apertura come canale di comando ──
      * Se l'escursione è ampia rispetto al riposo, quel canale è
      * utilizzabile — e per chi ha un occhio socchiuso spesso è il

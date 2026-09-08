@@ -346,6 +346,7 @@ export class SettingsView {
        * Vanno svuotate, non riportate a un valore: "nessuna
        * sovrascrittura" è proprio lo stato predefinito. */
       'signal.thresholdDir', 'signal.gainDir', 'signal.gainEye',
+      'signal.modoGrezzo', 'signal.modoGrezzoRiposoSec', 'signal.perOcchio',
       // Rilevamento e durate.
       'detection.minConfidence',
       'gestures.UP.dwellMs', 'gestures.UP.maxMs',
@@ -396,6 +397,79 @@ export class SettingsView {
         h('p', 'note', P(
           ['⚠️ Filtrare troppo è peggio che filtrare poco. Un passa-basso sotto i 2,5 Hz o una mediana oltre i 350 ms tagliano anche il GESTO, non solo il tremore: l\'ampiezza rilevata crolla pur restando il movimento identico. Se dopo una taratura le ampiezze sono basse e calano nel tempo, il primo sospetto sono questi due valori — e il pulsante qui sopra li riporta a posto.',
              '⚠️ Over-filtering is worse than under-filtering. A low-pass below 2.5 Hz or a median beyond 350 ms cut the GESTURE too.'])),
+        /* ══════════════════════════════════════════════════════════
+         * TARATURE PER SINGOLO OCCHIO
+         * ══════════════════════════════════════════════════════════
+         *
+         * ⚠️ Due occhi possono misurare diversamente lo STESSO
+         * movimento: uno più coperto dalla palpebra, uno più obliquo,
+         * uno abitualmente socchiuso. Chi guarda il video li vede
+         * muoversi uguale, e ha ragione: è la MISURA a essere diversa.
+         *
+         * Le soglie restano comuni di proposito — sono il criterio con
+         * cui si decide che un gesto è avvenuto e devono significare
+         * la stessa cosa per entrambi. È il guadagno a portare i due
+         * segnali sulla stessa scala.
+         */
+        h('div', 'vb-testa', P(['EQUILIBRIO FRA I DUE OCCHI', 'BALANCE BETWEEN THE EYES'])),
+        h('p', 'sub', P(
+          ['Questi guadagni pareggiano i due occhi, come si tarano due microfoni perché registrino allo stesso livello. A 1 non cambiano nulla, e la diagnostica li propone da sola.',
+           'These gains balance the two eyes. At 1 they change nothing.'])),
+        this._range('signal.gainEye.left',
+          P(['Guadagno occhio sinistro', 'Left eye gain']), null, 0.5, 4, 0.05),
+        this._range('signal.gainEye.right',
+          P(['Guadagno occhio destro', 'Right eye gain']), null, 0.5, 4, 0.05),
+
+        h('div', 'vb-testa', P(['FILTRI E RUMORE, PER OCCHIO', 'FILTERS AND NOISE, PER EYE'])),
+        h('p', 'sub', P(
+          ['Lasciati al valore generale valgono per entrambi. La diagnostica li misura separatamente e li propone; qui si possono correggere a mano. ⚠️ Un occhio più coperto o più obliquo ha un rumore diverso, e un filtro tarato sull\'altro lo penalizza.',
+           'Left at the shared value they apply to both. Diagnostics measures them separately.'])),
+        ...['left', 'right'].flatMap((eye) => {
+          const nome = eye === 'left' ? 'SINISTRO' : 'DESTRO';
+          const v = cfg.signal.perOcchio?.[eye] || {};
+          const propri = Object.keys(v).length;
+          const campi = [
+            ['medianWindowMs', ['Finestra mediana', 'Median window'], 0, 800, 10, ' ms'],
+            ['lowPassHz', ['Passa-basso', 'Low-pass'], 0.5, 8, 0.1, ' Hz'],
+            ['baselineTauSec', ['Costante della baseline', 'Baseline time constant'], 5, 120, 5, ' s'],
+            ['sigmaPercentile', ['Quanta parte è quiete', 'Rest fraction'], 0.10, 0.45, 0.01, ''],
+            ['sigmaRitaratura', ['Ritaratura del percentile', 'Recalibration'], 0.8, 3, 0.01, ''],
+            ['minConfidence', ['Confidenza minima', 'Minimum confidence'], 0.10, 0.80, 0.05, ''],
+          ];
+          const azzera = h('button', 'btn btn-sm',
+            P([`Occhio ${nome.toLowerCase()}: torna ai valori generali`,
+               `${nome}: back to shared values`]));
+          azzera.onclick = () => {
+            this.app.set(`signal.perOcchio.${eye}`, {});
+            this.render();
+          };
+          const az = h('div', 'profile-actions');
+          az.append(azzera);
+          return [
+            h('div', 'vb-testa', `OCCHIO ${nome}${propri ? ` — ${propri} valori propri` : ' — usa i valori generali'}`),
+            ...campi.map(([k, et, min, max, step, suff]) => {
+              const attuale = v[k];
+              const riga = h('div', 'set-row');
+              riga.append(h('label', null,
+                P(et) + (attuale === undefined ? ' · generale' : '')));
+              const inp = h('input');
+              inp.type = 'range';
+              inp.min = String(min); inp.max = String(max); inp.step = String(step);
+              inp.value = String(attuale ?? cfg.signal[k] ?? min);
+              inp.oninput = () => {
+                const o = { ...(this.app.get(`signal.perOcchio.${eye}`) || {}) };
+                o[k] = Number(inp.value);
+                this.app.set(`signal.perOcchio.${eye}`, o);
+                this.render();
+              };
+              riga.append(inp, h('span', 'val', inp.value + (suff || '')));
+              return riga;
+            }),
+            az,
+          ];
+        }),
+
+        h('div', 'vb-testa', P(['VALORI GENERALI', 'SHARED VALUES'])),
         this._range('signal.medianWindowMs', 'Finestra mediana', 'Rimuove le fasi rapide del nistagmo', 0, 800, 10, ' ms'),
         this._range('signal.lowPassHz', 'Passa-basso', 'Più basso = più stabile ma più lento', 0.3, 6, 0.1, ' Hz'),
         this._range('signal.baselineTauSec', 'Costante baseline', 'Insegue derive lente di postura e supporto', 3, 120, 1, ' s'),

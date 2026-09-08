@@ -932,6 +932,19 @@ class App {
       + ` | soglie ${this.cfg.signal.thresholdOn}/${this.cfg.signal.thresholdOff}`
       + ` | congelati ${G?.eyes?.left?.y?.base?.frozen ? 'SX' : '--'}${G?.eyes?.right?.y?.base?.frozen ? 'DX' : '--'}`
       + ` | apertura ${f(G?.eyes?.left?.a?.raw, 3)}/${f(G?.eyes?.right?.a?.raw, 3)}`
+      /* Sigma di OGNI asse e di OGNI occhio, separatamente: è ciò che
+       * mostra se i due occhi si stanno condizionando a vicenda. */
+      + ` | σ assi SX y${f(G?.eyes?.left?.y?.sigma, 4)} x${f(G?.eyes?.left?.x?.sigma, 4)} a${f(G?.eyes?.left?.a?.sigma, 4)}`
+      + ` | σ assi DX y${f(G?.eyes?.right?.y?.sigma, 4)} x${f(G?.eyes?.right?.x?.sigma, 4)} a${f(G?.eyes?.right?.a?.sigma, 4)}`
+      + ` | n SX su${f(ch['left.up']?.n, 1)} giu${f(ch['left.down']?.n, 1)} sx${f(ch['left.left']?.n, 1)} dx${f(ch['left.right']?.n, 1)}`
+      + ` | n DX su${f(ch['right.up']?.n, 1)} giu${f(ch['right.down']?.n, 1)} sx${f(ch['right.left']?.n, 1)} dx${f(ch['right.right']?.n, 1)}`
+      /* Sigma di OGNI direzione, per entrambi gli occhi: è ciò che
+       * viene confrontato con le soglie, quindi è il numero che decide
+       * se un gesto viene preso o no. Vederlo direzione per direzione
+       * mostra se il calo riguarda tutto l'occhio o un solo canale. */
+      + ` | SX su/giù/sx/dx ${f(ch['left.up']?.n, 1)}/${f(ch['left.down']?.n, 1)}/${f(ch['left.left']?.n, 1)}/${f(ch['left.right']?.n, 1)}`
+      + ` | DX su/giù/sx/dx ${f(ch['right.up']?.n, 1)}/${f(ch['right.down']?.n, 1)}/${f(ch['right.left']?.n, 1)}/${f(ch['right.right']?.n, 1)}`
+      + ` | apert σ ${f(ch['left.wide']?.n, 1)}/${f(ch['right.wide']?.n, 1)}`
       + ` | scheda ${document.body.dataset.tab}`
     );
   }

@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 35;
+export const CONFIG_VERSION = 37;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -333,6 +333,54 @@ export const DEFAULT_CONFIG = {
      * quel conflitto non è risolto. La lezione, l'ennesima: un
      * miglioramento che i test approvano va comunque provato sulla
      * configurazione che riproduce i dati veri. */
+    /* ══════════════════════════════════════════════════════════════
+     * MODALITÀ GREZZA — nessuna baseline, nessuna normalizzazione
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Il programma normalmente misura ogni gesto in multipli del
+     * rumore di quella persona, e sottrae una baseline che insegue la
+     * posizione di riposo. Sono due meccanismi che si adattano da soli
+     * — ed è il loro pregio, perché rendono le soglie valide per
+     * chiunque — ma sono anche due cose che possono sbagliarsi.
+     *
+     * In modalità grezza non si adatta nulla: si prende la posizione
+     * come esce dal rilevatore, le si sottrae un riposo FISSO misurato
+     * una volta all'avvio, e la si confronta con soglie espresse in
+     * unità di spostamento. Nessuna deriva possibile, nessun rumore
+     * che cresce, nessuna sorpresa dopo tre minuti.
+     *
+     * ⚠️ Il prezzo è reale: le soglie vanno tarate a mano per QUELLA
+     * persona e QUELLA telecamera, e non compensano più uno
+     * spostamento della testa. È una scelta di robustezza contro
+     * adattabilità, e va fatta sapendolo. */
+    /* ══════════════════════════════════════════════════════════════
+     * PARAMETRI PER SINGOLO OCCHIO
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Due occhi possono avere bisogno di tarature diverse: uno più
+     * coperto dalla palpebra, uno più obliquo, uno abitualmente
+     * socchiuso. Un filtro o un percentile tarato sul primo può
+     * peggiorare il secondo, e finora era proprio ciò che accadeva —
+     * la diagnostica misurava sull'occhio migliore e applicava a
+     * entrambi.
+     *
+     * Qui ogni occhio può avere i propri valori. Vuoto significa "usa
+     * quello generale", quindi chi non li tocca non cambia nulla.
+     *
+     * ⚠️ Le SOGLIE restano comuni di proposito: sono il criterio con
+     * cui si decide che un gesto è avvenuto, e devono significare la
+     * stessa cosa per entrambi gli occhi. È il guadagno per occhio a
+     * portare i due segnali sulla stessa scala, non la soglia a
+     * inseguirli. */
+    perOcchio: {
+      left:  {},   // medianWindowMs, lowPassHz, baselineTauSec,
+      right: {},   // sigmaPercentile, sigmaRitaratura, minSigma, minConfidence
+    },
+
+    modoGrezzo: false,
+    // Secondi di osservazione con cui si misura il riposo fisso.
+    modoGrezzoRiposoSec: 3,
+
     quieteAssoluta: false,
     quieteFrazione: 0.25,
     /* ⚠️ Quante volte il rumore veloce deve valere l'escursione perché
@@ -941,6 +989,13 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 37 && c.signal && !c.signal.perOcchio) {
+    c.signal.perOcchio = { left: {}, right: {} };
+  }
+  if (v < 36 && c.signal && c.signal.modoGrezzo === undefined) {
+    c.signal.modoGrezzo = false;
+    c.signal.modoGrezzoRiposoSec = 3;
+  }
   if (v < 35 && c.signal && c.signal.quieteAssoluta === undefined) {
     c.signal.quieteAssoluta = true;
     c.signal.quieteFrazione = 0.25;
