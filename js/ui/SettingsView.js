@@ -307,24 +307,80 @@ export class SettingsView {
    *
    * Questo comando riporta SOLO i filtri e le soglie ai valori
    * predefiniti, senza toccare nient'altro. */
+  /* ⚠️ Ritorno ai valori sicuri.
+   *
+   * I parametri applicati restano salvati: una taratura sbagliata —
+   * per esempio un passa-basso dentro la banda del gesto — rovina
+   * anche tutte le sessioni successive, e sembra un difetto del
+   * programma invece che una regolazione da rifare.
+   *
+   * ⚠️ L'elenco è ricavato dai valori PREDEFINITI, non scritto a mano.
+   * Scritto a mano era già divenuto incoerente: la diagnostica poteva
+   * proporre tredici parametri e il ripristino ne riportava sei, così
+   * sette regolazioni restavano incastrate sui valori applicati senza
+   * modo di tornare indietro. Ogni parametro nuovo aggiunto alla
+   * diagnostica si aggiunge qui da solo.
+   */
+  _viePrestazioni() {
+    return [
+      // Filtri e soglie: il cuore del rilevamento.
+      'signal.medianWindowMs', 'signal.lowPassHz',
+      'signal.thresholdOn', 'signal.thresholdOff',
+      'signal.baselineTauSec', 'signal.minSigma',
+      // Stima del rumore.
+      'signal.sigmaPercentile', 'signal.sigmaRitaratura',
+      'signal.sigmaFinestraMs', 'signal.normalizzaSuRumore', 'signal.sigmaFisso',
+      // Distinzione fra ammiccamento e sguardo alzato.
+      'signal.blinkRatio', 'signal.blinkRichiedeIride',
+      'signal.blinkSogliaIride', 'signal.blinkSmentiSopra',
+      'signal.blinkClosedRatio', 'signal.blinkFloor',
+      // Rilevamento e durate.
+      'detection.minConfidence',
+      'gestures.UP.dwellMs', 'gestures.UP.maxMs',
+      'gestures.blinkMaxPulseMs', 'gestures.blinkMinPulseMs',
+    ];
+  }
+
   _ripristinaFiltri() {
-    const sicuri = {
-      'signal.medianWindowMs': 250,
-      'signal.lowPassHz': 3.5,
-      'signal.thresholdOn': 3.5,
-      'signal.thresholdOff': 1.5,
-      'signal.baselineTauSec': 30,
-      'detection.minConfidence': 0.40,
+    const leggi = (via) => {
+      let n = DEFAULT_CONFIG;
+      for (const k of via.split('.')) n = n?.[k];
+      return n;
     };
-    for (const [via, val] of Object.entries(sicuri)) this.app.set(via, val);
+    let quanti = 0;
+    for (const via of this._viePrestazioni()) {
+      const val = leggi(via);
+      if (val === undefined) continue;      // parametro non più esistente
+      this.app.set(via, val);
+      quanti++;
+    }
     this.render();
-    this.app.toast('Filtri e soglie riportati ai valori predefiniti');
+    this.app.toast(`${quanti} parametri riportati ai valori predefiniti`);
   }
 
   _signalCard(cfg) {
     return this._card(t('sec.signal'),
       'Il nistagmo oscilla a 2–6 Hz; il gesto volontario è un gradino sostenuto. I filtri rimuovono l\'oscillazione e lasciano il gradino. La baseline si congela durante il gesto: se la inseguisse, lo cancellerebbe dopo pochi secondi.',
       [
+        /* ⚠️ Il ritorno ai valori sicuri, in cima e ben visibile.
+         *
+         * I parametri applicati restano salvati: una taratura sbagliata
+         * — per esempio un passa-basso dentro la banda del gesto —
+         * rovina anche tutte le sessioni successive, e sembra un
+         * difetto del programma invece che una regolazione da rifare.
+         * Deve essere la prima cosa che si trova qui. */
+        (() => {
+          const az = h('div', 'profile-actions');
+          const b = h('button', 'btn btn-sm btn-primary',
+            P(['Riporta filtri e soglie ai valori predefiniti',
+               'Restore filters and thresholds to defaults']));
+          b.onclick = () => this._ripristinaFiltri();
+          az.append(b);
+          return az;
+        })(),
+        h('p', 'note', P(
+          ['⚠️ Filtrare troppo è peggio che filtrare poco. Un passa-basso sotto i 2,5 Hz o una mediana oltre i 350 ms tagliano anche il GESTO, non solo il tremore: l\'ampiezza rilevata crolla pur restando il movimento identico. Se dopo una taratura le ampiezze sono basse e calano nel tempo, il primo sospetto sono questi due valori — e il pulsante qui sopra li riporta a posto.',
+             '⚠️ Over-filtering is worse than under-filtering. A low-pass below 2.5 Hz or a median beyond 350 ms cut the GESTURE too.'])),
         this._range('signal.medianWindowMs', 'Finestra mediana', 'Rimuove le fasi rapide del nistagmo', 0, 800, 10, ' ms'),
         this._range('signal.lowPassHz', 'Passa-basso', 'Più basso = più stabile ma più lento', 0.3, 6, 0.1, ' Hz'),
         this._range('signal.baselineTauSec', 'Costante baseline', 'Insegue derive lente di postura e supporto', 3, 120, 1, ' s'),

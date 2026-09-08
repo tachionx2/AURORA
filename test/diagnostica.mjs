@@ -2525,5 +2525,83 @@ function corri(mod, script) {
      '54g. spiegando che dipende da quanto tempo la persona si muove');
 }
 
+/* ══════ 55. La diagnosi non deve dipendere dalla propria taratura ══════
+ *
+ * ⚠️ Due difetti che si vedevano solo usandolo davvero.
+ *
+ * Il primo: osservando più a lungo, alcuni parametri proposti
+ * SPARIVANO — dopo tre minuti se ne potevano applicare cinque invece
+ * dei sette proposti dopo due. Chi assiste non poteva più applicare
+ * ciò che il programma aveva consigliato poco prima. Un consiglio che
+ * scompare mentre lo si legge non è un consiglio.
+ *
+ * Il secondo, la causa: la frazione di tempo in movimento e
+ * l'ampiezza del gesto venivano contate sui gesti RICONOSCIUTI, che
+ * dipendono dalla soglia corrente. Alzando la soglia il conteggio
+ * crollava e i parametri sparivano — proprio quando la taratura era
+ * sbagliata e servivano di più.                                     */
+{
+  const { SessionStats: SS55 } = await import('../js/signal/SessionStats.js');
+
+  function sessione(riconosce, minuti = 3) {
+    const st = new SS55();
+    let t = 0;
+    const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.021 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const cicli = Math.round(minuti * 17);
+    for (let k = 0; k < cicli; k++) {
+      for (let i = 0; i < 1400; i += 33) {
+        t += 33; const y = -0.16 + R(t);
+        const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+        st.push(t, { left: o, right: { ...o } }, riconosce ? 8 : 1.2, riconosce);
+      }
+      for (let i = 0; i < 2200; i += 33) {
+        t += 33; const y = R(t);
+        const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+        st.push(t, { left: o, right: { ...o } }, 1, false);
+      }
+    }
+    return st;
+  }
+
+  /* ⚠️ Anche con una taratura così sbagliata da non riconoscere NULLA,
+   * la diagnostica deve saper dire cosa correggere. È il momento in cui
+   * serve di più. */
+  const cieca = sessione(false).parametriConsigliati();
+  ok(cieca.ok && Object.keys(cieca.proposta).length >= 5,
+     `55a. propone anche quando nessun gesto viene riconosciuto (${Object.keys(cieca.proposta).length} parametri)`);
+  ok(cieca.proposta['signal.thresholdOn'] !== undefined,
+     '55b. compresa la soglia, che è proprio ciò che va corretto');
+  ok(cieca.motivi.some(m => /grezzo/.test(m)),
+     '55c. misurando sul segnale grezzo, non su ciò che ha riconosciuto');
+
+  /* ⚠️ E nessun parametro deve SPARIRE osservando più a lungo. */
+  const st = sessione(true, 2);
+  const dopo2 = st.parametriConsigliati();
+  // Si continua a osservare, ma con la soglia ormai alta: nessun gesto
+  // viene più riconosciuto.
+  let t = st.c.msTotali;
+  const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                 + 0.021 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+  for (let k = 0; k < 17; k++) {
+    for (let i = 0; i < 1400; i += 33) {
+      t += 33; const y = -0.16 + R(t);
+      const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+      st.push(t, { left: o, right: { ...o } }, 1.2, false);
+    }
+    for (let i = 0; i < 2200; i += 33) {
+      t += 33; const y = R(t);
+      const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+      st.push(t, { left: o, right: { ...o } }, 1, false);
+    }
+  }
+  const dopo3 = st.parametriConsigliati();
+  const persi = Object.keys(dopo2.proposta).filter(k => !(k in dopo3.proposta));
+  ok(persi.length === 0,
+     `55d. nessun parametro sparisce continuando a osservare (persi: ${persi.join(', ') || 'nessuno'})`);
+  ok(Object.keys(dopo3.proposta).length >= Object.keys(dopo2.proposta).length,
+     `55e. osservando di più si propone almeno quanto prima (${Object.keys(dopo2.proposta).length} → ${Object.keys(dopo3.proposta).length})`);
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

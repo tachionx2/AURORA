@@ -3238,6 +3238,17 @@ class App {
       };
     }
 
+    /* Ritorno ai valori predefiniti, raggiungibile dalla diagnostica:
+     * si riparte da una situazione pulita e si vede subito come cambia
+     * il rilevamento, senza uscire dalla scheda. */
+    const brs = document.getElementById('btnDiagReset');
+    if (brs) brs.onclick = () => {
+      if (!confirm('Riportare filtri e soglie ai valori predefiniti?\n\nLe altre impostazioni non vengono toccate.')) return;
+      this.settingsView._ripristinaFiltri();
+      this.toast('Filtri e soglie riportati ai valori predefiniti');
+      this.debugView?.logEvent('filtri riportati ai predefiniti');
+    };
+
     const bat = document.getElementById('btnAutoTune');
     if (bat) bat.onclick = () => this.avviaTaraturaAutomatica();
 

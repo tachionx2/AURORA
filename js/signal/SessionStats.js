@@ -171,6 +171,10 @@ export class SessionStats {
     this.grezzoValori = { left: new Istogramma(-1, 1, 200), right: new Istogramma(-1, 1, 200) };
     this.grezzoRiposo = { left: new Istogramma(0, 0.5, 100), right: new Istogramma(0, 0.5, 100) };
     this.grezzoGesto  = { left: new Istogramma(0, 0.5, 100), right: new Istogramma(0, 0.5, 100) };
+    /* Tutti gli scarti, senza distinguere gesto da riposo: serve a
+     * misurare QUANTO la persona si muove senza chiederlo alle soglie,
+     * che sono proprio ciò che stiamo cercando di tarare. */
+    this.grezzoTutti  = { left: new Istogramma(0, 0.5, 100), right: new Istogramma(0, 0.5, 100) };
     this.campioniInGesto = 0;
     this.campioniTotali = 0;
     this.durataGesti = new Istogramma(0, 6000, 30);   // ms
@@ -265,6 +269,7 @@ export class SessionStats {
         ? this.grezzoValori[eye].percentile(0.5) : 0;
       const scarto = Math.abs(o2.y - riposo);
       (inGesto ? this.grezzoGesto[eye] : this.grezzoRiposo[eye]).add(scarto);
+      this.grezzoTutti[eye].add(scarto);
     }
 
     // Analisi periodica: una volta al secondo, non a ogni fotogramma.
@@ -526,13 +531,30 @@ export class SessionStats {
        */
       const eyeRif = E === r.perOcchio?.left ? 'left' : 'right';
       const hRip = this.grezzoRiposo[eyeRif], hGes = this.grezzoGesto[eyeRif];
-      const abbastanza = hRip.tot > 300 && hGes.tot > 100;
+      /* ⚠️ Basta avere abbastanza CAMPIONI, non abbastanza gesti
+       * riconosciuti.
+       *
+       * Prima servivano cento campioni dentro gesti riconosciuti: se
+       * la soglia era troppo alta non se ne riconosceva nessuno, la
+       * condizione non era mai soddisfatta e la diagnostica smetteva
+       * di proporre proprio quando serviva di più — cioè quando la
+       * taratura era sbagliata. */
+      const hTutti = this.grezzoTutti[eyeRif];
+      const abbastanza = hTutti.tot > 400;
+      // Stessa formula che il programma usa per stimare il rumore.
+      // Serve sia alle soglie sia alla misura del movimento.
+      const sigmaGrezzo = hRip.tot > 100
+        ? Math.max(1e-6, 1.4826 * hRip.percentile(0.25) * 1.577) : 0;
 
       if (abbastanza) {
-        // Stessa formula che il programma usa per stimare il rumore.
-        const perc = 0.25, ritar = 1.577;
-        const sigmaGrezzo = Math.max(1e-6, 1.4826 * hRip.percentile(perc) * ritar);
-        const gestoN = hGes.percentile(0.75) / sigmaGrezzo;
+        /* L'ampiezza del gesto si legge dalla CODA della distribuzione
+         * di tutti gli scarti: i momenti in cui la persona si è
+         * scostata di più sono i suoi gesti, che li si sia riconosciuti
+         * o no. Nessuna dipendenza da soglie. */
+        const gestoN = Math.max(
+          hTutti.percentile(0.97),
+          hGes.tot > 100 ? hGes.percentile(0.75) : 0,
+        ) / sigmaGrezzo;
         /* ⚠️ Il riferimento non è il rumore MEDIO ma il suo PICCO.
          *
          * Una soglia messa a metà fra rumore medio e gesto scatterebbe
@@ -562,7 +584,27 @@ export class SessionStats {
        * Dipende da quanto tempo la persona passa in movimento: se i
        * gesti occupano più della frazione osservata, la stima si
        * gonfia e non torna più indietro. */
-      const inMov = this.campioniTotali > 0 ? this.campioniInGesto / this.campioniTotali : 0;
+      /* ⚠️ Frazione di tempo in movimento, misurata sul GREZZO.
+       *
+       * Prima si contavano i gesti RICONOSCIUTI, che dipendono dalla
+       * soglia corrente: alzando la soglia il conteggio crollava e il
+       * parametro spariva dalla proposta. Un altro anello — e quello
+       * che faceva sparire due parametri dopo il terzo minuto.
+       *
+       * Ora si conta quanti campioni si scostano dal riposo più di tre
+       * volte il rumore, misurato anch'esso sul grezzo. Non dipende da
+       * nessuna soglia. */
+      const hTut = this.grezzoTutti[eyeRif];
+      let inMov = 0;
+      if (hTut.tot > 200 && Number.isFinite(sigmaGrezzo) && sigmaGrezzo > 0) {
+        const limite = sigmaGrezzo * 3;
+        let sopra = 0;
+        for (let i = 0; i < hTut.n; i++) {
+          const centro = hTut.min + (i + 0.5) * (hTut.max - hTut.min) / hTut.n;
+          if (centro > limite) sopra += hTut.bin[i];
+        }
+        inMov = sopra / hTut.tot;
+      }
       if (inMov > 0.05) {
         const quiete = 1 - inMov;
         // Si resta ben dentro la parte quieta, con margine.
@@ -697,7 +739,27 @@ export class SessionStats {
       }
     }
 
-    return { ok: true, affidabilita, minuti: Math.round(minuti), proposta: p, motivi, avvisi, riepilogo: r };
+    /* ══════════════════════════════════════════════════════════════
+     * LA PROPOSTA SI ACCUMULA, NON SI SOSTITUISCE
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Ogni analisi restituiva solo i parametri che quel momento
+     * poteva stimare. Osservando più a lungo, alcuni sparivano — e chi
+     * assiste non poteva più applicare ciò che il programma aveva
+     * proposto poco prima. Un consiglio che scompare mentre lo si
+     * legge non è un consiglio.
+     *
+     * Ora si conserva tutto ciò che è stato misurato durante la
+     * sessione: i valori nuovi sostituiscono i vecchi dello stesso
+     * parametro — sono più informati — ma nulla viene mai tolto.
+     */
+    this._propostaCum = { ...(this._propostaCum || {}), ...p };
+    const completa = { ...this._propostaCum };
+
+    return {
+      ok: true, affidabilita, minuti: Math.round(minuti),
+      proposta: completa, motivi, avvisi, riepilogo: r,
+    };
   }
 
   /* -------------------------------- Scambio -------------------------------- */

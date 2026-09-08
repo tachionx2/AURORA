@@ -1386,5 +1386,69 @@ app.goto('parla');
   ok(/\.combo-nome\{/.test(cssG), 'con uno stile proprio per il nome');
 }
 
+/* ═══════ Un comando deve esistere, non solo il metodo che lo esegue ═══════
+ *
+ * ⚠️ Il ritorno ai valori predefiniti era stato scritto come metodo,
+ * ma il PULSANTE che lo chiama non era mai finito nella pagina: una
+ * sostituzione automatica non aveva agganciato, e nessuno se n'era
+ * accorto perché il codice compilava e i test passavano.
+ *
+ * Un metodo senza comando che lo invochi è codice morto — e per chi
+ * usa il programma è una funzione che semplicemente non c'è.        */
+{
+  const fsR = await import('node:fs');
+  const pathR = await import('node:path');
+  const quiR = pathR.dirname(import.meta.filename || process.argv[1]);
+  const svR = fsR.readFileSync(pathR.join(quiR, '..', 'js/ui/SettingsView.js'), 'utf8');
+  const htmlR = fsR.readFileSync(pathR.join(quiR, '..', 'index.html'), 'utf8');
+  const mainR = fsR.readFileSync(pathR.join(quiR, '..', 'js/main.js'), 'utf8');
+
+  ok(/_ripristinaFiltri\(\)\s*\{/.test(svR), 'il ritorno ai valori predefiniti esiste come metodo');
+  ok(/this\._ripristinaFiltri\(\)/.test(svR),
+     'ed è invocato da un comando nelle impostazioni, non solo definito');
+  ok(/Riporta filtri e soglie ai valori predefiniti/.test(svR),
+     'con un\'etichetta che dice cosa fa');
+
+  ok(/id="btnDiagReset"/.test(htmlR),
+     'lo stesso comando è raggiungibile anche dalla diagnostica');
+  ok(/btnDiagReset/.test(mainR), 'ed è collegato');
+  ok(/settingsView\._ripristinaFiltri\(\)/.test(mainR),
+     'e chiama lo stesso metodo, non una copia che potrebbe divergere');
+
+  /* ⚠️ OGNI parametro che la diagnostica può proporre deve essere
+   * anche ripristinabile.
+   *
+   * Erano tredici i proponibili e sei i ripristinabili: sette
+   * regolazioni restavano incastrate sui valori applicati senza modo
+   * di tornare indietro. La lista era scritta a mano ed era divenuta
+   * incoerente in silenzio. */
+  const i = svR.indexOf('_viePrestazioni()');
+  const corpo = svR.slice(i, svR.indexOf('_ripristinaFiltri()', i));
+  const vie = [...corpo.matchAll(/'([\w.]+)'/g)].map(m => m[1]);
+  ok(vie.length >= 20, `riporta a posto tutti i parametri di prestazione (${vie.length})`);
+  ok(vie.every(v => v.startsWith('signal.') || v.startsWith('detection.') || v.startsWith('gestures.')),
+     'tocca solo filtri, soglie e durate — non lingua, gruppi o destinatari');
+
+  const statsR = fsR.readFileSync(pathR.join(quiR, '..', 'js/signal/SessionStats.js'), 'utf8');
+  const proponibili = [...new Set([...statsR.matchAll(/p\['([\w.]+)'\]/g)].map(m => m[1]))];
+  const nonRipristinabili = proponibili.filter(k => !vie.includes(k));
+  ok(nonRipristinabili.length === 0,
+     `ogni parametro proponibile è anche ripristinabile (mancano: ${nonRipristinabili.join(', ') || 'nessuno'})`);
+
+  /* ⚠️ E i valori si leggono dai PREDEFINITI, non scritti a mano:
+   * scritti a mano divergono, ed erano già divergenti — il ripristino
+   * riportava il passa-basso a 3,5 quando il predefinito è 1,5. */
+  ok(/let n = DEFAULT_CONFIG/.test(svR),
+     'i valori del ripristino si leggono dai predefiniti, non sono scritti a mano');
+  const { DEFAULT_CONFIG: DCR } = await import('../js/core/config.js');
+  const inesistenti = vie.filter(v => {
+    let n = DCR;
+    for (const k of v.split('.')) n = n?.[k];
+    return n === undefined;
+  });
+  ok(inesistenti.length === 0,
+     `ogni via elencata esiste davvero (inesistenti: ${inesistenti.join(', ') || 'nessuna'})`);
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);
