@@ -1,0 +1,4 @@
+D:\MyDownloads\AURORA>certutil -hashfile aurora_ghit_v45.zip SHA256
+SHA256 hash of aurora_ghit_v45.zip:
+ed8db555e0fd5e8243cd4505e62f6342140a27f6f6ea604e260361917f8d4265
+CertUtil: -hashfile command completed successfully.
