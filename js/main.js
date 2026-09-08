@@ -880,6 +880,21 @@ class App {
       + ` | guadagno occhi ${s.gainEye?.left}/${s.gainEye?.right}`
       + ` | confidenza min ${d.minConfidence}`
       + ` | tau baseline ${s.baselineTauSec}s`);
+
+    /* ⚠️ E i valori PER OCCHIO, separatamente.
+     *
+     * Senza, leggendo il registro non si distingue una taratura
+     * comune da una separata, e non si capisce se l'applicazione ha
+     * davvero toccato entrambi gli occhi. */
+    for (const eye of ['left', 'right']) {
+      const v = s.perOcchio?.[eye];
+      const nome = eye === 'left' ? 'SX' : 'DX';
+      const voci = v && Object.keys(v).length
+        ? Object.entries(v).map(([k, x]) => `${k}=${x}`).join(' ')
+        : '(usa i valori generali)';
+      console.warn(`[aurora/AZIONE]   occhio ${nome}: ${voci}`
+        + ` | guadagno ${s.gainEye?.[eye] ?? 1}`);
+    }
   }
 
   registroConsole(now) {

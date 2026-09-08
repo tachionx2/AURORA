@@ -918,6 +918,45 @@ export class GestureEngine {
           if (sE.sigmaFinestraMs) A.base.scala.windowMs = sE.sigmaFinestraMs;
           if (sE.minSigma) A.base.scala.minSigma = sE.minSigma;
         }
+        /* ══════════════════════════════════════════════════════════
+         * IL RUMORE NON SI MISURA DENTRO IL GESTO
+         * ══════════════════════════════════════════════════════════
+         *
+         * ⚠️ È la causa che ha attraversato tutto questo progetto, e
+         * il registro di una sessione reale la mostra riga per riga:
+         *
+         *   16s  σ 0,0173/0,0136  n 5,7σ/4,7σ  congelati SXDX
+         *   36s  σ 0,0177/0,0460  n 7,2σ/1,9σ  congelati SX--
+         *  175s  σ 0,0125/0,1013  n 12,0σ/0,7σ congelati SX--
+         *
+         * Il destro scende sotto soglia UNA VOLTA. Da quel momento non
+         * si aggancia, quindi non viene congelato, quindi i suoi
+         * campioni di GESTO entrano nella stima del rumore, che cresce,
+         * e allora si aggancia ancora meno. Il sinistro non ci cade
+         * mai e migliora. Affoga da solo, senza che nessuno lo spinga.
+         *
+         * L'errore stava nel legare l'esclusione al RICONOSCIMENTO:
+         * "escludi i campioni del gesto" diventava "escludi i campioni
+         * dei gesti che sono riusciti a superare una soglia che dipende
+         * da ciò che sto stimando". Un cane che si morde la coda.
+         *
+         * Qui si esclude in base al MOVIMENTO, misurato sull'escursione
+         * grezza — che non dipende né dalla baseline né da sigma. Un
+         * campione lontano dal riposo più di un terzo dell'escursione
+         * è dentro un gesto, che il programma l'abbia riconosciuto o no.
+         *
+         * ⚠️ Si congela SOLO la stima del rumore, non la baseline: la
+         * baseline ha il proprio meccanismo, e i due non devono
+         * contendersi il congelamento. Provato: si scongelavano a
+         * vicenda e il risultato era peggiore di entrambi.
+         */
+        if (A.escursioneGrezza > 0 && A.rumoreVeloce > 0
+            && A.escursioneGrezza > 8 * A.rumoreVeloce) {
+          const dentroGesto = Math.abs(A.smooth - (A.baseline ?? A.smooth))
+            > 0.35 * A.escursioneGrezza;
+          A.base.congelaScala(dentroGesto);
+        }
+
         const b = A.base.push(t, A.smooth);
         A.baseline = b.baseline;
 

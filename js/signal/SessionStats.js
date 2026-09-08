@@ -609,13 +609,53 @@ export class SessionStats {
         const gD = Math.round(Math.min(4, forte / aD) * 100) / 100;
         // Si propone solo se lo squilibrio è reale: correggere il 5%
         // aggiungerebbe un parametro senza cambiare nulla.
-        if (Math.max(gS, gD) > 1.15) {
-          p['signal.gainEye'] = { left: gS, right: gD };
+        /* ══════════════════════════════════════════════════════════
+         * IL GUADAGNO PORTA IL GESTO DOVE LA SOGLIA LO VEDE
+         * ══════════════════════════════════════════════════════════
+         *
+         * ⚠️ Pareggiare i due occhi non basta: se ENTRAMBI restano
+         * bassi rispetto alla soglia, il gesto non si aggancia, quindi
+         * non viene escluso dalla stima del rumore, quindi la stima
+         * cresce e il gesto scende ancora. Chi usa il programma se n'è
+         * accorto da solo alzando il guadagno a 10: di colpo tutto
+         * funzionava. Non era un trucco — era l'uscita dal circolo.
+         *
+         * Il guadagno non cambia il rapporto fra gesto e rumore: li
+         * moltiplica entrambi. Ma sposta il gesto SOPRA la soglia, e da
+         * lì il meccanismo di esclusione riparte e la stima si ripulisce.
+         *
+         * Si calcola quindi il fattore che porta il gesto a circa tre
+         * volte la soglia di attivazione — abbastanza sopra da
+         * agganciarsi con margine, non tanto da rendere ogni sussulto
+         * un comando.
+         */
+        const sogliaAtt = p['signal.thresholdOn'] ?? 3.5;
+        const perPortare = (lato) => {
+          const hR2 = this.grezzoRiposo[lato], hT2 = this.grezzoTutti[lato];
+          if (!hR2 || hR2.tot < 300 || !hT2 || hT2.tot < 400) return 1;
+          const sg = Math.max(1e-6, 1.4826 * hR2.percentile(0.25) * 1.577);
+          const gesto = hT2.percentile(0.97) / sg;      // gesto, in sigma
+          if (!(gesto > 0.2)) return 1;
+          return clamp(Math.round((sogliaAtt * 3 / gesto) * 100) / 100, 1, 12);
+        };
+        const kS = perPortare('left'), kD = perPortare('right');
+        const gainS = Math.round(Math.min(12, gS * kS) * 100) / 100;
+        const gainD = Math.round(Math.min(12, gD * kD) * 100) / 100;
+
+        if (Math.max(gainS, gainD) > 1.15) {
+          p['signal.gainEye'] = { left: gainS, right: gainD };
+          if (kS > 1.2 || kD > 1.2) {
+            motivi.push(
+              `il gesto arriva a poche volte la soglia: si alza il guadagno `
+              + `(×${kS.toFixed(1)} a sinistra, ×${kD.toFixed(1)} a destra) per portarlo `
+              + `ben sopra — sotto soglia il gesto non viene riconosciuto, quindi non `
+              + `viene escluso dalla stima del rumore, che cresce e lo abbassa ancora`);
+          }
           const debole = aS < aD ? 'sinistro' : 'destro';
           motivi.push(
             `l'occhio ${debole} misura il ${(100 * Math.min(aS, aD) / forte).toFixed(0)}% dell'altro `
-            + `a parità di movimento: si propone un guadagno che li pareggia `
-            + `(${gS.toFixed(2)} e ${gD.toFixed(2)})`);
+            + `a parità di movimento: il guadagno li pareggia `
+            + `(${gainS.toFixed(2)} e ${gainD.toFixed(2)})`);
         }
       }
     }
@@ -648,7 +688,15 @@ export class SessionStats {
       if (inMov > 0.05) {
         const quiete = 1 - inMov;
         // Si resta ben dentro la parte quieta, con margine.
-        const percCons = clamp(Math.round(quiete * 0.6 * 100) / 100, 0.10, 0.40);
+        /* ⚠️ MAI sopra 0,25, che è il predefinito.
+         *
+         * La formula arrivava a proporre 0,40 quando misurava poco
+         * movimento — ed è il valore FRAGILE, quello che regge solo il
+         * 40% di tempo in movimento. Nel registro di una sessione
+         * reale, dopo averlo applicato entrambi gli occhi sono
+         * crollati. Un consiglio non deve mai peggiorare la
+         * configurazione di partenza. */
+        const percCons = clamp(Math.round(quiete * 0.6 * 100) / 100, 0.10, 0.25);
         p['signal.sigmaPercentile'] = percCons;
         // La ritaratura è legata al percentile: sono una coppia.
         p['signal.sigmaRitaratura'] = Math.round((0.40 / percCons) * 0.985 * 100) / 100;
@@ -781,7 +829,8 @@ export class SessionStats {
         const movE = sopra / hT.tot;
         if (movE > 0.05) {
           const quiete = 1 - movE;
-          const pc = clamp(Math.round(quiete * 0.6 * 100) / 100, 0.10, 0.40);
+          // Mai sopra il predefinito: vedi sopra.
+          const pc = clamp(Math.round(quiete * 0.6 * 100) / 100, 0.10, 0.25);
           voci.sigmaPercentile = pc;
           voci.sigmaRitaratura = Math.round((0.40 / pc) * 0.985 * 100) / 100;
         }
