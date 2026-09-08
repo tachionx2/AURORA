@@ -2789,5 +2789,110 @@ function corri(mod, script) {
   ok(/Escursione apertura SX \/ DX/.test(pan), '57g. insieme a quella dell apertura');
 }
 
+/* ══════ 58. Quiete misurata in unità ASSOLUTE ══════
+ *
+ * ⚠️ La causa del segnale che si spegneva nel tempo, misurata su dati
+ * reali forniti dall'uso.
+ *
+ * Baseline e stima del rumore presuppongono entrambe che la persona
+ * stia ferma la maggior parte del tempo. In una sessione di prova —
+ * dove si ripete lo stesso gesto per minuti — non è così: la baseline
+ * scivolava al 58% dentro il gesto e il rumore stimato diventava
+ * GRANDE QUANTO IL GESTO (0,1475 contro un tremore vero di 0,0150).
+ * Il gesto finiva a 0,2σ.
+ *
+ * Proteggerle con una soglia in sigma non funziona: se sigma è
+ * gonfiato, la soglia si gonfia con lui e non scatta mai. Si usa
+ * quindi l'escursione grezza, che non dipende né dalla baseline né da
+ * sigma.                                                             */
+{
+  function ripetuti(attiva, duty) {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.signal.quieteAssoluta = attiva;
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.015 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.008 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const riposo = Math.round(1400 * (1 - duty) / duty);
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); } };
+    d(20000);
+    let p = 0;
+    for (let k = 0; k < 40; k++) {
+      p = 0;
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(-0.17 * i / 250), right: o(-0.17 * i / 250) }); }
+      for (let i = 0; i < 900; i += 33) {
+        t += 33; g.process(t, { left: o(-0.17), right: o(-0.17) });
+        const ch = g.channels()['left.up']; if (ch) p = Math.max(p, ch.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(-0.17 * (1 - i / 250)), right: o(-0.17 * (1 - i / 250)) }); }
+      d(riposo);
+    }
+    return { p, sigma: g.eyes.left.y.sigma, baseline: g.eyes.left.y.baseline };
+  }
+
+  for (const duty of [0.50, 0.65]) {
+    const r = ripetuti(true, duty);
+    ok(Math.abs(r.baseline) < 0.02,
+       `58a. con gesti al ${(duty * 100).toFixed(0)}% la baseline resta al riposo (${r.baseline.toFixed(4)}, non dentro il gesto)`);
+    ok(r.sigma < 0.02,
+       `58b. e il rumore stimato resta il rumore, non il gesto (${r.sigma.toFixed(4)})`);
+    ok(r.p > 10, `58c. il gesto resta ben rilevabile (${r.p.toFixed(1)}σ)`);
+  }
+
+  /* ⚠️ E con il SOLO rumore la protezione NON deve scattare.
+   *
+   * Con un tremore lento il confronto passa-passo lo sottostima,
+   * l'escursione sembra un gesto, e baseline e stima resterebbero
+   * congelate su rumore puro — il modo più diretto per riempire il
+   * programma di comandi involontari. */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const o = () => ({ x: 0, y: 0.030 * Math.sin(2 * Math.PI * 0.8 * t / 1000), openness: 0.44, confidence: 0.97 });
+    for (let i = 0; i < 4000; i++) { t += 33; g.process(t, { left: o(), right: o() }); }
+    ok(g.eyes.left.y.sigma > 0.01,
+       `58d. con il solo rumore la stima resta viva (${g.eyes.left.y.sigma.toFixed(5)}, non congelata al minimo)`);
+  }
+
+  /* La protezione non deve aggiungere comandi involontari. */
+  const falsi = (attiva) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.signal.quieteAssoluta = attiva;
+    const ev = []; const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.021 * Math.sin(2 * Math.PI * 4.2 * x / 1000)
+                   + 0.012 * Math.sin(2 * Math.PI * 1.9 * x / 1000 + 2.2)
+                   + 0.008 * Math.sin(2 * Math.PI * 7.7 * x / 1000);
+    const o = () => ({ x: 0, y: R(t), openness: 0.44, confidence: 0.97 });
+    for (let i = 0; i < 4 * 60 * 30; i++) { t += 33; g.process(t, { left: o(), right: o() }); }
+    return ev.length / 4;
+  };
+  const fCon = falsi(true), fSenza = falsi(false);
+  ok(fCon <= fSenza + 0.1,
+     `58e. e non aggiunge falsi comandi (${fCon.toFixed(2)} contro ${fSenza.toFixed(2)} al minuto)`);
+
+  /* Il riferimento immune ai gesti dev'essere misurato. */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    g.setDiagnostics(true);
+    let t = 0;
+    const o = (y) => ({ x: 0, y: y + 0.010 * Math.sin(2 * Math.PI * 4.2 * t / 1000), openness: 0.44, confidence: 0.97 });
+    for (let i = 0; i < 600; i++) { t += 33; g.process(t, { left: o(0), right: o(0) }); }
+    const soloRumore = g.eyes.left.y.rumoreVeloce;
+    for (let k = 0; k < 10; k++) {
+      for (let i = 0; i < 900; i += 33) { t += 33; g.process(t, { left: o(-0.17), right: o(-0.17) }); }
+      for (let i = 0; i < 900; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); }
+    }
+    ok(Number.isFinite(soloRumore) && soloRumore > 0,
+       `58f. il rumore veloce viene misurato (${soloRumore?.toFixed(5)})`);
+    ok(Math.abs(g.eyes.left.y.rumoreVeloce / soloRumore - 1) < 0.6,
+       `58g. e i gesti quasi non lo toccano (${soloRumore?.toFixed(5)} → ${g.eyes.left.y.rumoreVeloce?.toFixed(5)})`);
+  }
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

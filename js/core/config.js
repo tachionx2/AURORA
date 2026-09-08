@@ -304,6 +304,49 @@ export const DEFAULT_CONFIG = {
      * livello. La diagnostica lo misura sul segnale grezzo e lo
      * propone. A 1 non cambia nulla. */
     gainEye: { left: 1, right: 1 },
+    /* ⚠️ Quiete misurata in unità ASSOLUTE, non in multipli del rumore.
+     *
+     * Baseline e stima del rumore presuppongono che la persona stia
+     * ferma la maggior parte del tempo. In una sessione di prova, dove
+     * si ripete lo stesso gesto per minuti, non è così: misurato su
+     * dati reali, la baseline scivolava al 58% dentro il gesto e il
+     * rumore stimato diventava grande quanto il gesto stesso.
+     *
+     * Proteggerle con una soglia in sigma non funziona: se sigma è
+     * gonfiato, la soglia si gonfia con lui. Si usa quindi l'escursione
+     * grezza — quanto il segnale si muove davvero — che non dipende né
+     * dalla baseline né da sigma. */
+    /* ⚠️ SPENTA di default, dopo averla misurata sul caso reale.
+     *
+     * L'idea era giusta e i test di laboratorio la promuovevano. Ma
+     * sulla configurazione che riproduce i dati veri — gesti dal primo
+     * istante e poca quiete fra l'uno e l'altro — peggiorava tutto in
+     * modo drastico: rumore stimato da 0,0076 a 0,1592 e ampiezza da
+     * 22,5σ a 0,5σ.
+     *
+     * Il motivo è che entra in conflitto con il congelamento legato
+     * all'aggancio del gesto: i due meccanismi si scongelano a
+     * vicenda, e i campioni del gesto finiscono nella stima proprio
+     * quando dovrebbero esserne esclusi.
+     *
+     * Resta accendibile per poterla studiare, ma non va usata finché
+     * quel conflitto non è risolto. La lezione, l'ennesima: un
+     * miglioramento che i test approvano va comunque provato sulla
+     * configurazione che riproduce i dati veri. */
+    quieteAssoluta: false,
+    quieteFrazione: 0.25,
+    /* ⚠️ Quante volte il rumore veloce deve valere l'escursione perché
+     * si possa dire che ci sono gesti veri da proteggere.
+     *
+     * Tarato misurando. Sotto 8 la protezione scattava anche col solo
+     * rumore: con un tremore lento il confronto passa-passo lo
+     * sottostima, l'escursione sembra un gesto, e baseline e stima
+     * restavano congelate su rumore puro — il modo più diretto per
+     * riempire il programma di comandi involontari.
+     *
+     * A 12 il rumore resta intatto (0,0224) e i gesti restano
+     * protetti. */
+    quieteMinRapporto: 12,
     /* ── Quali canali sommare nel canale combinato ──
      *
      * Un solo movimento volontario produce spesso più segnali insieme:
@@ -898,6 +941,10 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 35 && c.signal && c.signal.quieteAssoluta === undefined) {
+    c.signal.quieteAssoluta = true;
+    c.signal.quieteFrazione = 0.25;
+  }
   if (v < 35 && c.signal && !c.signal.gainEye) c.signal.gainEye = { left: 1, right: 1 };
   if (v < 34) {
     if (c.gestures && !c.gestures.COMBO) {

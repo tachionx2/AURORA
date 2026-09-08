@@ -629,6 +629,34 @@ export class GestureEngine {
          * Se resta costante mentre l'ampiezza in sigma cala, il
          * movimento è identico e il problema sta nella stima del
          * rumore. Se cala anche questa, è il rilevamento. */
+        /* ⚠️ RUMORE VELOCE: il riferimento immune ai gesti.
+         *
+         * Serve a sapere se ci sono gesti in corso, e non può basarsi
+         * su sigma — che quando è gonfiato è proprio il problema da
+         * riconoscere.
+         *
+         * Il rumore cambia in fretta fra un fotogramma e il successivo;
+         * un gesto che dura un secondo quasi non si muove nello stesso
+         * intervallo. Guardando le differenze passo-passo si misura
+         * quindi il rumore e basta.
+         *
+         * ⚠️ Da NON usare come sigma: non vede il tremore lento, e
+         * usarlo per normalizzare riempirebbe il programma di comandi
+         * involontari — misurato, quarantuno al minuto. Qui serve solo
+         * a dare la scala del rumore, e per quello è perfetto. */
+        if (Number.isFinite(A.raw)) {
+          if (A._grezzoPrec != null) {
+            A.diffStoria = A.diffStoria || [];
+            A.diffStoria.push(Math.abs(A.raw - A._grezzoPrec));
+            if (A.diffStoria.length > 300) A.diffStoria.shift();
+            if (A.diffStoria.length >= 30) {
+              const od = [...A.diffStoria].sort((p, q) => p - q);
+              A.rumoreVeloce = (od[od.length >> 1] / (Math.SQRT2 * 0.6745)) * 1.238;
+            }
+          }
+          A._grezzoPrec = A.raw;
+        }
+
         A.storiaGrezza = A.storiaGrezza || [];
         if (Number.isFinite(A.raw)) {
           A.storiaGrezza.push(A.raw);
@@ -638,8 +666,38 @@ export class GestureEngine {
             const q = (f) => ord[Math.min(ord.length - 1, Math.floor(ord.length * f))];
             // Riposo = mediana; picco = 97° percentile in valore assoluto
             // rispetto al riposo, così vale in entrambe le direzioni.
-            const riposo = q(0.5);
-            const scarti = ord.map(v => Math.abs(v - riposo)).sort((p, r) => p - r);
+            /* ⚠️ Il riposo è la MODA, non la mediana.
+             *
+             * La mediana presuppone che la persona stia ferma più di
+             * metà del tempo. In una sessione di prova non è così, e
+             * allora la mediana cade DENTRO il gesto: la baseline si
+             * ancora lì e il gesto sparisce.
+             *
+             * La moda — il valore attorno a cui il segnale si
+             * addensa di più — resta il riposo anche quando i gesti
+             * occupano la maggior parte del tempo, perché a riposo
+             * l'occhio è fermo mentre durante il gesto attraversa
+             * molti valori diversi. */
+            const lo = ord[0], hi = ord[ord.length - 1];
+            let riposo = q(0.5);
+            if (hi - lo > 1e-6) {
+              const NB = 40;
+              const bin = new Array(NB).fill(0);
+              for (const v of ord) {
+                const i2 = Math.min(NB - 1, Math.floor((v - lo) / (hi - lo) * NB));
+                bin[i2]++;
+              }
+              let best = 0;
+              for (let i2 = 1; i2 < NB; i2++) if (bin[i2] > bin[best]) best = i2;
+              riposo = lo + (best + 0.5) * (hi - lo) / NB;
+            }
+            /* La MODA serve a decidere dov'è il riposo; l'ESCURSIONE
+             * si misura invece dalla mediana, che è più stabile e non
+             * dipende da come sono distribuiti i valori. Sono due
+             * domande diverse e vogliono due statistiche diverse. */
+            A.riposoStimato = riposo;
+            const mediana = q(0.5);
+            const scarti = ord.map(v => Math.abs(v - mediana)).sort((p, r) => p - r);
             A.escursioneGrezza = scarti[Math.floor(scarti.length * 0.97)];
           }
         }
@@ -683,6 +741,108 @@ export class GestureEngine {
          * scivolata, la telecamera urtata — terrebbe la baseline
          * congelata per sempre, e il segnale resterebbe spostato.
          */
+        /* ══════════════════════════════════════════════════════════
+         * QUIETE MISURATA IN UNITÀ ASSOLUTE
+         * ══════════════════════════════════════════════════════════
+         *
+         * ⚠️ La causa vera del segnale che si spegneva nel tempo.
+         *
+         * Baseline e stima del rumore presuppongono entrambe che la
+         * persona stia ferma la maggior parte del tempo. In una
+         * sessione di prova — dove si ripete lo stesso gesto per
+         * minuti — non è così: misurato su dati reali, la baseline
+         * scivolava al 58% dentro il gesto e il rumore stimato
+         * diventava GRANDE QUANTO IL GESTO (0,1475 contro un tremore
+         * vero di 0,0150, dieci volte meno). Il gesto finiva a 0,2σ.
+         *
+         * Proteggerle con una soglia in sigma non funziona: se sigma è
+         * gonfiato, la soglia si gonfia con lui e non scatta mai. È
+         * l'anello che ha resistito per giorni.
+         *
+         * Si esce usando un metro che NON dipende né dalla baseline né
+         * da sigma: l'escursione grezza, cioè quanto il segnale si
+         * muove davvero, misurata per percentili sugli ultimi dieci
+         * secondi. Un quarto di quella escursione è ben sopra il
+         * tremore e ben sotto il gesto, sempre, quale che sia la
+         * persona o la telecamera.
+         */
+        /* ⚠️ La protezione si applica SOLO se ci sono gesti veri.
+         *
+         * Con il solo rumore, l'escursione misura il rumore stesso: il
+         * limite diventerebbe una frazione del rumore, il segnale lo
+         * supererebbe di continuo, baseline e stima resterebbero
+         * congelate e il programma scriverebbe da solo — misurato,
+         * quarantasette comandi involontari al minuto.
+         *
+         * Un gesto vero è molte volte il rumore veloce. Se non lo è,
+         * non c'è nulla da proteggere. */
+        const ci_sono_gesti = A.escursioneGrezza > 0 && A.rumoreVeloce > 0
+          && A.escursioneGrezza > (s.quieteMinRapporto ?? 4) * A.rumoreVeloce;
+        /* ⚠️ Durante un gesto RICONOSCIUTO questo criterio si tira
+         * indietro.
+         *
+         * Ha un tetto di venti secondi, giusto per non restare
+         * congelato su una deriva vera. Ma chi tiene l'occhio alzato
+         * più a lungo — trentacinque secondi, per riposare o per
+         * pensare — si vedrebbe scongelare la baseline a metà gesto e
+         * il segnale calare sotto i piedi. L'aggancio del gesto sa già
+         * distinguere una tenuta da una deriva, e per quel caso è il
+         * meccanismo giusto. */
+        const agganciato = A.hyst && Object.values(A.hyst).some(h => h && h.active);
+        if (s.quieteAssoluta !== false && ci_sono_gesti && !agganciato) {
+          // Mai sotto il rumore veloce: sotto quella soglia non si
+          // distingue un movimento da un sussulto.
+          const limite = Math.max(
+            (s.quieteFrazione ?? 0.25) * A.escursioneGrezza,
+            2.5 * A.rumoreVeloce,
+          );
+          /* ⚠️ La quiete si giudica rispetto al RIPOSO STIMATO, non
+           * alla baseline.
+           *
+           * Giudicarla sulla baseline è circolare: se la baseline si è
+           * ancorata dentro il gesto — cosa che accade partendo con la
+           * persona già in movimento — allora "essere vicini alla
+           * baseline" significa "essere dentro il gesto", e il
+           * congelamento la inchioda lì per sempre. Il gesto scompare:
+           * misurato, 0,3σ.
+           *
+           * Il riposo stimato viene invece dalla forma del segnale e
+           * non da ciò che il programma ha già deciso. */
+          const rif = Number.isFinite(A.riposoStimato) ? A.riposoStimato : (A.baseline ?? A.smooth);
+          const fuoriQuiete = Math.abs(A.smooth - rif) > limite;
+
+          /* ⚠️ NIENTE riancoraggio della baseline al riposo stimato.
+           *
+           * Sembrava il completamento naturale — se la baseline si è
+           * allontanata, riportarla — e invece distrugge le tenute
+           * lunghe: chi tiene l'occhio alzato dodici secondi vede
+           * quella posizione diventare la moda del segnale, la
+           * baseline la insegue e il gesto sparisce. Misurato: da
+           * 10,5σ a 0,4σ, ventisette verifiche cadute.
+           *
+           * Il riposo stimato serve solo a DECIDERE se c'è quiete, e
+           * per quello è affidabile; spostare la baseline resta
+           * compito del congelamento, che sa distinguere una tenuta
+           * da una deriva. */
+          if (fuoriQuiete) {
+            if (A._quieteDa == null) A._quieteDa = t;
+            /* ⚠️ Con un tetto: una deriva vera — la testa scivolata, la
+             * telecamera urtata — resterebbe altrimenti fuori quiete
+             * per sempre e il segnale non tornerebbe mai a posto. */
+            if (t - A._quieteDa < (s.baselineFreezeMaxMs || 20000)) {
+              A.base.freeze();
+              A.base.congelaScala(true);
+            } else {
+              A.base.release();
+              A.base.congelaScala(false);
+            }
+          } else {
+            A._quieteDa = null;
+            A.base.release();
+            A.base.congelaScala(false);
+          }
+        }
+
         if (s.baselineFreezeDuringGesture) {
           const rap = Math.abs(A.disp) / Math.max(1e-9, A.sigma);
           const agganciato = A.hyst

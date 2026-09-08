@@ -861,6 +861,27 @@ class App {
    * momento in cui il problema accade. Con questi si converge in un
    * giro invece che in dieci.
    */
+  /**
+   * Scrive nel registro un'AZIONE dell'assistente, con i parametri
+   * che contano.
+   *
+   * ⚠️ Senza questo, leggendo il registro non si capisce se un cambio
+   * improvviso è colpa del segnale o di un pulsante premuto. Le due
+   * cose vanno distinte, altrimenti si cerca nel posto sbagliato.
+   */
+  registraAzione(cosa) {
+    if (!this.cfg.debug?.console) return;
+    const s = this.cfg.signal, d = this.cfg.detection;
+    console.warn(`[aurora/AZIONE] ${cosa}`
+      + ` | soglie ${s.thresholdOn}/${s.thresholdOff}`
+      + ` | mediana ${s.medianWindowMs}ms passa-basso ${s.lowPassHz}Hz`
+      + ` | sigma perc ${s.sigmaPercentile} ritar ${s.sigmaRitaratura}`
+      + ` | quiete ${s.quieteAssoluta ? s.quieteFrazione : 'spenta'}`
+      + ` | guadagno occhi ${s.gainEye?.left}/${s.gainEye?.right}`
+      + ` | confidenza min ${d.minConfidence}`
+      + ` | tau baseline ${s.baselineTauSec}s`);
+  }
+
   registroConsole(now) {
     const d = this.cfg.debug;
     if (!d?.console) return;
@@ -906,6 +927,8 @@ class App {
       + ` | video ${v ? `t=${f(v.currentTime, 2)}s rs=${v.readyState} ${v.paused ? 'FERMO' : 'va'}` : 'assente'}`
       + ` | bloccati ${src?.bloccati ?? 0} riprese ${src?.riprese ?? 0} errori ${src?.errori ?? 0}`
       + ` | fps ${f(this.vision?.fps, 1)}`
+      + ` | escursione ${f(this.gestures?.eyes?.left?.y?.escursioneGrezza, 4)}/${f(this.gestures?.eyes?.right?.y?.escursioneGrezza, 4)}`
+      + ` | rumore veloce ${f(this.gestures?.eyes?.left?.y?.rumoreVeloce, 4)}/${f(this.gestures?.eyes?.right?.y?.rumoreVeloce, 4)}`
       + ` | scheda ${document.body.dataset.tab}`
     );
   }
@@ -3158,6 +3181,7 @@ class App {
       const undo = document.getElementById('btnDiagUndo');
       if (undo) undo.disabled = false;
       this.settingsView.render();
+      this.registraAzione(`APPLICATI ${voci.length} parametri consigliati`);
       this.toast(`Applicati ${voci.length} parametri — puoi ripristinarli per confrontare`);
       p.motivi.forEach(m => this.debugView.logEvent('diagnostica: ' + m));
     };
@@ -3261,6 +3285,7 @@ class App {
     if (brs) brs.onclick = () => {
       if (!confirm('Riportare filtri e soglie ai valori predefiniti?\n\nLe altre impostazioni non vengono toccate.')) return;
       this.settingsView._ripristinaFiltri();
+      this.registraAzione('RIPRISTINO ai valori predefiniti');
       this.toast('Filtri e soglie riportati ai valori predefiniti');
       this.debugView?.logEvent('filtri riportati ai predefiniti');
     };
@@ -3283,9 +3308,24 @@ class App {
       this.plot?.clear();
       this.renderDiagStats?.();
       this.debugView?.renderCounters?.();
+      this.registraAzione('NUOVA SESSIONE');
       this.toast('Sessione azzerata: si riparte da zero');
       this.debugView?.logEvent('sessione azzerata');
     };
+
+    /* Registro in console, accendibile senza uscire da qui.
+     * Serve a poter copiare i numeri invece di trascriverli a mano. */
+    const clog = document.getElementById('chkDiagLog');
+    if (clog) {
+      clog.checked = !!this.cfg.debug?.console;
+      clog.onchange = () => {
+        this.set('debug.console', clog.checked);
+        this.toast(clog.checked
+          ? 'Registro acceso: apri la console con F12'
+          : 'Registro spento');
+        if (clog.checked) this.registraAzione('registro acceso');
+      };
+    }
 
     const bat = document.getElementById('btnAutoTune');
     if (bat) bat.onclick = () => this.avviaTaraturaAutomatica();

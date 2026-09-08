@@ -377,6 +377,12 @@
          senza toccare le impostazioni. Sono due cose diverse e vanno
          tenute separate. -->
     <button class="btn btn-sm btn-danger" id="btnNuovaSessione" data-i18n="btn.nuovaSessione">Nuova sessione</button>
+    <!-- Registro in console: accendibile senza uscire dalla diagnostica,
+         così i numeri si possono copiare invece di trascriverli. -->
+    <label class="switch switch-inline" for="chkDiagLog" title="Scrive tutti i valori nella console del browser (F12)">
+      <input type="checkbox" id="chkDiagLog"><span></span>
+      <em data-i18n="diag.log">Registro in console</em>
+    </label>
     <label class="switch switch-inline" for="chkDiagAlways" title="Continua a misurare anche quando questa scheda non è aperta">
       <input type="checkbox" id="chkDiagAlways"><span></span>
       <em data-i18n="diag.always">Misura sempre</em>
