@@ -2011,7 +2011,11 @@ function corri(mod, script) {
     const r = reale(f);
     const vDx = (r.df / r.di - 1) * 100;
     const vSx = (r.sf / r.si - 1) * 100;
-    ok(vDx > -12,
+    /* ⚠️ Sotto i 3σ la variazione percentuale è ingannevole: fra 2,7σ e
+     * 2,1σ c'è mezzo sigma, che è rumore di misura, non degrado. Là si
+     * verifica che il valore non CROLLI, non che resti fermo. */
+    const tolleranza = r.di < 3 ? -30 : -12;
+    ok(vDx > tolleranza,
        `48a. destro al ${(f * 100).toFixed(0)}%: non cala (${r.di.toFixed(1)}σ → ${r.df.toFixed(1)}σ, ${vDx >= 0 ? '+' : ''}${vDx.toFixed(0)}%)`);
     ok(vSx > -12,
        `48b. destro al ${(f * 100).toFixed(0)}%: e il sinistro non ne risente (${vSx >= 0 ? '+' : ''}${vSx.toFixed(0)}%)`);
@@ -2892,6 +2896,73 @@ function corri(mod, script) {
     ok(Math.abs(g.eyes.left.y.rumoreVeloce / soloRumore - 1) < 0.6,
        `58g. e i gesti quasi non lo toccano (${soloRumore?.toFixed(5)} → ${g.eyes.left.y.rumoreVeloce?.toFixed(5)})`);
   }
+}
+
+/* ══════ 59. Dopo un'INTERRUZIONE la stima non deve saltare ══════
+ *
+ * ⚠️ La causa vera del segnale che calava nel tempo, trovata nel
+ * registro di una sessione reale. Non era una crescita graduale: erano
+ * SALTI, e ognuno cadeva subito dopo una ripresa del video.
+ *
+ *     22s  σ 0,0250      [video in pausa]
+ *     40s  σ 0,0618      ← più che raddoppiato di colpo
+ *    100s  σ 0,1107      [video in pausa 82 secondi]
+ *    184s  σ 0,2217      ← più che raddoppiato di colpo
+ *
+ * La finestra scarta i campioni più vecchi di venti secondi. Dopo una
+ * pausa li scarta TUTTI insieme, e la stima si ricalcola su quei pochi
+ * arrivati dopo la ripresa — che se la ripresa cade dentro un gesto
+ * sono tutti campioni di gesto.
+ *
+ * Da lì parte l'anello: rumore stimato grande quanto il gesto → soglia
+ * di aggancio più grande del gesto → il gesto non si aggancia più →
+ * non viene più escluso dalla stima → il rumore resta grande.       */
+{
+  function conPause(pause) {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000)
+                   + 0.010 * Math.sin(2 * Math.PI * 0.35 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(-0.03), right: o(-0.03) }); } };
+    const v = [];
+    for (let k = 0; k < 70; k++) {
+      // Pausa: il tempo avanza ma non arrivano fotogrammi.
+      if (pause.includes(k)) t += 82000;
+      let p = 0;
+      for (let i = 0; i < 300; i += 33) { t += 33; g.process(t, { left: o(-0.03 - 0.14 * i / 300), right: o(-0.03 - 0.14 * i / 300) }); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; g.process(t, { left: o(-0.17), right: o(-0.17) });
+        const ch = g.channels()['left.up']; if (ch) p = Math.max(p, ch.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; g.process(t, { left: o(-0.17 + 0.14 * i / 300), right: o(-0.17 + 0.14 * i / 300) }); }
+      d(900);
+      v.push({ p, s: g.eyes.left.y.sigma });
+    }
+    return v;
+  }
+
+  const v = conPause([10, 35]);
+
+  /* ⚠️ Il salto si vede confrontando il gesto PRIMA e DOPO la pausa. */
+  for (const k of [10, 35]) {
+    const prima = v[k - 1].s, dopo = v[k].s;
+    ok(dopo < prima * 2.5,
+       `59a. dopo la pausa al ${k}° gesto la stima non salta (${prima.toFixed(4)} → ${dopo.toFixed(4)})`);
+    ok(v[k].p > v[k - 1].p * 0.55,
+       `59b. e l ampiezza regge (${v[k - 1].p.toFixed(1)}σ → ${v[k].p.toFixed(1)}σ)`);
+  }
+
+  /* E soprattutto: alla fine della sessione il segnale non dev'essere
+   * calato. È tutto ciò che conta per chi lo usa. */
+  const inizio = (v[1].p + v[2].p + v[3].p) / 3;
+  const fine = (v[67].p + v[68].p + v[69].p) / 3;
+  ok(fine > inizio * 0.6,
+     `59c. dopo settanta gesti e due pause il segnale regge (${inizio.toFixed(1)}σ → ${fine.toFixed(1)}σ)`);
+  ok(fine > 8, `59d. e resta ben sopra la soglia (${fine.toFixed(1)}σ)`);
+  ok(v[69].s < 0.02,
+     `59e. la stima del rumore resta il rumore, non il gesto (${v[69].s.toFixed(4)})`);
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

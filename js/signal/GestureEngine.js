@@ -766,69 +766,68 @@ export class GestureEngine {
          * tremore e ben sotto il gesto, sempre, quale che sia la
          * persona o la telecamera.
          */
-        /* ⚠️ La protezione si applica SOLO se ci sono gesti veri.
+        /* ══════════════════════════════════════════════════════════
+         * UNA SOLA DECISIONE: congelare o no
+         * ══════════════════════════════════════════════════════════
          *
-         * Con il solo rumore, l'escursione misura il rumore stesso: il
-         * limite diventerebbe una frazione del rumore, il segnale lo
-         * supererebbe di continuo, baseline e stima resterebbero
-         * congelate e il programma scriverebbe da solo — misurato,
-         * quarantasette comandi involontari al minuto.
+         * ⚠️ Qui stava il difetto che ha resistito per giorni, e i
+         * dati di una sessione reale lo mostrano senza ambiguità:
          *
-         * Un gesto vero è molte volte il rumore veloce. Se non lo è,
-         * non c'è nulla da proteggere. */
-        const ci_sono_gesti = A.escursioneGrezza > 0 && A.rumoreVeloce > 0
-          && A.escursioneGrezza > (s.quieteMinRapporto ?? 4) * A.rumoreVeloce;
-        /* ⚠️ Durante un gesto RICONOSCIUTO questo criterio si tira
-         * indietro.
+         *     tempo   sigma    grezzo   escursione   ampiezza
+         *       2s    0,0040   -0,161     0,11        11,1σ
+         *      60s    0,0271   -0,081     0,14         1,3σ
+         *     200s    0,1241   -0,173     0,15         0,6σ
          *
-         * Ha un tetto di venti secondi, giusto per non restare
-         * congelato su una deriva vera. Ma chi tiene l'occhio alzato
-         * più a lungo — trentacinque secondi, per riposare o per
-         * pensare — si vedrebbe scongelare la baseline a metà gesto e
-         * il segnale calare sotto i piedi. L'aggancio del gesto sa già
-         * distinguere una tenuta da una deriva, e per quel caso è il
-         * meccanismo giusto. */
+         * Il movimento è IDENTICO per tutta la sessione — l'escursione
+         * grezza non si muove — eppure la stima del rumore cresce da
+         * 0,004 a 0,124, cioè fino a valere quanto il gesto.
+         *
+         * Il meccanismo: la soglia di aggancio è 3,5 volte il rumore
+         * stimato. Quando questo arriva a 0,124 la soglia vale 0,43,
+         * più grande dell'intero gesto (0,17). Il gesto non si aggancia
+         * mai più, quindi non viene mai escluso dalla stima, quindi la
+         * stima resta alta. Da lì non si esce.
+         *
+         * ⚠️ E c'erano DUE meccanismi che si contendevano il
+         * congelamento: quello legato all'aggancio e quello legato
+         * alla quiete assoluta. Il secondo rilasciava a ogni
+         * fotogramma ciò che il primo aveva congelato, e il risultato
+         * era peggiore di entrambi presi da soli.
+         *
+         * Ora la decisione è UNA. Si congela se il gesto è agganciato
+         * OPPURE se il segnale è lontano dal riposo — dove "lontano"
+         * si misura in unità assolute, sull'escursione grezza, che non
+         * dipende dal rumore stimato. È così che l'anello si spezza:
+         * anche quando il rumore è gonfiato al punto da impedire
+         * l'aggancio, il criterio assoluto continua a proteggere.
+         */
         const agganciato = A.hyst && Object.values(A.hyst).some(h => h && h.active);
-        if (s.quieteAssoluta !== false && ci_sono_gesti && !agganciato) {
-          // Mai sotto il rumore veloce: sotto quella soglia non si
-          // distingue un movimento da un sussulto.
+
+        let fuoriQuiete = false;
+        const ci_sono_gesti = A.escursioneGrezza > 0 && A.rumoreVeloce > 0
+          && A.escursioneGrezza > (s.quieteMinRapporto ?? 12) * A.rumoreVeloce;
+        if (s.quieteAssoluta !== false && ci_sono_gesti && Number.isFinite(A.riposoStimato)) {
           const limite = Math.max(
             (s.quieteFrazione ?? 0.25) * A.escursioneGrezza,
             2.5 * A.rumoreVeloce,
           );
-          /* ⚠️ La quiete si giudica rispetto al RIPOSO STIMATO, non
-           * alla baseline.
-           *
-           * Giudicarla sulla baseline è circolare: se la baseline si è
-           * ancorata dentro il gesto — cosa che accade partendo con la
-           * persona già in movimento — allora "essere vicini alla
-           * baseline" significa "essere dentro il gesto", e il
-           * congelamento la inchioda lì per sempre. Il gesto scompare:
-           * misurato, 0,3σ.
-           *
-           * Il riposo stimato viene invece dalla forma del segnale e
-           * non da ciò che il programma ha già deciso. */
-          const rif = Number.isFinite(A.riposoStimato) ? A.riposoStimato : (A.baseline ?? A.smooth);
-          const fuoriQuiete = Math.abs(A.smooth - rif) > limite;
+          fuoriQuiete = Math.abs(A.smooth - A.riposoStimato) > limite;
+        }
 
-          /* ⚠️ NIENTE riancoraggio della baseline al riposo stimato.
+        if (agganciato || fuoriQuiete) {
+          /* ⚠️ Il tetto vale SOLO per il criterio assoluto.
            *
-           * Sembrava il completamento naturale — se la baseline si è
-           * allontanata, riportarla — e invece distrugge le tenute
-           * lunghe: chi tiene l'occhio alzato dodici secondi vede
-           * quella posizione diventare la moda del segnale, la
-           * baseline la insegue e il gesto sparisce. Misurato: da
-           * 10,5σ a 0,4σ, ventisette verifiche cadute.
-           *
-           * Il riposo stimato serve solo a DECIDERE se c'è quiete, e
-           * per quello è affidabile; spostare la baseline resta
-           * compito del congelamento, che sa distinguere una tenuta
-           * da una deriva. */
-          if (fuoriQuiete) {
+           * Serve a non restare congelati per sempre su una deriva
+           * vera — la testa scivolata, la telecamera urtata. Ma un
+           * gesto agganciato va protetto senza limite: chi tiene
+           * l'occhio alzato mezzo minuto si vedrebbe altrimenti
+           * scongelare la baseline a metà gesto. */
+          if (agganciato) {
+            A._quieteDa = null;
+            A.base.freeze();
+            A.base.congelaScala(true);
+          } else {
             if (A._quieteDa == null) A._quieteDa = t;
-            /* ⚠️ Con un tetto: una deriva vera — la testa scivolata, la
-             * telecamera urtata — resterebbe altrimenti fuori quiete
-             * per sempre e il segnale non tornerebbe mai a posto. */
             if (t - A._quieteDa < (s.baselineFreezeMaxMs || 20000)) {
               A.base.freeze();
               A.base.congelaScala(true);
@@ -836,11 +835,11 @@ export class GestureEngine {
               A.base.release();
               A.base.congelaScala(false);
             }
-          } else {
-            A._quieteDa = null;
-            A.base.release();
-            A.base.congelaScala(false);
           }
+        } else {
+          A._quieteDa = null;
+          A.base.release();
+          A.base.congelaScala(false);
         }
 
         if (s.baselineFreezeDuringGesture) {

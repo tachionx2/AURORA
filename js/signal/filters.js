@@ -115,6 +115,7 @@ export class RobustScale {
   reset() {
     this.buf.length = 0; this.value = this.minSigma; this.tLast = -1e9;
     this.bufDiff.length = 0; this.vPrec = null; this.valoreDiff = this.minSigma;
+    this.tUltimoCampione = null; this.riempimentoDa = null;
   }
   /**
    * @param quiet false mentre è in corso un gesto: quel campione NON
@@ -127,6 +128,38 @@ export class RobustScale {
    * fatto sospettare un guasto casuale.
    */
   push(t, scarto, quiet = true) {
+    /* ⚠️ DOPO UN'INTERRUZIONE la stima non si aggiorna finché la
+     * finestra non si è riempita di nuovo.
+     *
+     * È il difetto che faceva calare il segnale nel tempo, e i dati di
+     * una sessione reale lo mostrano senza ambiguità: la stima del
+     * rumore non cresceva gradualmente, faceva SALTI, e ogni salto
+     * cadeva subito dopo una ripresa del video.
+     *
+     *     22s  σ 0,0250      [video in pausa]
+     *     40s  σ 0,0618      ← più che raddoppiato di colpo
+     *    100s  σ 0,1107      [video in pausa 82 secondi]
+     *    184s  σ 0,2217      ← più che raddoppiato di colpo
+     *
+     * Il motivo: la finestra scarta i campioni più vecchi di venti
+     * secondi. Dopo una pausa li scarta TUTTI in un colpo, e la stima
+     * si ricalcola su quei pochi arrivati dopo la ripresa — che se la
+     * ripresa cade dentro un gesto sono tutti campioni di gesto. Il
+     * rumore stimato diventa allora grande quanto il gesto, la soglia
+     * di aggancio con lui, il gesto non si aggancia più, quindi non
+     * viene più escluso: da lì non si esce.
+     *
+     * Basta non fidarsi di una finestra semisvuotata: si conserva il
+     * valore di prima finché non ci sono di nuovo abbastanza campioni
+     * distribuiti su abbastanza tempo. */
+    if (this.tUltimoCampione != null && (t - this.tUltimoCampione) > 1000) {
+      this.buf.length = 0;
+      this.bufDiff.length = 0;
+      this.vPrec = null;
+      this.riempimentoDa = t;
+    }
+    this.tUltimoCampione = t;
+
     if (quiet) this.buf.push({ t, v: Math.abs(scarto) });
 
     /* ⚠️ Le differenze si raccolgono SEMPRE, anche durante un gesto.
@@ -145,7 +178,21 @@ export class RobustScale {
     while (this.buf.length && this.buf[0].t < taglio) this.buf.shift();
     if (t - this.tLast < this.recomputeMs) return this.value;
     this.tLast = t;
-    if (this.buf.length < 10) return this.value;
+    /* ⚠️ Sessanta campioni, non dieci.
+     *
+     * Dieci campioni sono un terzo di secondo: se cadono dentro un
+     * gesto, la stima prende il gesto per rumore. È quello che
+     * accadeva riprendendo un video dopo una pausa, quando la finestra
+     * si era appena svuotata. Sessanta sono due secondi, abbastanza da
+     * contenere sia quiete sia movimento. */
+    if (this.buf.length < 60) return this.value;
+
+    /* ⚠️ Si era provato a pretendere anche un ARCO DI TEMPO minimo —
+     * "dieci campioni raccolti in mezzo secondo descrivono mezzo
+     * secondo, non venti" — ma su un occhio debole, i cui campioni
+     * entrano a intermittenza, quella condizione bloccava
+     * l'aggiornamento nei momenti sbagliati e peggiorava le cose:
+     * sette verifiche cadute. Il numero di campioni basta. */
     const a = this.buf.map(x => x.v).sort((p, q) => p - q);
     // 40° percentile invece della mediana: doppia protezione, nel caso
     // qualche campione di gesto sfugga comunque al filtro sopra.

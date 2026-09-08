@@ -929,6 +929,9 @@ class App {
       + ` | fps ${f(this.vision?.fps, 1)}`
       + ` | escursione ${f(this.gestures?.eyes?.left?.y?.escursioneGrezza, 4)}/${f(this.gestures?.eyes?.right?.y?.escursioneGrezza, 4)}`
       + ` | rumore veloce ${f(this.gestures?.eyes?.left?.y?.rumoreVeloce, 4)}/${f(this.gestures?.eyes?.right?.y?.rumoreVeloce, 4)}`
+      + ` | soglie ${this.cfg.signal.thresholdOn}/${this.cfg.signal.thresholdOff}`
+      + ` | congelati ${G?.eyes?.left?.y?.base?.frozen ? 'SX' : '--'}${G?.eyes?.right?.y?.base?.frozen ? 'DX' : '--'}`
+      + ` | apertura ${f(G?.eyes?.left?.a?.raw, 3)}/${f(G?.eyes?.right?.a?.raw, 3)}`
       + ` | scheda ${document.body.dataset.tab}`
     );
   }
