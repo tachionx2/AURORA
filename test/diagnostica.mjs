@@ -3227,5 +3227,124 @@ function corri(mod, script) {
      `63l. e il destro ci guadagna (${comuni.pd.toFixed(1)}σ → ${separati.pd.toFixed(1)}σ)`);
 }
 
+/* ══════ 64. Stabilità dell'ampiezza nel tempo ══════
+ *
+ * ⚠️ Risolto il calo, è emerso il problema opposto: l'ampiezza SALE
+ * per minuti. È lo stesso anello girato al contrario — si esclude
+ * meglio, la stima scende, l'ampiezza sale, ci si aggancia meglio,
+ * si esclude ancora meglio.
+ *
+ * Non è instabilità vera: la stima scende verso il proprio minimo e
+ * lì si ferma. Ma il tragitto dura minuti, e in quei minuti chi
+ * assiste deve inseguire con i guadagni.
+ *
+ * Il tetto alza il minimo in proporzione al gesto di QUELLA persona,
+ * così il limite si raggiunge prima.                                */
+{
+  function corsa(tetto, n = 80) {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.signal.plafondSigma = tetto;
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000)
+                   + 0.008 * Math.sin(2 * Math.PI * 0.35 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(-0.03), right: o(-0.03) }); } };
+    d(15000);
+    const v = [];
+    for (let k = 0; k < n; k++) {
+      let ps = 0, pd = 0;
+      const q = (f) => g.process(t, { left: o(-0.03 - 0.15 * f), right: o(-0.03 - 0.05 * f) });
+      for (let i = 0; i < 300; i += 33) { t += 33; q(i / 300); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; q(1);
+        const a = g.channels()['left.up'], b = g.channels()['right.up'];
+        if (a) ps = Math.max(ps, a.n);
+        if (b) pd = Math.max(pd, b.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; q(1 - i / 300); }
+      d(900);
+      v.push({ ps, pd });
+    }
+    return v;
+  }
+
+  const conTetto = corsa(25);
+  const senzaTetto = corsa(0);
+  /* ⚠️ Il tetto non toglie l'oscillazione fra un gesto e l'altro —
+   * quella è rumore di misura. Riduce l'ESCURSIONE COMPLESSIVA in cui
+   * l'ampiezza si muove durante la sessione, ed è quella a costringere
+   * chi assiste a inseguire con i guadagni: partire da 37σ e finire a
+   * 28σ è un intervallo molto più largo che restare fra 26σ e 25σ. */
+  const massimo = (v) => Math.max(...v.map(x => x.ps));
+  ok(massimo(conTetto) < massimo(senzaTetto),
+     `64a. il tetto limita il picco dell ampiezza (${massimo(conTetto).toFixed(1)}σ contro ${massimo(senzaTetto).toFixed(1)}σ)`);
+
+  /* ⚠️ E soprattutto NON deve calare: è il difetto che ci ha
+   * accompagnato per giorni e che non deve tornare. */
+  ok(conTetto[79].ps > conTetto[9].ps * 0.65,
+     `64b. e non cala (${conTetto[9].ps.toFixed(1)}σ → ${conTetto[79].ps.toFixed(1)}σ)`);
+  ok(conTetto[79].pd > 4,
+     `64c. anche l occhio debole resta usabile (${conTetto[79].pd.toFixed(1)}σ)`);
+  ok(conTetto[79].ps > 10, `64d. e il forte resta ampio (${conTetto[79].ps.toFixed(1)}σ)`);
+
+  /* Chi ha un gesto PICCOLO non dev'essere penalizzato: per lui il
+   * tetto darebbe un minimo più basso di quello assoluto. */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const o = y => ({ x: 0, y: y + 0.002 * Math.sin(2 * Math.PI * 4.2 * t / 1000), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); } };
+    d(15000);
+    let p = 0;
+    for (let k = 0; k < 30; k++) {
+      for (let i = 0; i < 300; i += 33) { t += 33; g.process(t, { left: o(-0.02 * i / 300), right: o(-0.02 * i / 300) }); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; g.process(t, { left: o(-0.02), right: o(-0.02) });
+        const a = g.channels()['left.up']; if (a) p = Math.max(p, a.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; g.process(t, { left: o(-0.02 * (1 - i / 300)), right: o(-0.02 * (1 - i / 300)) }); }
+      d(900);
+    }
+    ok(p > 4, `64e. un gesto piccolo (0,02) resta rilevabile (${p.toFixed(1)}σ)`);
+  }
+
+  /* ── Soglia come frazione del gesto: spenta, ma deve funzionare ── */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.signal.sogliaRelativa = true;
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.006 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(-0.03), right: o(-0.03) }); } };
+    d(15000);
+    const v = [];
+    for (let k = 0; k < 60; k++) {
+      let ps = 0, pd = 0;
+      const q = (f) => g.process(t, { left: o(-0.03 - 0.15 * f), right: o(-0.03 - 0.05 * f) });
+      for (let i = 0; i < 300; i += 33) { t += 33; q(i / 300); }
+      for (let i = 0; i < 1100; i += 33) {
+        t += 33; q(1);
+        const a = g.channels()['left.up'], b = g.channels()['right.up'];
+        if (a) ps = Math.max(ps, a.n);
+        if (b) pd = Math.max(pd, b.n);
+      }
+      for (let i = 0; i < 300; i += 33) { t += 33; q(1 - i / 300); }
+      d(900);
+      v.push({ ps, pd });
+    }
+    ok(Math.abs(v[59].ps / v[19].ps - 1) < 0.30,
+       `64f. con soglia relativa l ampiezza è stabile (${v[19].ps.toFixed(1)}σ → ${v[59].ps.toFixed(1)}σ)`);
+    /* ⚠️ E i due occhi si pareggiano da soli: ciascuno è misurato
+     * sulla PROPRIA escursione. */
+    ok(Math.abs(v[59].pd / v[59].ps - 1) < 0.40,
+       `64g. e i due occhi si pareggiano da soli (${v[59].ps.toFixed(1)}σ contro ${v[59].pd.toFixed(1)}σ, con gesti in rapporto 3:1)`);
+    ok(DEFAULT_CONFIG.signal.sogliaRelativa === false,
+       '64h. resta spenta di default: cambia il significato delle soglie');
+  }
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

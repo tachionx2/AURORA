@@ -529,7 +529,29 @@ export class SessionStats {
        * Il risultato non cambia riapplicandolo: è la stessa persona
        * misurata due volte, non la configurazione che si insegue.
        */
-      const eyeRif = E === r.perOcchio?.left ? 'left' : 'right';
+      /* ⚠️ Le soglie si calcolano sull'occhio PEGGIORE, non sul
+       * migliore.
+       *
+       * L'occhio di riferimento è quello con la confidenza migliore, ed
+       * è giusto per descrivere il comportamento della persona. Ma
+       * fissare LE SOGLIE su di lui significa metterle dove l'altro non
+       * arriva — e l'altro resta sotto soglia, quindi non viene
+       * riconosciuto, quindi non viene escluso dalla stima del rumore,
+       * che cresce e lo abbassa ancora.
+       *
+       * Le soglie sono comuni per scelta: devono quindi essere
+       * raggiungibili da ENTRAMBI, cioè tarate sul più difficile dei
+       * due. */
+      const margineDi = (lato) => {
+        const hR3 = this.grezzoRiposo[lato], hT3 = this.grezzoTutti[lato];
+        if (!hR3 || hR3.tot < 300 || !hT3 || hT3.tot < 400) return Infinity;
+        const sg = Math.max(1e-6, 1.4826 * hR3.percentile(0.25) * 1.577);
+        return hT3.percentile(0.97) / sg;
+      };
+      const mS = margineDi('left'), mD = margineDi('right');
+      const eyeRif = (Number.isFinite(mS) && Number.isFinite(mD))
+        ? (mS <= mD ? 'left' : 'right')          // il più difficile
+        : (E === r.perOcchio?.left ? 'left' : 'right');
       const hRip = this.grezzoRiposo[eyeRif], hGes = this.grezzoGesto[eyeRif];
       /* ⚠️ Basta avere abbastanza CAMPIONI, non abbastanza gesti
        * riconosciuti.

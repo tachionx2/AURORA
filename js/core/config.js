@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 37;
+export const CONFIG_VERSION = 38;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -372,6 +372,44 @@ export const DEFAULT_CONFIG = {
      * stessa cosa per entrambi gli occhi. È il guadagno per occhio a
      * portare i due segnali sulla stessa scala, non la soglia a
      * inseguirli. */
+    /* ⚠️ TETTO all'ampiezza in sigma.
+     *
+     * La stima del rumore scende verso il proprio pavimento assoluto
+     * (0,004). Con un gesto ampio ciò significa che l'ampiezza sale
+     * fino a quaranta sigma e oltre — e ci mette minuti, durante i
+     * quali chi assiste deve inseguire con i guadagni.
+     *
+     * Non è instabilità: è un transitorio troppo lungo. Alzando il
+     * pavimento in proporzione all'escursione di QUELLA persona, la
+     * stima arriva prima al suo limite e l'ampiezza si stabilizza
+     * attorno a questo valore.
+     *
+     * ⚠️ Il pavimento assoluto resta comunque: chi ha un gesto piccolo
+     * non viene penalizzato, perché per lui questo tetto darebbe un
+     * pavimento più basso e non si applica. */
+    plafondSigma: 25,
+
+    /* ══════════════════════════════════════════════════════════════
+     * SOGLIA COME FRAZIONE DEL GESTO — spenta di default
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Il difetto di fondo del misurare in multipli del rumore: è il
+     * rapporto fra due grandezze che evolvono ENTRAMBE. Anche quando
+     * tutto funziona, quel numero non può essere stabile, e chi assiste
+     * deve inseguire con i guadagni.
+     *
+     * L'escursione grezza invece è stabilissima — nei registri reali
+     * resta a 0,15 per tutta la sessione. Esprimendo la soglia come
+     * frazione di essa — "scatta quando il segnale supera il 40% del
+     * gesto tipico di questa persona" — l'ampiezza diventa costante
+     * per costruzione.
+     *
+     * ⚠️ SPENTA di default perché cambia il significato delle soglie,
+     * e la situazione attuale funziona. Da provare a parte, non da
+     * subire. */
+    sogliaRelativa: false,
+    sogliaFrazione: 0.40,
+
     perOcchio: {
       left:  {},   // medianWindowMs, lowPassHz, baselineTauSec,
       right: {},   // sigmaPercentile, sigmaRitaratura, minSigma, minConfidence
@@ -989,6 +1027,11 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 38 && c.signal) {
+    if (c.signal.plafondSigma === undefined) c.signal.plafondSigma = 25;
+    if (c.signal.sogliaRelativa === undefined) c.signal.sogliaRelativa = false;
+    if (c.signal.sogliaFrazione === undefined) c.signal.sogliaFrazione = 0.40;
+  }
   if (v < 37 && c.signal && !c.signal.perOcchio) {
     c.signal.perOcchio = { left: {}, right: {} };
   }

@@ -916,7 +916,15 @@ export class GestureEngine {
           A.base.scala.perc = sE.sigmaPercentile ?? 0.25;
           A.base.scala.ritaratura = sE.sigmaRitaratura ?? 1.577;
           if (sE.sigmaFinestraMs) A.base.scala.windowMs = sE.sigmaFinestraMs;
-          if (sE.minSigma) A.base.scala.minSigma = sE.minSigma;
+          /* Pavimento del rumore: quello configurato, ma mai tanto
+           * basso da far salire l'ampiezza oltre il tetto. Accorcia il
+           * transitorio senza penalizzare chi ha un gesto piccolo. */
+          let pav = sE.minSigma || 0.004;
+          const tetto = sE.plafondSigma ?? 25;
+          if (tetto > 0 && A.escursioneGrezza > 0) {
+            pav = Math.max(pav, A.escursioneGrezza / tetto);
+          }
+          A.base.scala.minSigma = pav;
         }
         /* ══════════════════════════════════════════════════════════
          * IL RUMORE NON SI MISURA DENTRO IL GESTO
@@ -996,6 +1004,22 @@ export class GestureEngine {
          * vorrà più dire "tre volte e mezzo il rumore". */
         // In modalità grezza il denominatore è fisso: le soglie
         // diventano spostamenti, non multipli del rumore.
+        /* Soglia come frazione del gesto: si sceglie il denominatore
+         * in modo che la soglia cada esattamente a quella frazione
+         * dell'escursione. L'ampiezza diventa allora costante per
+         * costruzione, perché l'escursione è stabile. */
+        if (sE.sogliaRelativa && A.escursioneGrezza > 0) {
+          const fr = sE.sogliaFrazione ?? 0.40;
+          const soglia = Math.max(0.5, s.thresholdOn || 3.5);
+          A.sigma = Math.max(sE.minSigma || 0.004,
+                             A.escursioneGrezza * fr / soglia);
+          A.disp = A.smooth - A.baseline;
+          A.valid = true;
+          res.axes[axis] = { raw: A.raw, smooth: A.smooth, baseline: A.baseline,
+                             sigma: A.sigma, disp: A.disp };
+          continue;
+        }
+
         A.sigma = (s.modoGrezzo || s.normalizzaSuRumore === false)
           ? Math.max(s.minSigma, s.sigmaFisso ?? 0.02)
           : b.sigma;

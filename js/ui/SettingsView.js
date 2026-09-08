@@ -347,6 +347,7 @@ export class SettingsView {
        * sovrascrittura" è proprio lo stato predefinito. */
       'signal.thresholdDir', 'signal.gainDir', 'signal.gainEye',
       'signal.modoGrezzo', 'signal.modoGrezzoRiposoSec', 'signal.perOcchio',
+      'signal.plafondSigma', 'signal.sogliaRelativa', 'signal.sogliaFrazione',
       // Rilevamento e durate.
       'detection.minConfidence',
       'gestures.UP.dwellMs', 'gestures.UP.maxMs',
@@ -468,6 +469,24 @@ export class SettingsView {
             az,
           ];
         }),
+
+        h('div', 'vb-testa', P(['STABILITÀ NEL TEMPO', 'STABILITY OVER TIME'])),
+        this._range('signal.plafondSigma',
+          P(['Tetto all\'ampiezza in sigma', 'Cap on amplitude in sigma']),
+          P(['La stima del rumore scende verso il proprio minimo, e con un gesto ampio l\'ampiezza sale per minuti prima di fermarsi — costringendo a inseguire con i guadagni. Questo tetto alza il minimo in proporzione al gesto di QUESTA persona, così l\'ampiezza si stabilizza attorno al valore indicato invece di crescere a lungo. ⚠️ Chi ha un gesto piccolo non viene penalizzato: per lui questo darebbe un minimo più basso di quello assoluto, e non si applica. A zero il tetto è tolto.',
+             'Caps how high the amplitude can climb, shortening the transient.']),
+          0, 60, 1, 'σ'),
+        this._toggle('signal.sogliaRelativa',
+          P(['Soglia come frazione del gesto', 'Threshold as a fraction of the gesture']),
+          P(['⚠️ SPERIMENTALE, spenta di default. Misurare in multipli del rumore è il rapporto fra due grandezze che evolvono entrambe: anche quando tutto funziona quel numero non è stabile. L\'escursione del gesto invece lo è. Accendendo questa opzione la soglia significa "scatta quando il segnale supera questa frazione del gesto tipico di questa persona", e l\'ampiezza diventa costante per costruzione — pareggiando anche i due occhi da sola. Cambia però il significato delle soglie, che vanno riguardate.',
+             '⚠️ EXPERIMENTAL, off by default. Makes the threshold a fraction of the person\'s own gesture.'])),
+        ...(cfg.signal.sogliaRelativa ? [
+          this._range('signal.sogliaFrazione',
+            P(['Frazione del gesto a cui scatta', 'Fraction of the gesture at which it fires']),
+            P(['0,40 significa "scatta al 40% del gesto tipico". Più basso = più sensibile.',
+               '0.40 means "fires at 40% of the typical gesture".']),
+            0.15, 0.80, 0.05),
+        ] : []),
 
         h('div', 'vb-testa', P(['VALORI GENERALI', 'SHARED VALUES'])),
         this._range('signal.medianWindowMs', 'Finestra mediana', 'Rimuove le fasi rapide del nistagmo', 0, 800, 10, ' ms'),
