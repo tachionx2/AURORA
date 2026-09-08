@@ -263,7 +263,13 @@ export class DebugView {
        * il sigma differisce, il movimento è uguale e il problema sta
        * nella stima del rumore; se il grezzo differisce, allora è il
        * rilevamento a vedere davvero un movimento più piccolo. */
-      ['Segnale grezzo SX / DX', `${(this.app.gestures?.eyes?.left?.y?.smooth ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.smooth ?? 0).toFixed(4)}`],
+      /* ⚠️ GREZZO davvero: la posizione come esce dal rilevatore,
+       * prima di mediana e passa-basso. Prima qui compariva il segnale
+       * già FILTRATO, quindi non si poteva distinguere "il rilevatore
+       * vede poco movimento" da "i filtri lo stanno mangiando" — che è
+       * esattamente la domanda da porsi quando l'ampiezza è bassa. */
+      ['Grezzo SX / DX', `${(this.app.gestures?.eyes?.left?.y?.raw ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.raw ?? 0).toFixed(4)}`],
+      ['Filtrato SX / DX', `${(this.app.gestures?.eyes?.left?.y?.smooth ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.smooth ?? 0).toFixed(4)}`],
       ['Scostamento SX / DX', `${(this.app.gestures?.eyes?.left?.y?.disp ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.disp ?? 0).toFixed(4)}`],
       ['Viso soppressi', g.visoSoppressi ?? 0],
       ['Apertura riposo SX', bs.left.openRef !== null ? bs.left.openRef.toFixed(3) : 'calibrando…'],

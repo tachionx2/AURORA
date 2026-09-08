@@ -267,6 +267,30 @@ export const DEFAULT_CONFIG = {
      * protezione, è un blocco. Riattivarla solo dopo averla verificata
      * con rumore realistico. */
     baselineFreezeSigma: 0,
+    /* ══════════════════════════════════════════════════════════════
+     * STIMA DEL RUMORE — parametri, non più valori fissi nel codice
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Il programma misura ogni gesto in multipli del rumore di quella
+     * persona. Questi tre numeri governano come quel rumore viene
+     * stimato, ed erano scritti nel codice: cambiarli richiedeva una
+     * versione nuova.
+     */
+    // Quale percentile degli scostamenti si considera "rumore".
+    // Più basso = sopporta più tempo in movimento senza gonfiarsi.
+    sigmaPercentile: 0.25,
+    // Fattore che riporta quel percentile nella scala di riferimento.
+    // ⚠️ Va cambiato INSIEME al percentile: sono una coppia.
+    sigmaRitaratura: 1.577,
+    // Finestra su cui si guarda, in millisecondi.
+    sigmaFinestraMs: 20000,
+    /* Spegne la normalizzazione: le soglie diventano valori ASSOLUTI
+     * di spostamento invece che multipli del rumore. Serve quando il
+     * rumore è così basso o così irregolare che normalizzare confonde
+     * invece di aiutare. ⚠️ Spegnendola, le soglie vanno ritarate da
+     * capo: 3,5 non vorrà più dire "tre volte e mezzo il rumore". */
+    normalizzaSuRumore: true,
+    sigmaFisso: 0.02,
     /* ── Quali canali sommare nel canale combinato ──
      *
      * Un solo movimento volontario produce spesso più segnali insieme:

@@ -2348,5 +2348,182 @@ function corri(mod, script) {
      '52f. e il canale combinato mostra subito i propri canali quando lo si accende');
 }
 
+/* ══════ 53. La stima del rumore non deve LATCHARE ══════
+ *
+ * ⚠️ L'errore che ha attraversato tutto questo progetto, e la ragione
+ * per cui "applica parametri e poi ripristina" migliorava le cose.
+ *
+ * La stima del rumore usava il 40° percentile degli scostamenti dal
+ * riposo. Ma un gesto È uno scostamento: se la persona si muove per
+ * più del 40% del tempo — e in una sessione di gesti ripetuti succede
+ * — il valore scelto cade dentro un gesto e la stima si gonfia.
+ *
+ * A quel punto si chiude un circolo: rumore alto → il gesto non supera
+ * più la soglia → non viene riconosciuto → i suoi campioni non vengono
+ * più esclusi → il rumore resta alto. Da lì non si esce, e l'unico
+ * modo era ricostruire i filtri: ecco perché applicare e poi
+ * ripristinare i parametri "aggiustava" tutto.
+ *
+ * Il 25° percentile sopporta fino al 75% di tempo in movimento. Ma va
+ * RITARATO: un percentile più basso restituisce un numero più piccolo,
+ * e sottostimare il rumore riempie il programma di comandi
+ * involontari. Il fattore 1,577 è il rapporto misurato fra i due
+ * percentili su rumore pulito, dove varia appena.                    */
+{
+  const RUM = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.020 * Math.sin(2 * Math.PI * 4.2 * x / 1000)
+                   + 0.012 * Math.sin(2 * Math.PI * 1.9 * x / 1000 + 2.2)
+                   + 0.008 * Math.sin(2 * Math.PI * 7.7 * x / 1000);
+
+  function corsa(quieteIniziale, n = 30) {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const o = y => ({ x: 0, y: y + RUM(t), openness: 0.44, confidence: 0.97 });
+    const d = (ms, y) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(y), right: o(y) }); } };
+    d(quieteIniziale, 0);
+    const v = [];
+    for (let k = 0; k < n; k++) {
+      let p = 0;
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(-0.16 * i / 250), right: o(-0.16 * i / 250) }); }
+      for (let i = 0; i < 900; i += 33) {
+        t += 33; g.process(t, { left: o(-0.16), right: o(-0.16) });
+        const ch = g.channels()['left.up']; if (ch) p = Math.max(p, ch.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; g.process(t, { left: o(-0.16 * (1 - i / 250)), right: o(-0.16 * (1 - i / 250)) }); }
+      d(1500, 0);
+      v.push({ p, s: g.eyes.left.y.sigma });
+    }
+    return v;
+  }
+
+  /* ⚠️ LA VERIFICA CHE CONTA: partendo con quiete o senza — cioè
+   * caricando un video in cui la persona si muove dal primo istante —
+   * si deve arrivare allo STESSO valore. Se il risultato dipende da
+   * come è cominciata la sessione, la stima sta latchando. */
+  const conQuiete = corsa(20000);
+  const senzaQuiete = corsa(0);
+  const fin1 = conQuiete[29].p, fin2 = senzaQuiete[29].p;
+  ok(Math.abs(fin1 - fin2) < Math.max(fin1, fin2) * 0.25,
+     `53a. con o senza quiete iniziale si converge allo stesso valore (${fin1.toFixed(1)}σ contro ${fin2.toFixed(1)}σ)`);
+  ok(Math.abs(conQuiete[29].s - senzaQuiete[29].s) < 0.004,
+     `53b. e alla stessa stima del rumore (${conQuiete[29].s.toFixed(5)} contro ${senzaQuiete[29].s.toFixed(5)})`);
+  ok(fin2 > 5,
+     `53c. il gesto resta ben sopra la soglia anche partendo in movimento (${fin2.toFixed(1)}σ)`);
+
+  /* ⚠️ E la contropartita: un percentile più basso NON deve
+   * sottostimare il rumore, altrimenti il programma scrive da solo. */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const ev = []; const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const o = () => ({ x: 0, y: RUM(t), openness: 0.44, confidence: 0.97 });
+    const minuti = 10;
+    for (let i = 0; i < minuti * 60 * 30; i++) { t += 33; g.process(t, { left: o(), right: o() }); }
+    ok(ev.length / minuti < 0.5,
+       `53d. su dieci minuti di solo rumore i falsi comandi restano rari (${(ev.length / minuti).toFixed(2)} al minuto)`);
+  }
+
+  // La ritaratura deve essere applicata: senza, la stima è più bassa
+  const { RobustScale } = await import('../js/signal/filters.js');
+  const rs = new RobustScale(20000, 250, 0.001);
+  ok(rs.perc === 0.25, `53e. si usa il 25° percentile (${rs.perc})`);
+  ok(Math.abs(rs.ritaratura - 1.577) < 0.01,
+     `53f. con la ritaratura misurata su rumore pulito (×${rs.ritaratura})`);
+}
+
+/* ══════ 54. La diagnosi si misura sul GREZZO, non su sé stessa ══════
+ *
+ * ⚠️ Le soglie venivano calcolate dal segnale già corretto e
+ * normalizzato sulla stima corrente del rumore. È un anello: rumore
+ * stimato male → segnale normalizzato piccolo → soglia bassa → alla
+ * diagnosi successiva i numeri sono di nuovo diversi. Applicando due
+ * volte la stessa diagnosi si ottenevano due risultati.
+ *
+ * Ora tutto parte dalla posizione GREZZA, come esce dal rilevatore,
+ * prima di filtri, baseline e normalizzazione. È la differenza fra
+ * misurare la persona e misurare la propria configurazione.        */
+{
+  const { SessionStats: SS54 } = await import('../js/signal/SessionStats.js');
+
+  function sessione(rumore, gesto, nGesti = 60) {
+    const st = new SS54();
+    let t = 0;
+    const R = (x) => rumore * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + rumore * 0.7 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    for (let k = 0; k < nGesti; k++) {
+      for (let i = 0; i < 1400; i += 33) {
+        t += 33; const y = -gesto + R(t);
+        const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+        st.push(t, { left: o, right: { ...o } }, 8, true);
+      }
+      for (let i = 0; i < 2200; i += 33) {
+        t += 33; const y = R(t);
+        const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+        st.push(t, { left: o, right: { ...o } }, 1, false);
+      }
+    }
+    return st.parametriConsigliati();
+  }
+
+  /* ⚠️ IDEMPOTENZA: la stessa persona misurata due volte deve dare gli
+   * stessi valori. Se cambiano, la diagnosi sta inseguendo sé stessa. */
+  const a = sessione(0.030, 0.16), b = sessione(0.030, 0.16);
+  ok(JSON.stringify(a.proposta) === JSON.stringify(b.proposta),
+     '54a. due diagnosi sulla stessa persona danno gli stessi valori');
+
+  /* ⚠️ E soprattutto: il risultato NON deve dipendere da come è
+   * normalizzato il segnale adesso. Si passa un valore normalizzato
+   * completamente diverso e le soglie devono restare le stesse. */
+  function conNormalizzazione(nFinto) {
+    const st = new SS54();
+    let t = 0;
+    const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.021 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    for (let k = 0; k < 60; k++) {
+      for (let i = 0; i < 1400; i += 33) {
+        t += 33; const y = -0.16 + R(t);
+        const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+        st.push(t, { left: o, right: { ...o } }, nFinto, true);
+      }
+      for (let i = 0; i < 2200; i += 33) {
+        t += 33; const y = R(t);
+        const o = { x: 0, y, openness: 0.44, confidence: 0.97 };
+        st.push(t, { left: o, right: { ...o } }, nFinto / 8, false);
+      }
+    }
+    return st.parametriConsigliati();
+  }
+  const basso = conNormalizzazione(2), alto = conNormalizzazione(40);
+  ok(basso.proposta['signal.thresholdOn'] === alto.proposta['signal.thresholdOn'],
+     `54b. la soglia non cambia se il segnale è normalizzato diversamente (${basso.proposta['signal.thresholdOn']} contro ${alto.proposta['signal.thresholdOn']})`);
+
+  /* La soglia deve scalare con il rapporto vero fra gesto e rumore. */
+  const forte = sessione(0.010, 0.16);
+  const debole = sessione(0.060, 0.16);
+  ok(forte.proposta['signal.thresholdOn'] > debole.proposta['signal.thresholdOn'],
+     `54c. con più margine la soglia sale (${forte.proposta['signal.thresholdOn']}σ contro ${debole.proposta['signal.thresholdOn']}σ)`);
+
+  /* ⚠️ E deve stare SOPRA il picco del rumore, non sopra la sua media:
+   * il rumore ha punte molto più alte della media, ed è quelle che
+   * fanno scrivere lettere che nessuno voleva. */
+  for (const [rum, ges] of [[0.030, 0.16], [0.060, 0.16], [0.010, 0.16]]) {
+    const p = sessione(rum, ges);
+    const m = p.motivi.find(x => /a riposo arriva a/.test(x)) || '';
+    const picco = parseFloat((/arriva a ([\d.]+)/.exec(m) || [])[1] || '0');
+    ok(p.proposta['signal.thresholdOn'] >= picco * 1.2,
+       `54d. rumore ${rum}: la soglia (${p.proposta['signal.thresholdOn']}σ) sta sopra il picco del rumore (${picco}σ)`);
+  }
+
+  /* Il percentile della stima si adatta a quanto la persona si muove. */
+  const p2 = sessione(0.030, 0.16);
+  ok(p2.proposta['signal.sigmaPercentile'] !== undefined,
+     '54e. viene proposto anche il percentile della stima del rumore');
+  ok(p2.proposta['signal.sigmaRitaratura'] !== undefined,
+     '54f. e la sua ritaratura, che va sempre insieme');
+  ok(p2.motivi.some(m => /in movimento il/.test(m)),
+     '54g. spiegando che dipende da quanto tempo la persona si muove');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

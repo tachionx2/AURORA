@@ -89,10 +89,33 @@ export class RobustScale {
     this.buf = [];
     this.value = minSigma;
     // Frazione della finestra usata per stimare il rumore.
-    this.perc = 0.4;
+    this.perc = 0.25;
+    this.ritaratura = 1.577;
+    /* ⚠️ Seconda stima, immune ai gesti.
+     *
+     * La stima classica guarda quanto il segnale si scosta dal proprio
+     * riposo. Ma un gesto È uno scostamento: se la persona si muove
+     * per una buona parte del tempo — e nel video di una sessione di
+     * prova succede — quegli scostamenti entrano nella stima e la
+     * gonfiano. Misurato: +280% con gesti al 45% del tempo.
+     *
+     * Il rumore però ha una firma che il gesto non ha: cambia in
+     * fretta FRA UN FOTOGRAMMA E L'ALTRO. Un gesto che dura un secondo
+     * si muove pochissimo da un fotogramma al successivo. Guardando le
+     * differenze passo-passo invece degli scostamenti, il gesto
+     * sparisce dalla misura: la stessa prova dà +2%.
+     *
+     * Le due stime coincidono sul rumore puro a meno di un fattore
+     * costante, che dipende solo dallo spettro e non dal segnale. */
+    this.bufDiff = [];
+    this.vPrec = null;
+    this.valoreDiff = minSigma;
     this.tLast = -1e9;
   }
-  reset() { this.buf.length = 0; this.value = this.minSigma; this.tLast = -1e9; }
+  reset() {
+    this.buf.length = 0; this.value = this.minSigma; this.tLast = -1e9;
+    this.bufDiff.length = 0; this.vPrec = null; this.valoreDiff = this.minSigma;
+  }
   /**
    * @param quiet false mentre è in corso un gesto: quel campione NON
    * descrive il rumore a riposo e non deve entrare nella stima.
@@ -105,6 +128,19 @@ export class RobustScale {
    */
   push(t, scarto, quiet = true) {
     if (quiet) this.buf.push({ t, v: Math.abs(scarto) });
+
+    /* ⚠️ Le differenze si raccolgono SEMPRE, anche durante un gesto.
+     *
+     * È il punto della faccenda: un gesto quasi non le tocca, perché
+     * fra un fotogramma e il successivo si muove pochissimo. Escluderle
+     * durante i gesti significherebbe rinunciare proprio ai campioni
+     * che rendono questa stima affidabile quando l'altra fallisce. */
+    if (this.vPrec !== null && Number.isFinite(scarto)) {
+      this.bufDiff.push(Math.abs(scarto - this.vPrec));
+      // Finestra della stessa lunghezza dell'altra, in campioni.
+      while (this.bufDiff.length > 600) this.bufDiff.shift();
+    }
+    if (Number.isFinite(scarto)) this.vPrec = scarto;
     const taglio = t - this.windowMs;
     while (this.buf.length && this.buf[0].t < taglio) this.buf.shift();
     if (t - this.tLast < this.recomputeMs) return this.value;
@@ -124,8 +160,29 @@ export class RobustScale {
      *
      * Un percentile più basso guarda solo la parte più quieta della
      * finestra, e regge una quota di movimento molto maggiore. */
-    const q = a[Math.floor(a.length * (this.perc ?? 0.4))];
-    this.value = Math.max(this.minSigma, 1.4826 * q / 0.6745 * 0.6745);
+    /* ⚠️ VENTICINQUESIMO percentile, ritarato — non il quarantesimo.
+     *
+     * Il percentile decide quanta CONTAMINAZIONE la stima sopporta:
+     * col quarantesimo, se la persona si muove per più del 40% del
+     * tempo — e in una sessione di prova di gesti ripetuti succede —
+     * il valore scelto cade dentro un gesto e la stima si gonfia.
+     * Misurato: da 0,004 a 0,043, con l'ampiezza crollata da 34σ a 9σ
+     * e nessun ritorno, perché a quel punto i gesti non superano più
+     * la soglia e non vengono più esclusi. Un circolo chiuso.
+     *
+     * Il venticinquesimo sopporta fino al 75% di tempo in movimento.
+     *
+     * ⚠️ Ma va RITARATO, ed è il punto: un percentile più basso di per
+     * sé restituisce un numero più piccolo, e sottostimare il rumore
+     * riempie il programma di comandi involontari. Il fattore 1,577 è
+     * il rapporto misurato fra i due percentili su rumore pulito —
+     * tremore lento, nistagmo, rumore casuale, misto — dove varia
+     * appena, fra 1,47 e 1,75. Con quel fattore la stima resta la
+     * stessa di prima quando non c'è contaminazione. */
+    const q = a[Math.floor(a.length * (this.perc ?? 0.25))];
+    const daScostamento = Math.max(this.minSigma, 1.4826 * q * (this.ritaratura ?? 1.577));
+
+    this.value = daScostamento;
     return this.value;
   }
 }

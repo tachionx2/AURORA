@@ -148,6 +148,31 @@ export class SessionStats {
     this.confidenza = { left: new Istogramma(0, 1, 20), right: new Istogramma(0, 1, 20) };
     this.apertura = { left: new Istogramma(0, 0.6, 30), right: new Istogramma(0, 0.6, 30) };
     this.riposoSigma = new Istogramma(0, 20, 40);     // |n| quando NON c'è gesto
+
+    /* ══════════════════════════════════════════════════════════════
+     * MISURE SUL SEGNALE GREZZO
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Le soglie venivano calcolate dal segnale GIÀ corretto e
+     * normalizzato. È un anello: se il rumore stimato è gonfiato, il
+     * segnale normalizzato risulta piccolo, la soglia consigliata
+     * scende, e la diagnosi successiva parte da una configurazione
+     * diversa — applicandola due volte si ottengono valori diversi.
+     *
+     * Queste misure guardano invece la posizione GREZZA, come esce dal
+     * rilevatore, prima di ogni filtro, baseline o normalizzazione.
+     * Da lì si ricava tutto: quanto vale il rumore, quanto vale il
+     * gesto, e quindi dove mettere la soglia — senza che il risultato
+     * dipenda da come il programma è configurato adesso.
+     *
+     * È la differenza fra "misurare la persona" e "misurare la
+     * propria configurazione".
+     */
+    this.grezzoValori = { left: new Istogramma(-1, 1, 200), right: new Istogramma(-1, 1, 200) };
+    this.grezzoRiposo = { left: new Istogramma(0, 0.5, 100), right: new Istogramma(0, 0.5, 100) };
+    this.grezzoGesto  = { left: new Istogramma(0, 0.5, 100), right: new Istogramma(0, 0.5, 100) };
+    this.campioniInGesto = 0;
+    this.campioniTotali = 0;
     this.durataGesti = new Istogramma(0, 6000, 30);   // ms
     this.durataChiusure = new Istogramma(0, 3000, 30);// ms
 
@@ -225,6 +250,22 @@ export class SessionStats {
     // Il segnale a riposo è ciò che determina la soglia: si accumula
     // solo quando NON c'è un gesto in corso.
     if (!inGesto && Number.isFinite(n)) this.riposoSigma.add(Math.abs(n));
+
+    /* Misure sul GREZZO, indipendenti dalla configurazione.
+     * La mediana di tutti i valori è la posizione di riposo: la
+     * persona sta ferma la maggior parte del tempo, e la mediana non
+     * si lascia spostare dai gesti. */
+    this.campioniTotali++;
+    if (inGesto) this.campioniInGesto++;
+    for (const eye of ['left', 'right']) {
+      const o2 = obs?.[eye];
+      if (!o2 || !Number.isFinite(o2.y)) continue;
+      this.grezzoValori[eye].add(o2.y);
+      const riposo = this.grezzoValori[eye].tot > 200
+        ? this.grezzoValori[eye].percentile(0.5) : 0;
+      const scarto = Math.abs(o2.y - riposo);
+      (inGesto ? this.grezzoGesto[eye] : this.grezzoRiposo[eye]).add(scarto);
+    }
 
     // Analisi periodica: una volta al secondo, non a ogni fotogramma.
     if (t - this.tUltimaAnalisi >= this.passoAnalisiMs) {
@@ -458,10 +499,81 @@ export class SessionStats {
     // Soglia dal segnale a riposo osservato per ore. Il 99° percentile
     // è più solido del massimo: un singolo urto non deve dettare legge.
     if (this.riposoSigma.tot > 500) {
-      const base = Math.max(r.riposo99, r.riposoMediana * 3);
-      p['signal.thresholdOn'] = clamp(Math.ceil(base * 1.25 * 2) / 2, 3.0, 12);
-      p['signal.thresholdOff'] = Math.round(p['signal.thresholdOn'] * 0.45 * 10) / 10;
-      motivi.push(`a riposo il segnale resta sotto ${r.riposo99.toFixed(1)}σ nel 99% del tempo (massimo ${r.riposoMassimo.toFixed(1)}σ)`);
+      /* ══════════════════════════════════════════════════════════════
+       * SOGLIE CALCOLATE DAL SEGNALE GREZZO
+       * ══════════════════════════════════════════════════════════════
+       *
+       * ⚠️ Prima si partiva da |n|, cioè dal segnale già normalizzato
+       * sulla stima corrente del rumore. Un anello: rumore stimato
+       * male → segnale normalizzato piccolo → soglia bassa → alla
+       * diagnosi successiva i numeri sono di nuovo diversi. Applicando
+       * due volte si ottenevano due risultati.
+       *
+       * Ora si parte dalla posizione GREZZA. Si misurano due cose che
+       * non dipendono da come il programma è configurato:
+       *   · quanto si scosta il segnale quando la persona è ferma;
+       *   · quanto si scosta quando compie il gesto.
+       *
+       * Dal primo si ricostruisce quale rumore stimerebbe il
+       * programma, con lo stesso metodo che usa davvero. Il rapporto
+       * fra i due dice a quanti "sigma" corrisponde il gesto, e la
+       * soglia si mette a metà strada — abbastanza sopra il rumore da
+       * non scattare a vuoto, abbastanza sotto il gesto da non
+       * perderlo.
+       *
+       * Il risultato non cambia riapplicandolo: è la stessa persona
+       * misurata due volte, non la configurazione che si insegue.
+       */
+      const eyeRif = E === r.perOcchio?.left ? 'left' : 'right';
+      const hRip = this.grezzoRiposo[eyeRif], hGes = this.grezzoGesto[eyeRif];
+      const abbastanza = hRip.tot > 300 && hGes.tot > 100;
+
+      if (abbastanza) {
+        // Stessa formula che il programma usa per stimare il rumore.
+        const perc = 0.25, ritar = 1.577;
+        const sigmaGrezzo = Math.max(1e-6, 1.4826 * hRip.percentile(perc) * ritar);
+        const gestoN = hGes.percentile(0.75) / sigmaGrezzo;
+        /* ⚠️ Il riferimento non è il rumore MEDIO ma il suo PICCO.
+         *
+         * Una soglia messa a metà fra rumore medio e gesto scatterebbe
+         * su ogni sussulto: il rumore ha punte molto più alte della
+         * propria media, ed è quelle che fanno scrivere lettere che
+         * nessuno voleva. Si guarda quindi quanto il segnale arriva a
+         * scostarsi nel 99% del tempo di quiete. */
+        const picco99 = hRip.percentile(0.99) / sigmaGrezzo;
+        // Punto di mezzo geometrico: resta lontano da entrambi anche
+        // quando la distanza fra i due è grande.
+        let soglia = Math.sqrt(Math.max(1.2, picco99) * Math.max(2, gestoN));
+        // E comunque mai troppo vicina al picco del rumore.
+        soglia = Math.max(soglia, picco99 * 1.25);
+        p['signal.thresholdOn'] = clamp(Math.round(soglia * 2) / 2, 2.5, 12);
+        p['signal.thresholdOff'] = Math.round(p['signal.thresholdOn'] * 0.45 * 10) / 10;
+        motivi.push(
+          `misurato sul segnale grezzo: il gesto vale ${gestoN.toFixed(1)} volte il rumore, `
+          + `che a riposo arriva a ${picco99.toFixed(1)} — soglia posta in mezzo`);
+      } else {
+        const base = Math.max(r.riposo99, r.riposoMediana * 3);
+        p['signal.thresholdOn'] = clamp(Math.ceil(base * 1.25 * 2) / 2, 3.0, 12);
+        p['signal.thresholdOff'] = Math.round(p['signal.thresholdOn'] * 0.45 * 10) / 10;
+        motivi.push(`pochi gesti osservati: soglia stimata dal comportamento a riposo (sotto ${r.riposo99.toFixed(1)}σ nel 99% del tempo)`);
+      }
+
+      /* ── Percentile della stima del rumore ──
+       * Dipende da quanto tempo la persona passa in movimento: se i
+       * gesti occupano più della frazione osservata, la stima si
+       * gonfia e non torna più indietro. */
+      const inMov = this.campioniTotali > 0 ? this.campioniInGesto / this.campioniTotali : 0;
+      if (inMov > 0.05) {
+        const quiete = 1 - inMov;
+        // Si resta ben dentro la parte quieta, con margine.
+        const percCons = clamp(Math.round(quiete * 0.6 * 100) / 100, 0.10, 0.40);
+        p['signal.sigmaPercentile'] = percCons;
+        // La ritaratura è legata al percentile: sono una coppia.
+        p['signal.sigmaRitaratura'] = Math.round((0.40 / percCons) * 0.985 * 100) / 100;
+        motivi.push(
+          `la persona è in movimento il ${(inMov * 100).toFixed(0)}% del tempo: `
+          + `la stima del rumore guarda il ${(percCons * 100).toFixed(0)}% più quieto del segnale`);
+      }
       if (r.tassoFalsiAlMinuto > 0.5) {
         motivi.push(`⚠️ ${r.tassoFalsiAlMinuto.toFixed(1)} superamenti a vuoto al minuto: soglia probabilmente bassa`);
       }

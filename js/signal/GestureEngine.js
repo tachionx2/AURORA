@@ -637,8 +637,30 @@ export class GestureEngine {
             A.base.release();
           }
         }
+        /* I parametri della stima del rumore sono regolabili: si
+         * applicano qui, a ogni fotogramma, così una modifica ha
+         * effetto subito senza ricostruire nulla. */
+        if (A.base?.scala) {
+          A.base.scala.perc = s.sigmaPercentile ?? 0.25;
+          A.base.scala.ritaratura = s.sigmaRitaratura ?? 1.577;
+          if (s.sigmaFinestraMs) A.base.scala.windowMs = s.sigmaFinestraMs;
+        }
         const b = A.base.push(t, A.smooth);
-        A.baseline = b.baseline; A.sigma = b.sigma;
+        A.baseline = b.baseline;
+        /* ⚠️ Normalizzazione sul rumore: si può SPEGNERE.
+         *
+         * Accesa (predefinito), ogni gesto è misurato in multipli del
+         * rumore di quella persona: le soglie valgono per chiunque,
+         * indipendentemente da distanza, illuminazione e telecamera.
+         *
+         * Spenta, si usa un valore fisso e le soglie diventano
+         * spostamenti ASSOLUTI. Serve quando il rumore è così basso o
+         * così irregolare che normalizzare confonde invece di aiutare.
+         * ⚠️ Spegnendola le soglie vanno ritarate da capo: 3,5 non
+         * vorrà più dire "tre volte e mezzo il rumore". */
+        A.sigma = s.normalizzaSuRumore === false
+          ? Math.max(s.minSigma, s.sigmaFisso ?? 0.02)
+          : b.sigma;
         A.disp = A.smooth - A.baseline;
         A.valid = true;
         res.axes[axis] = {

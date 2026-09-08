@@ -1297,8 +1297,16 @@ app.goto('parla');
    * è il numero che distingue "il movimento è davvero più piccolo" da
    * "il metro di quell'occhio è diverso". */
   const panelsC = fsC.readFileSync(pathC.join(quiC, '..', 'js/ui/Panels.js'), 'utf8');
-  ok(/Segnale grezzo SX \/ DX/.test(panelsC),
-     'il segnale grezzo è mostrato per entrambi gli occhi');
+  /* ⚠️ GREZZO e FILTRATO vanno mostrati SEPARATI.
+   *
+   * Prima l'etichetta diceva "grezzo" ma mostrava il segnale già
+   * filtrato: non si poteva distinguere "il rilevatore vede poco
+   * movimento" da "i filtri lo stanno mangiando" — che è esattamente
+   * la domanda da porsi quando l'ampiezza è bassa. */
+  ok(/'Grezzo SX \/ DX'/.test(panelsC) && /y\?\.raw/.test(panelsC),
+     'il segnale GREZZO mostrato è davvero quello prima dei filtri');
+  ok(/'Filtrato SX \/ DX'/.test(panelsC),
+     'e il filtrato è mostrato a parte, per confronto');
   ok(/Scostamento SX \/ DX/.test(panelsC),
      'e così lo scostamento dalla propria baseline');
   ok(/Palpebra copre iride SX \/ DX/.test(panelsC),
