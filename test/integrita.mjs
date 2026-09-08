@@ -36,7 +36,7 @@ const dynamicIds = new Set(['ytHost', 'pdfCanvas', 'mediaText', 'mediaImg', 'med
   // nell'HTML perché serve solo a chi stampa.
   'printFrame',
   // Creato dalla scheda impostazioni al momento del disegno.
-  'btnOffline', 'btnFloatWindow']);
+  'btnOffline', 'btnFloatWindow', 'btnNuovaSessione']);
 const missingIds = new Set();
 for (const f of jsFiles) {
   const src = read(f);

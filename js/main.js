@@ -3030,7 +3030,22 @@ class App {
     document.getElementById('fileVideo').onchange = (e) => {
       const f = e.target.files?.[0];
       e.target.value = '';
-      if (f) this.startVision(f);
+      if (!f) return;
+      /* ⚠️ Un video nuovo è una sessione nuova.
+       *
+       * Stime del rumore, baseline, riferimenti di apertura e
+       * statistiche cliniche si accumulano per tutta la sessione — ed
+       * è giusto, servono tempo per essere affidabili. Ma caricando
+       * un altro video, o passando a un'altra persona, si continuava
+       * a misurare con lo stato costruito sul filmato precedente,
+       * senza alcun modo di accorgersene.
+       *
+       * Chi carica un video si aspetta di ricominciare da lì. */
+      this.gestures.nuovaSessione();
+      this.sessione = new SessionStats();
+      this.plot?.clear();
+      this.debugView?.logEvent('nuovo video: sessione azzerata');
+      this.startVision(f);
     };
 
     /* ── Comandi del video caricato ──
@@ -3247,6 +3262,23 @@ class App {
       this.settingsView._ripristinaFiltri();
       this.toast('Filtri e soglie riportati ai valori predefiniti');
       this.debugView?.logEvent('filtri riportati ai predefiniti');
+    };
+
+    /* ── Nuova sessione ──
+     * Azzera tutto ciò che si accumula: stime del rumore, baseline,
+     * riferimenti, contatori, statistiche cliniche e grafico. Serve
+     * passando a un'altra persona, a un altro video, o semplicemente
+     * per rifare una prova da capo con la certezza di ripartire pulito. */
+    const bns = document.getElementById('btnNuovaSessione');
+    if (bns) bns.onclick = () => {
+      if (!confirm('Azzerare la sessione?\n\nSi perdono le misure raccolte finora — rumore, baseline, statistiche cliniche e grafico — e si riparte da zero.\n\nLe impostazioni NON vengono toccate.')) return;
+      this.gestures.nuovaSessione();
+      this.sessione = new SessionStats();
+      this.plot?.clear();
+      this.renderDiagStats?.();
+      this.debugView?.renderCounters?.();
+      this.toast('Sessione azzerata: si riparte da zero');
+      this.debugView?.logEvent('sessione azzerata');
     };
 
     const bat = document.getElementById('btnAutoTune');

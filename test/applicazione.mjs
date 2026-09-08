@@ -1450,5 +1450,77 @@ app.goto('parla');
      `ogni via elencata esiste davvero (inesistenti: ${inesistenti.join(', ') || 'nessuna'})`);
 }
 
+/* ═══════════ Deve esistere un modo di RICOMINCIARE ═══════════
+ *
+ * ⚠️ Stime del rumore, baseline, riferimenti di apertura e statistiche
+ * cliniche si accumulano per tutta la sessione — ed è giusto, servono
+ * tempo per essere affidabili.
+ *
+ * Ma significa che caricando un video diverso, o passando a un'altra
+ * persona, si continuava a misurare con lo stato costruito su quello
+ * di prima. E se quello stato si era guastato, non c'era modo di
+ * uscirne: nemmeno riportando le impostazioni ai predefiniti, perché
+ * sono due cose diverse.
+ *
+ * Ricostruire i filtri cambiando un parametro lo faceva per caso — ed
+ * è il motivo per cui "applica e poi ripristina" sembrava aggiustare
+ * tutto. Non era la configurazione: era l'azzeramento.               */
+{
+  const { GestureEngine: GE } = await import('../js/signal/GestureEngine.js');
+  const { SessionStats: SS } = await import('../js/signal/SessionStats.js');
+  const { DEFAULT_CONFIG: DC, deepClone: dc } = await import('../js/core/config.js');
+
+  const c = dc(DC);
+  const g = new GE(c, () => {});
+  let t = 0;
+  const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000);
+  const o = y => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.97 });
+  let st = new SS();
+  for (let i = 0; i < 4000; i++) {
+    t += 33;
+    const obs = { left: o(0), right: o(0) };
+    g.process(t, obs);
+    st.push(t, obs, 1, false);
+  }
+  const sigmaPrima = g.eyes.left.y.sigma;
+  const orePrima = st.riepilogo().ore;
+  ok(sigmaPrima > 0.01 && orePrima > 0,
+     'lo stato si accumula durante la sessione, come deve');
+
+  g.nuovaSessione();
+  st = new SS();
+  ok(g.eyes.left.y.sigma < sigmaPrima,
+     `dopo l azzeramento la stima del rumore riparte (${sigmaPrima.toFixed(5)} → ${g.eyes.left.y.sigma.toFixed(5)})`);
+  ok(g.eyes.left.y.baseline === 0 || g.eyes.left.y.baseline === null,
+     'e con essa la baseline');
+  ok(st.riepilogo().ore === 0, 'le statistiche cliniche ripartono da zero');
+  ok((g.counters.validiLeft ?? 0) === 0, 'e i contatori');
+
+  /* ⚠️ Ma le IMPOSTAZIONI non vanno toccate: azzerare le misure e
+   * riportare i parametri ai predefiniti sono due cose diverse, e chi
+   * preme una non si aspetta l'altra. */
+  ok(c.signal.thresholdOn === DC.signal.thresholdOn
+     && c.ui.language === DC.ui.language,
+     'azzerare la sessione NON tocca le impostazioni');
+
+  const fsN = await import('node:fs');
+  const pathN = await import('node:path');
+  const quiN = pathN.dirname(import.meta.filename || process.argv[1]);
+  const htmlN = fsN.readFileSync(pathN.join(quiN, '..', 'index.html'), 'utf8');
+  const mainN = fsN.readFileSync(pathN.join(quiN, '..', 'js/main.js'), 'utf8');
+  ok(/id="btnNuovaSessione"/.test(htmlN), 'esiste il comando nella diagnostica');
+  ok(/btnNuovaSessione/.test(mainN) && /nuovaSessione\(\)/.test(mainN), 'ed è collegato');
+
+  /* ⚠️ E caricare un video nuovo deve azzerare da solo: chi carica un
+   * altro filmato si aspetta di ricominciare da lì, non di continuare
+   * a misurare con lo stato del precedente. */
+  const iF = mainN.indexOf("getElementById('fileVideo')");
+  const blocco = mainN.slice(iF, iF + 1200);
+  ok(/nuovaSessione\(\)/.test(blocco),
+     'caricando un video nuovo la sessione si azzera da sola');
+  ok(/new SessionStats\(\)/.test(blocco),
+     'comprese le statistiche cliniche');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

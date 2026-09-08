@@ -185,6 +185,41 @@ export class GestureEngine {
     this._syncBlink();
   }
 
+  /**
+   * Azzera TUTTO lo stato del rilevamento e riparte da zero.
+   *
+   * ⚠️ Serve un modo esplicito di ricominciare, e prima non c'era.
+   *
+   * Le stime del rumore, le baseline, i riferimenti di apertura e i
+   * contatori si accumulano per tutta la sessione. È giusto: servono
+   * tempo per essere affidabili. Ma significa che caricando un video
+   * diverso, o passando a un'altra persona, si continua a misurare
+   * con lo stato costruito su quello di prima — e se quello stato si
+   * era guastato, non c'è modo di uscirne.
+   *
+   * Ricostruire i filtri cambiando un parametro lo faceva per caso, ed
+   * è il motivo per cui "applica e poi ripristina" sembrava aggiustare
+   * le cose: non era la configurazione, era l'azzeramento.
+   *
+   * Meglio poterlo chiedere direttamente.
+   */
+  nuovaSessione() {
+    this._rebuild();
+    for (const eye of ['left', 'right']) {
+      this.blink[eye]?.reset?.();
+      this.burst[eye]?.reset?.();
+    }
+    this._combo = null;
+    this._comboN = null;
+    this._comboDa = null;
+    this._pending = {};
+    this.dominant = 'left';
+    for (const k of Object.keys(this.counters)) {
+      if (typeof this.counters[k] === 'number') this.counters[k] = 0;
+    }
+    this.counters.lastRejectReason = null;
+  }
+
   _rebuild() {
     const s = this.cfg.signal;
     // ⚠️ Filtri più LEGGERI per le espressioni del viso.

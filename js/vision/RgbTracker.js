@@ -55,9 +55,23 @@ const MODEL_URL = 'https://storage.googleapis.com/mediapipe-models/face_landmark
  */
 export const EYE_LM = {
   // occhio sinistro della persona = lato destro dell'immagine
-  left:  { inner: 362, outer: 263, upper: 386, lower: 374, iris: [473, 474, 475, 476, 477] },
+  /* ⚠️ Le palpebre si misurano su TRE coppie di punti, non una.
+   *
+   * Con una coppia sola l'apertura misurata cambiava pochissimo anche
+   * quando l'occhio si spalancava in modo evidente: nei dati reali
+   * passava da 0,438 a 0,443 mentre i punti sullo schermo si
+   * allontanavano vistosamente. Il punto scelto non cade dove
+   * l'occhio si apre di più, e il modello lo colloca in modo
+   * conservativo.
+   *
+   * Prendendo la distanza MASSIMA fra tre coppie lungo la rima, si
+   * coglie il punto di massima apertura ovunque si trovi, e il segnale
+   * diventa utilizzabile come canale di comando. */
+  left:  { inner: 362, outer: 263, upper: 386, lower: 374, iris: [473, 474, 475, 476, 477],
+           coppie: [[386, 374], [385, 380], [387, 373]] },
   // occhio destro della persona = lato sinistro dell'immagine
-  right: { inner: 133, outer: 33,  upper: 159, lower: 145, iris: [468, 469, 470, 471, 472] },
+  right: { inner: 133, outer: 33,  upper: 159, lower: 145, iris: [468, 469, 470, 471, 472],
+           coppie: [[159, 145], [158, 153], [160, 144]] },
 };
 
 /** Rampa lineare continua fra due estremi. */
@@ -263,7 +277,23 @@ export class RgbTracker {
 
       const cx = (inner.x + outer.x) / 2, cy = (inner.y + outer.y) / 2;
 
-      const lidGap = Math.hypot(upper.x - lower.x, upper.y - lower.y);
+      /* Apertura: la distanza MASSIMA fra le coppie di punti palpebrali.
+       *
+       * Una coppia sola coglie l'apertura in un punto arbitrario della
+       * rima, che non è dove l'occhio si apre di più. Il massimo fra
+       * tre coppie segue il punto di massima apertura ovunque si
+       * sposti, ed è quello che cambia davvero quando lo sguardo va in
+       * alto. Se le coppie non ci sono, si ricade sulla misura di
+       * sempre senza cambiare nulla. */
+      let lidGap = Math.hypot(upper.x - lower.x, upper.y - lower.y);
+      if (Array.isArray(M.coppie)) {
+        for (const [su, giu] of M.coppie) {
+          const a2 = P(su), b2 = P(giu);
+          if (!a2 || !b2) continue;
+          const d2 = Math.hypot(a2.x - b2.x, a2.y - b2.y);
+          if (d2 > lidGap) lidGap = d2;
+        }
+      }
       const openness = lidGap / eyeWidth;
 
       // Raggio dell'iride, dai soli punti del PERIMETRO.

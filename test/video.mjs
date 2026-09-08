@@ -342,5 +342,92 @@ setLanguage('it');
      `il tetto impedisce di far volare il segno (${estremo[0].y.toFixed(4)})`);
 }
 
+/* ── L'apertura si misura su TRE coppie di punti ──
+ *
+ * ⚠️ Con una coppia sola l'apertura cambiava pochissimo anche quando
+ * l'occhio si spalancava in modo evidente: nei dati reali passava da
+ * 0,438 a 0,443 mentre i punti sullo schermo si allontanavano
+ * vistosamente. Il punto scelto non cade dove l'occhio si apre di più.
+ *
+ * Il canale "occhio spalancato" risultava così sotto la soglia e
+ * inutilizzabile — e sommandolo agli altri PEGGIORAVA il combinato,
+ * perché aggiungeva rumore senza segnale.                           */
+{
+  const { RgbTracker: RT3, EYE_LM: LM3 } = await import('../js/vision/RgbTracker.js');
+  const { DEFAULT_CONFIG: DC3, deepClone: dc3 } = await import('../js/core/config.js');
+  const W3 = 640, H3 = 480;
+
+  // L'occhio si spalanca: il punto centrale della palpebra si alza
+  // poco, quelli laterali molto. È il caso che rendeva cieca la
+  // misura a una coppia.
+  function volto(apre, conCoppie) {
+    const p = new Array(478).fill(null).map(() => ({ x: 0, y: 0, z: 0 }));
+    const n = (x, y) => ({ x: x / W3, y: y / H3, z: 0 });
+    const occhio = (M, cx) => {
+      p[M.inner] = n(cx + 15, 240); p[M.outer] = n(cx - 15, 240);
+      p[M.upper] = n(cx, 236 - 2 * apre); p[M.lower] = n(cx, 244 + 1 * apre);
+      if (conCoppie && M.coppie) {
+        p[M.coppie[1][0]] = n(cx - 6, 235 - 7 * apre); p[M.coppie[1][1]] = n(cx - 6, 245 + 3 * apre);
+        p[M.coppie[2][0]] = n(cx + 6, 235 - 7 * apre); p[M.coppie[2][1]] = n(cx + 6, 245 + 3 * apre);
+      }
+      const r = 5, iy = 240;
+      p[M.iris[0]] = n(cx, iy); p[M.iris[1]] = n(cx - r, iy);
+      p[M.iris[2]] = n(cx, iy - r); p[M.iris[3]] = n(cx + r, iy); p[M.iris[4]] = n(cx, iy + r);
+    };
+    occhio(LM3.right, 200); occhio(LM3.left, 440);
+    return { faceLandmarks: [p] };
+  }
+
+  const misura = (conCoppie) => {
+    const tr = new RT3(dc3(DC3)); tr.ready = true;
+    tr.landmarker = { detectForVideo: () => tr._r };
+    return [0, 2].map((a, i) => {
+      tr._r = volto(a, conCoppie);
+      return tr.detect({}, 1000 + i * 100, W3, H3).left.openness;
+    });
+  };
+
+  const conUna = misura(false), conTre = misura(true);
+  const escUna = conUna[1] - conUna[0], escTre = conTre[1] - conTre[0];
+  ok(escTre > escUna * 2,
+     `l apertura misurata su tre coppie è molto più sensibile (${escTre.toFixed(4)} contro ${escUna.toFixed(4)})`);
+  ok(escTre / conTre[0] > 1.0,
+     `spalancando l occhio l apertura più che raddoppia (+${((escTre / conTre[0]) * 100).toFixed(0)}%)`);
+
+  // Ogni occhio deve avere le proprie coppie, e devono essere valide
+  for (const lato of ['left', 'right']) {
+    ok(Array.isArray(LM3[lato].coppie) && LM3[lato].coppie.length === 3,
+       `l occhio ${lato} ha tre coppie di punti palpebrali`);
+    ok(LM3[lato].coppie.every(([a, b]) => Number.isInteger(a) && Number.isInteger(b) && a !== b),
+       `e sono coppie valide di punti distinti`);
+  }
+
+  /* ⚠️ E un occhio CHIUSO deve restare riconosciuto: prendendo il
+   * massimo fra più coppie si rischierebbe di non vedere mai la
+   * chiusura, togliendo a chi usa Aurora un modo di comandare. */
+  const trC = new RT3(dc3(DC3)); trC.ready = true;
+  trC.landmarker = { detectForVideo: () => trC._r };
+  trC._r = volto(0, true);
+  const aperto = trC.detect({}, 2000, W3, H3).left.openness;
+  // Occhio chiuso: tutte le coppie collassano
+  const chiuso = (() => {
+    const p = new Array(478).fill(null).map(() => ({ x: 0, y: 0, z: 0 }));
+    const n = (x, y) => ({ x: x / W3, y: y / H3, z: 0 });
+    for (const [lato, cx] of [['right', 200], ['left', 440]]) {
+      const M = LM3[lato];
+      p[M.inner] = n(cx + 15, 240); p[M.outer] = n(cx - 15, 240);
+      p[M.upper] = n(cx, 240); p[M.lower] = n(cx, 240);
+      for (const [su, giu] of M.coppie) { p[su] = n(cx, 240); p[giu] = n(cx, 240); }
+      const r = 5;
+      p[M.iris[0]] = n(cx, 240); p[M.iris[1]] = n(cx - r, 240);
+      p[M.iris[2]] = n(cx, 235); p[M.iris[3]] = n(cx + r, 240); p[M.iris[4]] = n(cx, 245);
+    }
+    trC._r = { faceLandmarks: [p] };
+    return trC.detect({}, 2100, W3, H3).left.openness;
+  })();
+  ok(chiuso < aperto * 0.2,
+     `un occhio chiuso resta riconoscibile (${chiuso.toFixed(4)} contro ${aperto.toFixed(4)} da aperto)`);
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);
