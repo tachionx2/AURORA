@@ -1303,8 +1303,13 @@ app.goto('parla');
    * filtrato: non si poteva distinguere "il rilevatore vede poco
    * movimento" da "i filtri lo stanno mangiando" — che è esattamente
    * la domanda da porsi quando l'ampiezza è bassa. */
-  ok(/'Grezzo SX \/ DX'/.test(panelsC) && /y\?\.raw/.test(panelsC),
+  ok(/'Grezzo istantaneo SX \/ DX'/.test(panelsC) && /y\?\.raw/.test(panelsC),
      'il segnale GREZZO mostrato è davvero quello prima dei filtri');
+  /* ⚠️ E accanto c'è l ESCURSIONE, che è il numero utile: il valore
+   * istantaneo va letto nell attimo giusto del gesto, cosa impossibile
+   * mentre si osserva. */
+  ok(/Escursione grezza SX \/ DX/.test(panelsC),
+     'ed è affiancato dall escursione, leggibile con calma');
   ok(/'Filtrato SX \/ DX'/.test(panelsC),
      'e il filtrato è mostrato a parte, per confronto');
   ok(/Scostamento SX \/ DX/.test(panelsC),
@@ -1579,6 +1584,77 @@ app.goto('parla');
   const g2 = new GEx(c2, () => {});
   ok(g2.guadagnoOcchio('left') === 1 && g2.guadagnoOcchio('right') === 1,
      'valori impossibili vengono ignorati invece di azzerare il segnale');
+}
+
+/* ═══════ Il ripristino deve CAMBIARE davvero i valori ═══════
+ *
+ * ⚠️ Il difetto più imbarazzante di tutta questa serie: il ripristino
+ * leggeva i valori da `DEFAULT_CONFIG`, che NON era importato in quel
+ * file. Ogni lettura restituiva `undefined`, ogni parametro veniva
+ * saltato, e il comando non faceva assolutamente nulla — in silenzio,
+ * senza errori, mostrando anche un messaggio di conferma.
+ *
+ * Chi lo premeva restava con i vecchi valori credendo di essere
+ * tornato ai predefiniti, e ogni prova successiva partiva da una
+ * configurazione sconosciuta. I test controllavano che il comando
+ * esistesse e che fosse collegato: nessuno controllava che AVESSE
+ * EFFETTO.                                                           */
+{
+  const fsQ = await import('node:fs');
+  const pathQ = await import('node:path');
+  const quiQ = pathQ.dirname(import.meta.filename || process.argv[1]);
+  const svQ = fsQ.readFileSync(pathQ.join(quiQ, '..', 'js/ui/SettingsView.js'), 'utf8');
+
+  // Ogni identificatore usato dev'essere importato o definito nel file.
+  for (const nome of ['DEFAULT_CONFIG', 'GESTURE_CHANNELS', 'deepClone']) {
+    const importato = new RegExp(`import\\s*\\{[^}]*\\b${nome}\\b`).test(svQ);
+    const definito = new RegExp(`(const|let|function|class)\\s+${nome}\\b`).test(svQ);
+    ok(importato || definito,
+       `"${nome}" è importato o definito, non usato a vuoto`);
+  }
+
+  /* La prova vera: si esegue il ripristino su una configurazione
+   * sporcata e si verifica che i valori CAMBINO. */
+  const { DEFAULT_CONFIG: DCQ, deepClone: dcQ } = await import('../js/core/config.js');
+  const cfg = dcQ(DCQ);
+  cfg.signal.thresholdOn = 9;
+  cfg.signal.thresholdOff = 4;
+  cfg.signal.medianWindowMs = 600;
+  cfg.signal.thresholdDir = { up: 7, down: 7, left: 7, right: 7 };
+
+  const { SettingsView: SVpre } = await import('../js/ui/SettingsView.js');
+  const finto = {
+    _viePrestazioni: SVpre.prototype._viePrestazioni,
+    app: {
+      cfg,
+      set(via, val) {
+        const parti = via.split('.');
+        let n = this.cfg;
+        for (let i = 0; i < parti.length - 1; i++) n = n[parti[i]];
+        n[parti[parti.length - 1]] = val;
+      },
+      toast() {},
+    },
+    render() {},
+  };
+
+  // Si riusa il metodo vero, non una copia.
+  SVpre.prototype._ripristinaFiltri.call(finto);
+
+  ok(cfg.signal.thresholdOn === DCQ.signal.thresholdOn,
+     `il ripristino riporta davvero la soglia (${cfg.signal.thresholdOn})`);
+  ok(cfg.signal.thresholdOff === DCQ.signal.thresholdOff,
+     `e quella di rilascio (${cfg.signal.thresholdOff})`);
+  ok(cfg.signal.medianWindowMs === DCQ.signal.medianWindowMs,
+     `e la finestra mediana (${cfg.signal.medianWindowMs})`);
+  ok(cfg.signal.thresholdDir.up === null,
+     'e svuota le soglie per direzione, che altrimenti vincono su tutto');
+
+  /* ⚠️ E non deve CONDIVIDERE gli oggetti con i valori predefiniti:
+   * la prima modifica successiva li corromperebbe per sempre. */
+  cfg.signal.thresholdDir.up = 99;
+  ok(DCQ.signal.thresholdDir.up === null,
+     'gli oggetti vengono copiati, non condivisi con i predefiniti');
 }
 
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);

@@ -2711,5 +2711,83 @@ function corri(mod, script) {
   }
 }
 
+/* ══════ 57. L'ESCURSIONE GREZZA distingue le due domande ══════
+ *
+ * ⚠️ Quando l'ampiezza cala, le domande possibili sono due e portano
+ * a indagini opposte: "il rilevatore vede meno movimento?" oppure "il
+ * movimento è lo stesso ma il metro è cambiato?".
+ *
+ * Finora non c'era modo di rispondere: il grafico mostra tutto diviso
+ * per il rumore, compresa la traccia chiamata "grezzo", e il contatore
+ * mostrava il valore ISTANTANEO — che va letto nell'attimo giusto del
+ * gesto, cosa impossibile mentre si osserva.
+ *
+ * Questa è la distanza fra riposo e picco negli ultimi dieci secondi,
+ * in unità del rilevatore, senza alcuna divisione. Si guarda con calma
+ * e risponde da sola.                                                */
+{
+  const c = deepClone(DEFAULT_CONFIG);
+  const g = new GestureEngine(c, () => {});
+  g.setDiagnostics(true);
+  let t = 0;
+  const R = (x) => 0.020 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+  const o = (y) => ({ x: 0, y: y + R(t), openness: 0.44, confidence: 0.96 });
+  const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0), right: o(0) }); } };
+  d(60000);
+  const misure = [];
+  for (let k = 0; k < 25; k++) {
+    // Il destro si muove la METÀ del sinistro, sempre uguale nel tempo.
+    const q = (f) => g.process(t, { left: o(-0.16 * f), right: o(-0.08 * f) });
+    for (let i = 0; i < 250; i += 33) { t += 33; q(i / 250); }
+    for (let i = 0; i < 900; i += 33) { t += 33; q(1); }
+    for (let i = 0; i < 250; i += 33) { t += 33; q(1 - i / 250); }
+    d(1500);
+    misure.push({
+      sx: g.eyes.left.y.escursioneGrezza,
+      dx: g.eyes.right.y.escursioneGrezza,
+    });
+  }
+
+  const primo = misure[3], ultimo = misure[24];
+  ok(Number.isFinite(primo.sx) && Number.isFinite(primo.dx),
+     '57a. l escursione grezza viene misurata per entrambi gli occhi');
+  ok(Math.abs(ultimo.sx / primo.sx - 1) < 0.10,
+     `57b. resta costante nel tempo a movimento costante (${primo.sx.toFixed(4)} → ${ultimo.sx.toFixed(4)})`);
+  ok(Math.abs(ultimo.dx / primo.dx - 1) < 0.10,
+     `57c. anche sull occhio che si muove meno (${primo.dx.toFixed(4)} → ${ultimo.dx.toFixed(4)})`);
+
+  /* ⚠️ E deve riflettere il movimento VERO: il destro si muove la
+   * metà, e la misura deve dirlo. */
+  ok(Math.abs(ultimo.dx / ultimo.sx - 0.5) < 0.08,
+     `57d. e rispecchia il movimento reale (destro al ${(100 * ultimo.dx / ultimo.sx).toFixed(0)}% del sinistro)`);
+
+  /* Non deve dipendere dal rumore stimato: è il punto di tutta la
+   * faccenda. Con una stima del rumore diversa, la misura è la stessa. */
+  const c2 = deepClone(DEFAULT_CONFIG);
+  c2.signal.minSigma = 0.04;          // rumore stimato dieci volte tanto
+  const g2 = new GestureEngine(c2, () => {});
+  g2.setDiagnostics(true);
+  let t2 = 0;
+  const o2 = (y) => ({ x: 0, y: y + 0.020 * Math.sin(2 * Math.PI * 4.2 * t2 / 1000), openness: 0.44, confidence: 0.96 });
+  const d2 = (ms) => { for (let i = 0; i < ms; i += 33) { t2 += 33; g2.process(t2, { left: o2(0), right: o2(0) }); } };
+  d2(60000);
+  for (let k = 0; k < 25; k++) {
+    const q = (f) => g2.process(t2, { left: o2(-0.16 * f), right: o2(-0.08 * f) });
+    for (let i = 0; i < 250; i += 33) { t2 += 33; q(i / 250); }
+    for (let i = 0; i < 900; i += 33) { t2 += 33; q(1); }
+    for (let i = 0; i < 250; i += 33) { t2 += 33; q(1 - i / 250); }
+    d2(1500);
+  }
+  ok(Math.abs(g2.eyes.left.y.escursioneGrezza / ultimo.sx - 1) < 0.08,
+     `57e. NON dipende dalla stima del rumore (${g2.eyes.left.y.escursioneGrezza.toFixed(4)} contro ${ultimo.sx.toFixed(4)})`);
+
+  const fs57 = await import('node:fs');
+  const path57 = await import('node:path');
+  const qui57 = path57.dirname(import.meta.filename || process.argv[1]);
+  const pan = fs57.readFileSync(path57.join(qui57, '..', 'js/ui/Panels.js'), 'utf8');
+  ok(/Escursione grezza SX \/ DX/.test(pan), '57f. ed è mostrata nei contatori');
+  ok(/Escursione apertura SX \/ DX/.test(pan), '57g. insieme a quella dell apertura');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

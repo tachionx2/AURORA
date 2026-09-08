@@ -268,7 +268,19 @@ export class DebugView {
        * già FILTRATO, quindi non si poteva distinguere "il rilevatore
        * vede poco movimento" da "i filtri lo stanno mangiando" — che è
        * esattamente la domanda da porsi quando l'ampiezza è bassa. */
-      ['Grezzo SX / DX', `${(this.app.gestures?.eyes?.left?.y?.raw ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.raw ?? 0).toFixed(4)}`],
+      /* ⚠️ IL numero da guardare quando l'ampiezza cala.
+       *
+       * È quanto il segnale si muove DAVVERO negli ultimi dieci
+       * secondi, senza alcuna divisione per il rumore. Se resta
+       * costante mentre l'ampiezza in sigma cala, il movimento è
+       * identico e il problema sta nella stima del rumore. Se cala
+       * anche questa, è il rilevamento a vedere meno.
+       *
+       * Il valore istantaneo non bastava: va letto nell'attimo giusto
+       * del gesto, che mentre si osserva è impossibile. */
+      ['Escursione grezza SX / DX', `${(this.app.gestures?.eyes?.left?.y?.escursioneGrezza ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.escursioneGrezza ?? 0).toFixed(4)}`],
+      ['Escursione apertura SX / DX', `${(this.app.gestures?.eyes?.left?.a?.escursioneGrezza ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.a?.escursioneGrezza ?? 0).toFixed(4)}`],
+      ['Grezzo istantaneo SX / DX', `${(this.app.gestures?.eyes?.left?.y?.raw ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.raw ?? 0).toFixed(4)}`],
       ['Filtrato SX / DX', `${(this.app.gestures?.eyes?.left?.y?.smooth ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.smooth ?? 0).toFixed(4)}`],
       ['Scostamento SX / DX', `${(this.app.gestures?.eyes?.left?.y?.disp ?? 0).toFixed(4)} / ${(this.app.gestures?.eyes?.right?.y?.disp ?? 0).toFixed(4)}`],
       ['Viso soppressi', g.visoSoppressi ?? 0],

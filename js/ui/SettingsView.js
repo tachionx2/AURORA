@@ -9,7 +9,7 @@
  * complessità vive qui, dove la manovra un assistente.
  */
 
-import { GESTURE_CHANNELS, ACTIONS, DEFAULT_GROUPS, ALPHABETICAL_GROUPS, DEFAULT_PHRASE_GROUPS, deepClone } from '../core/config.js';
+import { DEFAULT_CONFIG, GESTURE_CHANNELS, ACTIONS, DEFAULT_GROUPS, ALPHABETICAL_GROUPS, DEFAULT_PHRASE_GROUPS, deepClone } from '../core/config.js';
 import { EXPR_CHECKS } from '../signal/GestureEngine.js';
 import { CHANNEL_PRESETS } from '../core/config.js';
 import { ESEMPIO_NETLIFY, indirizzoValido, verificaConfigurazione } from '../lang/Mailer.js';

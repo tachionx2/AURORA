@@ -614,6 +614,35 @@ export class GestureEngine {
          * misura che serve al riconoscimento della chiusura, qui però
          * usata come segnale continuo invece che come interruttore. */
         A.raw = axis === 'a' ? o.openness : o[axis];
+
+        /* ⚠️ ESCURSIONE GREZZA: quanto il segnale si muove davvero,
+         * in unità di misura del rilevatore, senza alcuna divisione
+         * per il rumore.
+         *
+         * È il numero che distingue le due domande che continuavano a
+         * confondersi: "il rilevatore vede meno movimento?" oppure "il
+         * movimento è lo stesso ma il metro è cambiato?". Il valore
+         * istantaneo non basta, perché va letto nell'attimo giusto;
+         * questa è la distanza fra il riposo e il picco degli ultimi
+         * dieci secondi, e si può guardare con calma.
+         *
+         * Se resta costante mentre l'ampiezza in sigma cala, il
+         * movimento è identico e il problema sta nella stima del
+         * rumore. Se cala anche questa, è il rilevamento. */
+        A.storiaGrezza = A.storiaGrezza || [];
+        if (Number.isFinite(A.raw)) {
+          A.storiaGrezza.push(A.raw);
+          if (A.storiaGrezza.length > 300) A.storiaGrezza.shift();
+          if (A.storiaGrezza.length >= 30) {
+            const ord = [...A.storiaGrezza].sort((p, q) => p - q);
+            const q = (f) => ord[Math.min(ord.length - 1, Math.floor(ord.length * f))];
+            // Riposo = mediana; picco = 97° percentile in valore assoluto
+            // rispetto al riposo, così vale in entrambe le direzioni.
+            const riposo = q(0.5);
+            const scarti = ord.map(v => Math.abs(v - riposo)).sort((p, r) => p - r);
+            A.escursioneGrezza = scarti[Math.floor(scarti.length * 0.97)];
+          }
+        }
         A.smooth = A.lp.push(t, A.median.push(t, A.raw));
         /* ── Baseline alimentata solo dalla QUIETE ──
          *
