@@ -1921,7 +1921,15 @@ function corri(mod, script) {
   const bd3 = new BlinkDetector();
   let t3 = 0;
   for (let i = 0; i < 200; i++) { t3 += 33; bd3.update(0.45, t3, 0.95); }
-  const strizzata = bd3.update(0.24, t3 + 33, 0.95);
+  /* ⚠️ L'apertura si riduce GRADUALMENTE, come quando si alza lo
+   * sguardo: è la lentezza a distinguerla da un ammiccamento, che
+   * percorre la stessa corsa in due o tre fotogrammi. */
+  let t3b = t3;
+  let strizzata = null;
+  for (const ap of [0.42, 0.38, 0.34, 0.30, 0.27, 0.25, 0.24]) {
+    t3b += 33;
+    strizzata = bd3.update(ap, t3b, 0.95);
+  }
   ok(strizzata.closed === false,
      '47e. un occhio stretto con iride ancora visibile non è una chiusura');
   const strizzataSenzaIride = bd3.update(0.24, t3 + 66, 0.20);
@@ -2601,6 +2609,106 @@ function corri(mod, script) {
      `55d. nessun parametro sparisce continuando a osservare (persi: ${persi.join(', ') || 'nessuno'})`);
   ok(Object.keys(dopo3.proposta).length >= Object.keys(dopo2.proposta).length,
      `55e. osservando di più si propone almeno quanto prima (${Object.keys(dopo2.proposta).length} → ${Object.keys(dopo3.proposta).length})`);
+}
+
+/* ══════ 56. Ammiccamento e sguardo alzato si distinguono per DURATA ══════
+ *
+ * ⚠️ Allargare la finestra di smentimento aveva risolto le finte
+ * chiusure, ma lasciava passare anche i TRANSITORI di ogni
+ * ammiccamento vero — i fotogrammi in cui la palpebra è a mezza corsa
+ * e la posizione dell'iride sbanda. Quei campioni entravano nella
+ * stima del rumore e la gonfiavano: l'occhio che ammicca più spesso
+ * scendeva da 35σ a 25σ mentre l'altro reggeva.
+ *
+ * I due casi si distinguono per durata: un ammiccamento intero sta
+ * dentro un paio di decimi di secondo, mentre stringere gli occhi
+ * guardando in alto dura un secondo o più.                          */
+{
+  function conAmmiccamenti(velocita) {
+    const c = deepClone(DEFAULT_CONFIG);
+    // Una velocità enorme smentisce QUALUNQUE chiusura, anche un
+    // ammiccamento vero: è il comportamento sbagliato da confrontare.
+    c.signal.blinkSmentiVelocita = velocita;
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.020 * Math.sin(2 * Math.PI * 0.8 * x / 1000)
+                   + 0.015 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    const cf = ap => 0.45 + 0.55 * Math.max(0, Math.min(1, (ap - 0.05) / 0.09));
+    // Durante un ammiccamento la posizione stimata SBANDA: la palpebra
+    // copre l'iride e il modello tira a indovinare.
+    const o = (y, ap) => ({
+      x: 0, y: y + R(t) + (ap < 0.30 ? (0.30 - ap) * 1.5 : 0),
+      openness: ap, confidence: cf(ap),
+    });
+    const d = (ms, y) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(y, 0.44), right: o(y, 0.44) }); } };
+    const amm = (ancheSx) => {
+      for (const ap of [0.34, 0.24, 0.16, 0.16, 0.24, 0.34]) {
+        t += 33;
+        g.process(t, { left: o(0, ancheSx ? ap : 0.44), right: o(0, ap) });
+      }
+    };
+    d(40000, 0);
+    const v = [];
+    for (let k = 0; k < 30; k++) {
+      let ps = 0, pd = 0;
+      for (let i = 0; i < 250; i += 33) { t += 33; const f = i / 250; g.process(t, { left: o(-0.16 * f, 0.44), right: o(-0.16 * f, 0.44) }); }
+      for (let i = 0; i < 900; i += 33) {
+        t += 33; g.process(t, { left: o(-0.16, 0.44), right: o(-0.16, 0.44) });
+        const a = g.channels()['left.up'], b = g.channels()['right.up'];
+        if (a) ps = Math.max(ps, a.n);
+        if (b) pd = Math.max(pd, b.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; const f = 1 - i / 250; g.process(t, { left: o(-0.16 * f, 0.44), right: o(-0.16 * f, 0.44) }); }
+      d(800, 0);
+      amm(k % 3 === 0);          // il destro ammicca il triplo del sinistro
+      d(800, 0);
+      v.push({ ps, pd });
+    }
+    return { v, ss: g.eyes.left.y.sigma, sd: g.eyes.right.y.sigma };
+  }
+
+  const senzaDurata = conAmmiccamenti(999);   // smentisce tutto: sbagliato
+  const conDurata = conAmmiccamenti(1.8);     // distingue per velocità
+  ok(conDurata.v[29].pd > senzaDurata.v[29].pd,
+     `56a. l occhio che ammicca di più regge meglio (${senzaDurata.v[29].pd.toFixed(1)}σ → ${conDurata.v[29].pd.toFixed(1)}σ)`);
+  ok(conDurata.sd < senzaDurata.sd,
+     `56b. e il suo rumore stimato si gonfia meno (${senzaDurata.sd.toFixed(4)} → ${conDurata.sd.toFixed(4)})`);
+  ok(conDurata.v[29].pd > conDurata.v[29].ps * 0.75,
+     `56c. i due occhi restano dello stesso ordine (${conDurata.v[29].ps.toFixed(1)}σ contro ${conDurata.v[29].pd.toFixed(1)}σ)`);
+
+  /* ⚠️ E le finte chiusure devono restare risolte: è il motivo per cui
+   * la finestra era stata allargata. Le due correzioni devono
+   * convivere, non escludersi. */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    const R = (x) => 0.030 * Math.sin(2 * Math.PI * 0.8 * x / 1000);
+    const cf = ap => 0.45 + 0.55 * Math.max(0, Math.min(1, (ap - 0.05) / 0.09));
+    const o = (y, ap) => ({ x: 0, y: y + R(t), openness: ap, confidence: cf(ap) });
+    const d = (ms) => { for (let i = 0; i < ms; i += 33) { t += 33; g.process(t, { left: o(0, 0.435), right: o(0, 0.435) }); } };
+    d(100000);
+    let ps = 0, pd = 0;
+    for (let k = 0; k < 30; k++) {
+      ps = 0; pd = 0;
+      // Il destro si stringe il doppio del sinistro guardando in alto.
+      const q = (f) => g.process(t, {
+        left: o(-0.18 * f, 0.435 - 0.135 * f),
+        right: o(-0.18 * f, 0.435 - 0.265 * f),
+      });
+      for (let i = 0; i < 250; i += 33) { t += 33; q(i / 250); }
+      for (let i = 0; i < 800; i += 33) {
+        t += 33; q(1);
+        const a = g.channels()['left.up'], b = g.channels()['right.up'];
+        if (a) ps = Math.max(ps, a.n);
+        if (b) pd = Math.max(pd, b.n);
+      }
+      for (let i = 0; i < 250; i += 33) { t += 33; q(1 - i / 250); }
+      d(2500);
+    }
+    ok(pd > ps * 0.8,
+       `56d. l occhio che si stringe di più resta pari all altro (${ps.toFixed(1)}σ contro ${pd.toFixed(1)}σ)`);
+  }
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

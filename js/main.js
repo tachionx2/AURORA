@@ -3042,6 +3042,7 @@ class App {
        *
        * Chi carica un video si aspetta di ricominciare da lì. */
       this.gestures.nuovaSessione();
+      this.vision?.rgb?.nuovaSessione?.();
       this.sessione = new SessionStats();
       this.plot?.clear();
       this.debugView?.logEvent('nuovo video: sessione azzerata');
@@ -3273,6 +3274,11 @@ class App {
     if (bns) bns.onclick = () => {
       if (!confirm('Azzerare la sessione?\n\nSi perdono le misure raccolte finora — rumore, baseline, statistiche cliniche e grafico — e si riparte da zero.\n\nLe impostazioni NON vengono toccate.')) return;
       this.gestures.nuovaSessione();
+      // ⚠️ Anche il RILEVATORE accumula stato: il riferimento del
+      // raggio dell'iride di quella persona. Senza azzerarlo, "nuova
+      // sessione" lasciava dietro proprio ciò che rende diverso un
+      // programma appena aperto da uno già in uso.
+      this.vision?.rgb?.nuovaSessione?.();
       this.sessione = new SessionStats();
       this.plot?.clear();
       this.renderDiagStats?.();

@@ -193,6 +193,30 @@ export class RgbTracker {
 
   updateConfig(cfg) { this.cfg = cfg; }
 
+  /**
+   * Azzera lo stato che il rilevatore accumula.
+   *
+   * ⚠️ Questo stato esisteva senza alcun modo di azzerarlo, ed è la
+   * ragione per cui il programma appena aperto si comportava diversamente
+   * da uno già in uso — anche premendo "nuova sessione" o ricaricando
+   * lo stesso video.
+   *
+   * `raggi` è il riferimento adattivo del raggio dell'iride di QUELLA
+   * persona: serve a giudicare se un rilevamento è plausibile, e quindi
+   * entra nella confidenza. Dalla confidenza dipende quali campioni
+   * vengono accettati, e da quelli la stima del rumore. Un riferimento
+   * costruito su un altro volto, o su una fase in cui il rilevamento
+   * andava male, si trascinava per tutta la sessione senza che nulla
+   * lo mostrasse.
+   */
+  nuovaSessione() {
+    for (const lato of ['left', 'right']) {
+      this.stato[lato] = { raggi: [], ultimo: null, copSopra: [], totali: 0, corretti: 0 };
+    }
+    this.lastError = null;
+    this.msMedio = 0;
+  }
+
   async init() {
     try {
       // Percorso assoluto ricavato dalla pagina: funziona sia in

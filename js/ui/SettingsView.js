@@ -334,6 +334,18 @@ export class SettingsView {
       'signal.blinkRatio', 'signal.blinkRichiedeIride',
       'signal.blinkSogliaIride', 'signal.blinkSmentiSopra',
       'signal.blinkClosedRatio', 'signal.blinkFloor',
+      /* ⚠️ Le sovrascritture PER DIREZIONE.
+       *
+       * `thresholdDir` e `gainDir` contengono soglie e guadagni
+       * specifici di ciascuna direzione, e quando ci sono VINCONO su
+       * quelli globali. Non erano nella lista: premendo "torna ai
+       * predefiniti" i valori globali tornavano a posto ma la soglia
+       * effettiva restava quella scritta lì, e sembrava che il
+       * comando non funzionasse.
+       *
+       * Vanno svuotate, non riportate a un valore: "nessuna
+       * sovrascrittura" è proprio lo stato predefinito. */
+      'signal.thresholdDir', 'signal.gainDir', 'signal.gainEye',
       // Rilevamento e durate.
       'detection.minConfidence',
       'gestures.UP.dwellMs', 'gestures.UP.maxMs',
@@ -351,7 +363,10 @@ export class SettingsView {
     for (const via of this._viePrestazioni()) {
       const val = leggi(via);
       if (val === undefined) continue;      // parametro non più esistente
-      this.app.set(via, val);
+      /* Gli oggetti di sovrascrittura si copiano, non si condividono:
+       * assegnare il riferimento ai valori predefiniti farebbe sì che
+       * la prima modifica successiva li corrompa per sempre. */
+      this.app.set(via, (val && typeof val === 'object') ? deepClone(val) : val);
       quanti++;
     }
     this.render();

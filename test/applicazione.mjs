@@ -1522,5 +1522,64 @@ app.goto('parla');
      'comprese le statistiche cliniche');
 }
 
+/* ═══════════ Nessuno stato nascosto deve sopravvivere ═══════════
+ *
+ * ⚠️ Il programma appena aperto si comportava diversamente da uno già
+ * in uso, anche premendo "nuova sessione" o ricaricando lo stesso
+ * video. La causa: il RILEVATORE accumula un proprio stato — il
+ * riferimento del raggio dell'iride di quella persona — e non aveva
+ * alcun modo di essere azzerato.
+ *
+ * Da quel riferimento dipende la confidenza, dalla confidenza quali
+ * campioni vengono accettati, e da quelli la stima del rumore. Un
+ * riferimento costruito su un altro volto, o su una fase in cui il
+ * rilevamento andava male, si trascinava per tutta la sessione senza
+ * che nulla lo mostrasse.                                            */
+{
+  const { RgbTracker: RTx } = await import('../js/vision/RgbTracker.js');
+  const { DEFAULT_CONFIG: DCx, deepClone: dcx } = await import('../js/core/config.js');
+  const tr = new RTx(dcx(DCx));
+  tr.stato.left.raggi = [0.1, 0.2, 0.3];
+  tr.stato.left.ultimo = { x: 1, y: 2 };
+  ok(typeof tr.nuovaSessione === 'function',
+     'il rilevatore sa azzerare il proprio stato');
+  tr.nuovaSessione();
+  ok(tr.stato.left.raggi.length === 0 && !tr.stato.left.ultimo,
+     'e lo azzera davvero, riferimento del raggio compreso');
+
+  const fsX = await import('node:fs');
+  const pathX = await import('node:path');
+  const quiX = pathX.dirname(import.meta.filename || process.argv[1]);
+  const mainX = fsX.readFileSync(pathX.join(quiX, '..', 'js/main.js'), 'utf8');
+  const quante = (mainX.match(/rgb\?\.nuovaSessione\?\.\(\)/g) || []).length;
+  ok(quante >= 2,
+     `viene azzerato sia dal comando sia caricando un video nuovo (${quante} punti)`);
+}
+
+/* ═══════════ Guadagno per occhio ═══════════
+ *
+ * ⚠️ Due occhi possono misurare diversamente lo STESSO movimento
+ * fisico. Chi guarda il video li vede muoversi uguale e ha ragione:
+ * è la misura a essere diversa. */
+{
+  const { GestureEngine: GEx } = await import('../js/signal/GestureEngine.js');
+  const { DEFAULT_CONFIG: DC2, deepClone: dc2 } = await import('../js/core/config.js');
+
+  const c = dc2(DC2);
+  c.signal.gainEye = { left: 1, right: 2 };
+  const g = new GEx(c, () => {});
+  ok(g.guadagnoOcchio('left') === 1 && g.guadagnoOcchio('right') === 2,
+     'il guadagno per occhio viene letto');
+  ok(new GEx(dc2(DC2), () => {}).guadagnoOcchio('right') === 1,
+     'e vale 1 di default, quindi non cambia nulla per chi non lo usa');
+
+  // Un valore assurdo non deve rompere il rilevamento
+  const c2 = dc2(DC2);
+  c2.signal.gainEye = { left: 0, right: -5 };
+  const g2 = new GEx(c2, () => {});
+  ok(g2.guadagnoOcchio('left') === 1 && g2.guadagnoOcchio('right') === 1,
+     'valori impossibili vengono ignorati invece di azzerare il segnale');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

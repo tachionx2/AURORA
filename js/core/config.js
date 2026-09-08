@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 34;
+export const CONFIG_VERSION = 35;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -291,6 +291,19 @@ export const DEFAULT_CONFIG = {
      * capo: 3,5 non vorrà più dire "tre volte e mezzo il rumore". */
     normalizzaSuRumore: true,
     sigmaFisso: 0.02,
+    /* ⚠️ Guadagno PER OCCHIO.
+     *
+     * Due occhi possono misurare diversamente lo stesso movimento
+     * fisico: uno più coperto dalla palpebra, uno più obliquo rispetto
+     * alla telecamera, uno abitualmente socchiuso. Il rapporto fra le
+     * due ampiezze grezze è però stabile e misurabile, e un guadagno
+     * lo pareggia.
+     *
+     * Non è un modo di nascondere un difetto: è la stessa cosa che si
+     * fa tarando due microfoni diversi perché registrino allo stesso
+     * livello. La diagnostica lo misura sul segnale grezzo e lo
+     * propone. A 1 non cambia nulla. */
+    gainEye: { left: 1, right: 1 },
     /* ── Quali canali sommare nel canale combinato ──
      *
      * Un solo movimento volontario produce spesso più segnali insieme:
@@ -386,6 +399,16 @@ export const DEFAULT_CONFIG = {
      * ammiccamento vero attraversa sempre, e la confidenza, che in un
      * ammiccamento vero crolla perché l'iride sparisce. */
     blinkSmentiSopra: 0.20,
+    /* ⚠️ Velocità di chiusura oltre la quale è un ammiccamento vero,
+     * in unità di apertura al secondo.
+     *
+     * È il criterio che distingue un ammiccamento da uno sguardo
+     * alzato: la palpebra che ammicca percorre la propria corsa in due
+     * o tre fotogrammi, chi stringe gli occhi guardando in alto
+     * impiega dieci volte tanto. Un criterio basato sul TEMPO — "aspetta
+     * un quarto di secondo prima di decidere" — creava invece un
+     * ammiccamento fantasma all'inizio di ogni gesto. */
+    blinkSmentiVelocita: 1.8,
     blinkSustainedMs: 500,       // oltre: non è un ammiccamento
 
     // ── Soglie e guadagni PER DIREZIONE ──
@@ -875,6 +898,7 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 35 && c.signal && !c.signal.gainEye) c.signal.gainEye = { left: 1, right: 1 };
   if (v < 34) {
     if (c.gestures && !c.gestures.COMBO) {
       c.gestures.COMBO = { enabled: false, action: 'NONE', dwellMs: 400, maxMs: 2600 };

@@ -438,6 +438,16 @@ export class BlinkDetector {
      * Nei dati reali l'occhio che si stringeva guardando in alto stava
      * al 54% del riposo; una chiusura volontaria scende al 13%. */
     this.smentiSopra = 0.20;
+    /* Da quanto tempo l'apertura deve essere ridotta perché si possa
+     * dire che non è un ammiccamento. Un ammiccamento intero dura
+     * meno di così. */
+    /* Velocità di chiusura oltre la quale è un ammiccamento, in unità
+     * di apertura al secondo. Un ammiccamento percorre la propria
+     * corsa in due o tre fotogrammi; stringere gli occhi guardando in
+     * alto impiega dieci volte tanto. */
+    this.smentiVelocita = 1.8;
+    this._apPrec = null;
+    this._tVel = null;
     this.smentiti = 0;
     this.tSottoSoglia = null;        // da quando siamo sotto soglia
     // Soglia fissa, quando l'auto-calibrazione è spenta. La logica di
@@ -451,10 +461,11 @@ export class BlinkDetector {
     this.tSottoSoglia = null;
   }
   configure(ratio, floor, discrimina, sustainedMs, sogliaFissa, ratioChiuso,
-            richiedeIride, sogliaIride, smentiSopra) {
+            richiedeIride, sogliaIride, smentiSopra, smentiDopoMs) {
     if (richiedeIride !== undefined) this.richiedeIride = !!richiedeIride;
     if (sogliaIride !== undefined) this.sogliaIride = sogliaIride;
     if (smentiSopra !== undefined) this.smentiSopra = smentiSopra;
+    if (smentiDopoMs !== undefined) this.smentiVelocita = smentiDopoMs;
     /* ⚠️ I parametri non specificati NON vanno azzerati.
      *
      * Prima venivano assegnati comunque: chiamando `configure` per
@@ -582,7 +593,41 @@ export class BlinkDetector {
      * Si smentisce solo chi sta nel mezzo: sotto la soglia di
      * ammiccamento ma sopra quella di chiusura vera, e con l'iride
      * ancora ben visibile. Un ammiccamento vero non passa mai di lì. */
-    if (sottoSoglia && this.richiedeIride
+    /* ⚠️ Un ammiccamento è VELOCE, uno sguardo alzato no.
+     *
+     * Allargare la finestra di smentimento ha risolto le finte
+     * chiusure, ma ha lasciato passare anche i TRANSITORI di ogni
+     * ammiccamento vero — i fotogrammi in cui la palpebra è a mezza
+     * corsa e la posizione dell'iride sbanda. Quei campioni entravano
+     * nella stima del rumore e la gonfiavano: misurato, l'occhio che
+     * ammicca più spesso scendeva da 35σ a 25σ mentre l'altro reggeva.
+     *
+     * I due casi si distinguono per DURATA: la discesa e risalita di
+     * un ammiccamento stanno dentro un paio di decimi di secondo,
+     * mentre stringere gli occhi guardando in alto dura un secondo o
+     * più. Si smentisce quindi solo ciò che PERSISTE.
+     *
+     * Il prezzo è che i primi decimi di secondo di uno sguardo alzato
+     * restano mascherati — su un gesto che dura un secondo, nulla. */
+    /* Si guarda la VELOCITÀ con cui la palpebra si muove.
+     *
+     * ⚠️ Un criterio basato sul tempo — "smentisci solo dopo un quarto
+     * di secondo" — sembrava naturale ma creava un ammiccamento
+     * fantasma all'inizio di OGNI gesto: i primi fotogrammi venivano
+     * mascherati, poi smascherati, e quella chiusura breve veniva
+     * contata come un ammiccamento vero.
+     *
+     * La velocità invece distingue subito, senza aspettare: una
+     * palpebra che ammicca percorre la propria corsa in un paio di
+     * fotogrammi, mentre chi stringe gli occhi guardando in alto
+     * impiega dieci volte tanto. Il primo fotogramma già lo dice. */
+    const dt = this._tVel != null ? Math.max(1, t - this._tVel) : 33;
+    const vel = this._apPrec != null ? Math.abs(openness - this._apPrec) / (dt / 1000) : 0;
+    this._apPrec = openness;
+    this._tVel = t;
+    const lento = vel < (this.smentiVelocita ?? 1.8);
+
+    if (sottoSoglia && lento && this.richiedeIride
         /* ⚠️ Il pavimento assoluto non si scavalca MAI.
          * Esiste per riconoscere un occhio davvero chiuso quando il
          * riferimento non è affidabile — per esempio un occhio che non

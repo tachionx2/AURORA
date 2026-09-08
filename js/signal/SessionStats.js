@@ -580,7 +580,47 @@ export class SessionStats {
         motivi.push(`pochi gesti osservati: soglia stimata dal comportamento a riposo (sotto ${r.riposo99.toFixed(1)}σ nel 99% del tempo)`);
       }
 
-      /* ── Percentile della stima del rumore ──
+      /* ══════════════════════════════════════════════════════════════
+     * GUADAGNO PER PAREGGIARE I DUE OCCHI
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Due occhi possono misurare diversamente lo stesso movimento
+     * fisico: uno più coperto dalla palpebra, uno più obliquo rispetto
+     * alla telecamera, uno abitualmente socchiuso per fotosensibilità.
+     * Chi guarda il video li vede muoversi uguale, e ha ragione: è la
+     * MISURA a essere diversa, non il movimento.
+     *
+     * Il rapporto fra le due ampiezze grezze è stabile e misurabile.
+     * Si propone quindi un guadagno che le pareggi — la stessa cosa
+     * che si fa tarando due microfoni diversi perché registrino allo
+     * stesso livello.
+     *
+     * Misurato sul GREZZO: non dipende da soglie né da normalizzazioni.
+     */
+    {
+      const ampiezza = (lato) => {
+        const h = this.grezzoTutti[lato];
+        return h && h.tot > 400 ? h.percentile(0.97) : 0;
+      };
+      const aS = ampiezza('left'), aD = ampiezza('right');
+      if (aS > 1e-4 && aD > 1e-4) {
+        const forte = Math.max(aS, aD);
+        const gS = Math.round(Math.min(4, forte / aS) * 100) / 100;
+        const gD = Math.round(Math.min(4, forte / aD) * 100) / 100;
+        // Si propone solo se lo squilibrio è reale: correggere il 5%
+        // aggiungerebbe un parametro senza cambiare nulla.
+        if (Math.max(gS, gD) > 1.15) {
+          p['signal.gainEye'] = { left: gS, right: gD };
+          const debole = aS < aD ? 'sinistro' : 'destro';
+          motivi.push(
+            `l'occhio ${debole} misura il ${(100 * Math.min(aS, aD) / forte).toFixed(0)}% dell'altro `
+            + `a parità di movimento: si propone un guadagno che li pareggia `
+            + `(${gS.toFixed(2)} e ${gD.toFixed(2)})`);
+        }
+      }
+    }
+
+    /* ── Percentile della stima del rumore ──
        * Dipende da quanto tempo la persona passa in movimento: se i
        * gesti occupano più della frazione osservata, la stima si
        * gonfia e non torna più indietro. */

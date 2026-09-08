@@ -464,13 +464,28 @@ export class GestureEngine {
     return (typeof v === 'number' && isFinite(v) && v > 0) ? v : 1;
   }
 
+  /**
+   * Guadagno del singolo occhio.
+   *
+   * ⚠️ Due occhi possono misurare diversamente lo stesso movimento
+   * fisico: uno più coperto dalla palpebra, uno più obliquo, uno
+   * abitualmente socchiuso. Il rapporto fra le loro ampiezze grezze è
+   * stabile e misurabile, e questo lo pareggia — come si tarano due
+   * microfoni diversi perché registrino allo stesso livello.
+   */
+  guadagnoOcchio(eye) {
+    const v = this.cfg.signal.gainEye?.[eye];
+    return (typeof v === 'number' && isFinite(v) && v > 0) ? v : 1;
+  }
+
   _syncBlink() {
     const s = this.cfg.signal, g = this.cfg.gestures;
     for (const eye of ['left', 'right']) {
       this.blink[eye].configure(
         s.blinkRatio, s.blinkFloor, s.blinkDiscriminate, s.blinkSustainedMs,
         s.blinkAutoCalibrate ? null : s.blinkLidThreshold, s.blinkClosedRatio,
-        s.blinkRichiedeIride, s.blinkSogliaIride, s.blinkSmentiSopra);
+        s.blinkRichiedeIride, s.blinkSogliaIride, s.blinkSmentiSopra,
+        s.blinkSmentiVelocita);
     }
     for (const eye of ['left', 'right'])
       this.burst[eye].configure(g.blinkBurstMs, g.blinkMinPulseMs, g.blinkMaxPulseMs);
@@ -859,7 +874,7 @@ export class GestureEngine {
 
         const chiave = c.sign < 0 ? '-1' : '+1';
         const hyst = A.hyst[chiave];
-        const disp = this.guadagnoDi(c.id) * c.sign * A.disp;
+        const disp = this.guadagnoDi(c.id) * this.guadagnoOcchio(eye) * c.sign * A.disp;
 
         /**
          * ⚠️ RILASCIO D'UFFICIO DOPO UN AGGANCIO TROPPO LUNGO.
@@ -1209,7 +1224,7 @@ export class GestureEngine {
     for (const eye of ['left', 'right']) {
       for (const d of DIR_CHECKS) {
         const A = this.eyes[eye][d.axis];
-        const g = this.guadagnoDi(d.id);
+        const g = this.guadagnoDi(d.id) * this.guadagnoOcchio(eye);
         outs[`${eye}.${d.id}`] = A.valid ? {
           n: A.n(d.sign, g),
           nRaw: (g * d.sign * (A.raw - A.baseline)) / Math.max(1e-6, A.sigma),
