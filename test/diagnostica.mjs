@@ -256,6 +256,100 @@ function corri(mod, script) {
   const ir = new IrTracker(cfgIr);
   let res = ir.detect({}, W, H, { left:{x:0,y:0,w:120,h:120}, right:null });
   ok(res.left !== null, '11a. la pupilla viene rilevata sotto IR');
+
+  /* ══════ Preparazione dell'immagine: facoltativa e innocua ══════
+   *
+   * ⚠️ Quattro filtri per la sola modalità infrarossa, tutti spenti di
+   * default. La verifica che conta è che a filtri SPENTI il risultato
+   * sia identico a prima: chi non li accende non deve accorgersi che
+   * esistono.
+   *
+   * ⚠️ Nulla di questo tocca MediaPipe, che non passa da questo codice
+   * e non ne condivide una riga.
+   */
+  {
+    const rif = ir.detect({}, W, H, { left: { x: 0, y: 0, w: 120, h: 120 } }).left;
+    ok(rif !== null, '11a1. la scena di prova dà un rilevamento');
+
+    for (const k of ['irBlur', 'irApertura', 'irPesoCentro', 'irPesoContinuita']) {
+      ok(DEFAULT_CONFIG.detection[k] === 0,
+         `11a2. "${k}" è spento di default`);
+    }
+
+    // Con i filtri spenti, due rilevazioni consecutive coincidono.
+    const uguale = ir.detect({}, W, H, { left: { x: 0, y: 0, w: 120, h: 120 } }).left;
+    ok(Math.abs(uguale.px.iris.x - rif.px.iris.x) < 0.01
+       && Math.abs(uguale.px.iris.y - rif.px.iris.y) < 0.01,
+       '11a3. a filtri spenti il risultato non cambia');
+
+    // ⚠️ E acceso, ciascun filtro non deve FAR PERDERE la pupilla:
+    // scartare troppo è peggio che trovare male.
+    for (const [k, v] of [['irBlur', 2], ['irApertura', 1],
+                          ['irPesoCentro', 0.5], ['irPesoContinuita', 0.5]]) {
+      const prima = cfgIr.detection[k];
+      cfgIr.detection[k] = v;
+      const r2 = ir.detect({}, W, H, { left: { x: 0, y: 0, w: 120, h: 120 } }).left;
+      ok(r2 !== null, `11a4. con "${k}" = ${v} la pupilla si trova ancora`);
+      if (r2) {
+        ok(Math.abs(r2.px.iris.x - 60) < 12 && Math.abs(r2.px.iris.y - 60) < 12,
+           `11a5. e resta al posto giusto (${r2.px.iris.x.toFixed(1)}, ${r2.px.iris.y.toFixed(1)})`);
+      }
+      cfgIr.detection[k] = prima;
+    }
+
+    /* ══════ CLAHE e raffinamento sul bordo ══════
+     *
+     * ⚠️ Il raffinamento cambia principio: la soglia dice quali pixel
+     * sono scuri, il gradiente dice DOVE la luminanza cambia. Una
+     * soglia sbagliata di poco sposta il centro di molto; il massimo
+     * del gradiente resta dov'è.
+     *
+     * La verifica che conta non è che non rompa, ma che con una soglia
+     * DELIBERATAMENTE sbagliata il centro resti giusto. */
+    for (const k of ['irClahe', 'irRaffinaBordo']) {
+      ok(DEFAULT_CONFIG.detection[k] === 0, `11a6. "${k}" è spento di default`);
+    }
+
+    const centroCon = (mod) => {
+      const salva = {};
+      for (const [k, v] of Object.entries(mod)) { salva[k] = cfgIr.detection[k]; cfgIr.detection[k] = v; }
+      const r3 = ir.detect({}, W, H, { left: { x: 0, y: 0, w: 120, h: 120 } }).left;
+      for (const [k, v] of Object.entries(salva)) cfgIr.detection[k] = v;
+      return r3 ? { x: r3.px.iris.x, y: r3.px.iris.y } : null;
+    };
+
+    // Soglia deliberatamente sbagliata: prende troppi pixel.
+    const sbagliata = { irDarkPercentile: 35 };
+    const senzaRaff = centroCon(sbagliata);
+    const conRaff = centroCon({ ...sbagliata, irRaffinaBordo: 1 });
+    ok(senzaRaff && conRaff, '11a7. con soglia sbagliata si trova comunque qualcosa');
+    if (senzaRaff && conRaff) {
+      const erroreSenza = Math.hypot(senzaRaff.x - 60, senzaRaff.y - 60);
+      const erroreCon = Math.hypot(conRaff.x - 60, conRaff.y - 60);
+      ok(erroreCon <= erroreSenza + 1.5,
+         `11a8. il raffinamento sul bordo non peggiora il centro (errore ${erroreSenza.toFixed(1)} → ${erroreCon.toFixed(1)} px)`);
+    }
+
+    // CLAHE non deve far perdere la pupilla
+    const conClahe = centroCon({ irClahe: 3 });
+    ok(conClahe !== null, '11a9. con CLAHE acceso la pupilla si trova ancora');
+    if (conClahe) {
+      ok(Math.hypot(conClahe.x - 60, conClahe.y - 60) < 12,
+         `11b1. e resta al posto giusto (${conClahe.x.toFixed(1)}, ${conClahe.y.toFixed(1)})`);
+    }
+
+    /* ⚠️ E tutti insieme devono convivere: si sommano, e sommandosi
+     * potrebbero scartare tutto. È già successo con sfocatura e forma. */
+    const tutti = centroCon({
+      irBlur: 1, irApertura: 1, irPesoCentro: 0.3, irPesoContinuita: 0.3,
+      irClahe: 3, irRaffinaBordo: 1,
+    });
+    ok(tutti !== null, '11b2. con TUTTI i filtri accesi insieme la pupilla si trova ancora');
+    if (tutti) {
+      ok(Math.hypot(tutti.x - 60, tutti.y - 60) < 15,
+         `11b3. e il centro resta plausibile (${tutti.x.toFixed(1)}, ${tutti.y.toFixed(1)})`);
+    }
+  }
   ok(Math.abs(res.left.px.iris.x-60)<4 && Math.abs(res.left.px.iris.y-60)<4,
      `11b. centroide corretto (${res.left.px.iris.x.toFixed(1)}, ${res.left.px.iris.y.toFixed(1)}) atteso (60, 60)`);
   ok(res.left.px.glint !== null, '11c. il riflesso corneale viene trovato');

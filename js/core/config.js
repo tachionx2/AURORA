@@ -191,6 +191,51 @@ export const DEFAULT_CONFIG = {
      * nulla, che è peggio che trovare male. A zero il controllo è
      * tolto. */
     irMaxAllungamento: 2.6,
+    /* ══════════════════════════════════════════════════════════════
+     * PREPARAZIONE DELL'IMMAGINE — tutto spento di default
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Riguarda SOLO la modalità infrarossa. MediaPipe non passa da
+     * questo codice e non ne è toccato in alcun modo.
+     *
+     * ⚠️ Non ci sono normalizzazione, stretch dell'istogramma o
+     * equalizzazione, e non è una dimenticanza: spostano i valori ma
+     * lasciano l'ORDINE dei pixel intatto, e siccome la soglia qui è
+     * un percentile — "il 12% più scuro" — il risultato sarebbe
+     * identico prima e dopo. Fatica per zero effetto.
+     */
+    // Sfocatura in pixel: toglie il rumore che attacca ciglia e ombre
+    // alla pupilla. 0 = spenta, 1 o 2 bastano.
+    irBlur: 0,
+    // Apertura morfologica: stacca la pupilla da ciò che la tocca per
+    // un filo di pixel. 0 = spenta.
+    irApertura: 0,
+    // Quanto scoraggiare le regioni lontane dal centro del riquadro,
+    // dove stanno ombre e ciglia. 0 = nessuna preferenza.
+    irPesoCentro: 0,
+    // Quanto preferire la regione vicina a dove era nel fotogramma
+    // prima. 0 = nessuna memoria.
+    irPesoContinuita: 0,
+    // Dopo quanto tempo senza rilevamento si ricomincia liberi: senza,
+    // un rilevamento perso resterebbe ancorato al posto sbagliato.
+    irContinuitaMs: 500,
+    /* CLAHE: equalizzazione a riquadri con limite di taglio.
+     * ⚠️ L'unico filtro di immagine che aggiunge informazione, perché
+     * non conserva l'ordine dei pixel. Serve quando un lato dell'occhio
+     * è in ombra. Amplifica il rumore: da usare con la sfocatura.
+     * 0 = spento; 2-4 è il campo utile. */
+    irClahe: 0,
+    irClaheRiquadri: 4,
+    /* Raffinamento sul bordo: dal centro trovato si cercano i punti in
+     * cui la luminanza cambia più bruscamente, e da quelli si ricava
+     * il centro vero. ⚠️ Insensibile alla soglia: una soglia sbagliata
+     * di poco sposta il centro di molto, il massimo del gradiente
+     * resta dov'è. 0 = spento. */
+    irRaffinaBordo: 0,
+    irRaggi: 24,
+    // Quanto deve essere netto il passaggio scuro-chiaro per essere
+    // considerato un bordo. Troppo basso accetta il rumore.
+    irGradienteMin: 12,
     irUseGlint: true,            // PCCR: sottrae il riflesso corneale
     irInvert: false,             // per sensori che restituiscono il negativo
 
