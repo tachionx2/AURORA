@@ -328,6 +328,7 @@ export class SettingsView {
          * cinquanta non la si raggiunge mai. */
         this._number('detection.irDarkPercentile', 'IR · percentile scuro', 'Percentuale di pixel più scuri considerati pupilla. Alzare se il bordo trovato è troppo piccolo o cade fuori dall\'iride', 1, 90),
         this._number('detection.irMinArea', 'IR · area minima', 'px², scarta blob troppo piccoli', 5, 20000, 5),
+        this._number('detection.irMaxAllungamento', 'IR · allungamento massimo', 'Quanto può essere lunga rispetto a larga una regione per essere ancora considerata un\'iride. Un\'iride resta tonda anche tagliata dalla palpebra; un\'ombra o le ciglia no. Abbassare se il bordo giallo appare ellittico e il centro finisce sul bordo dell\'occhio. A 0 il controllo è tolto', 0, 6, 0.1),
         this._number('detection.irMaxArea', 'IR · area massima', 'px², scarta blob troppo grandi: se il bordo scappa sulla palpebra o sull\'ombra dell\'orbita, abbassare questo valore', 100, 60000, 100),
         this._toggle('detection.irUseGlint', 'IR · usa glint (PCCR)', 'Sottrae il riflesso corneale: cancella i movimenti di testa'),
         this._toggle('detection.irInvert', 'IR · inverti immagine', 'Per sensori che restituiscono il negativo'),
@@ -1247,6 +1248,17 @@ export class SettingsView {
     righe.push(h('p', 'sub', P(
       ['Somma positiva: si normalizza sulla somma. Somma nulla (differenza fra canali): si centra a metà scala. In entrambi i casi la soglia per percentile non va ritarata.',
        'Positive sum: normalised by the sum. Zero sum (channel difference): centred at mid scale. In both cases the percentile threshold needs no retuning.'])));
+
+    /* ⚠️ Vedere ciò che il rilevatore vede.
+     *
+     * I riquadri mostravano sempre l'immagine a colori, anche quando il
+     * rilevamento lavorava sul solo canale rosso: si sceglieva una
+     * combinazione senza poterne vedere l'effetto, cioè proprio la cosa
+     * che quella scelta esiste per migliorare. */
+    righe.push(this._toggle('detection.mostraCanali',
+      P(['Mostra i riquadri con i canali scelti', 'Show the eye views with the chosen channels']),
+      P(['I riquadri degli occhi in Diagnostica mostrano ciò che il rilevatore VEDE davvero, invece dell\'immagine a colori. Serve a scegliere la combinazione guardandone l\'effetto: se l\'iride si stacca bene dal bianco dell\'occhio, quella combinazione è buona. ⚠️ Vale solo in modalità infrarossa o ibrida — con MediaPipe la combinazione di canali non ha alcun effetto, e il riquadro resta a colori.',
+         'The eye views in Diagnostics show what the detector actually SEES. ⚠️ Only in infrared or hybrid mode.'])));
 
     return this._card(t('sec.channels'),
       P(['La melanina assorbe molto nel blu e nel verde, poco nel rosso: un\'iride marrone scuro nel canale ROSSO appare più chiara, mentre la pupilla resta nera. È lo stesso principio per cui funziona l\'infrarosso a 940 nm, solo più debole — e permette il tracciamento a soglia anche con una webcam normale. Su un\'iride chiara il guadagno è minore o nullo. In Diagnostica trovi il CONTRASTO misurato: prova le combinazioni e tieni quella con il valore più alto su questa persona.',

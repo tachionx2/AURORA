@@ -179,6 +179,18 @@ export const DEFAULT_CONFIG = {
     irDarkPercentile: 12,        // percentile per la soglia adattiva
     irMinArea: 30,               // px², scarta blob troppo piccoli
     irMaxArea: 20000,
+    /* ⚠️ Quanto può essere allungata una regione per essere ancora
+     * considerata un'iride.
+     *
+     * Un'iride resta TONDA anche tagliata dalla palpebra: il taglio le
+     * toglie una calotta senza allungarla. Una regione molto più lunga
+     * che larga è invece un'ombra o le ciglia — ed è la causa del
+     * bordo ellittico con il centro che finisce sul bordo rosa.
+     *
+     * Generoso di default: scartare troppo significa non trovare
+     * nulla, che è peggio che trovare male. A zero il controllo è
+     * tolto. */
+    irMaxAllungamento: 2.6,
     irUseGlint: true,            // PCCR: sottrae il riflesso corneale
     irInvert: false,             // per sensori che restituiscono il negativo
 
@@ -200,6 +212,12 @@ export const DEFAULT_CONFIG = {
      */
     channelPreset: 'luma',       // luma | red | redGreen | redMinusBlue | custom
     channelMix: { r: 0.299, g: 0.587, b: 0.114 },
+    /* Mostra nei riquadri degli occhi ciò che il rilevatore VEDE
+     * davvero, invece dell'immagine a colori. Serve a scegliere la
+     * combinazione di canali guardandone l'effetto invece di
+     * indovinare. ⚠️ Solo in modalità infrarossa: con MediaPipe la
+     * combinazione non ha effetto. */
+    mostraCanali: false,
     // Le etichette "sinistro"/"destro" si riferiscono agli occhi DELLA
     // PERSONA. Se la telecamera è montata specchiata e risultano
     // invertite, si corregge qui.
@@ -1153,7 +1171,8 @@ export function migrateConfig(cfg) {
     if (c.ui.readFocus === undefined) c.ui.readFocus = false;
   }
   if (v < 23 && c.detection) {
-    if (!c.detection.channelMix) c.detection.channelMix = { r: 0.299, g: 0.587, b: 0.114 };
+    if (c.detection && c.detection.mostraCanali === undefined) c.detection.mostraCanali = false;
+  if (!c.detection.channelMix) c.detection.channelMix = { r: 0.299, g: 0.587, b: 0.114 };
     if (!c.detection.channelPreset) c.detection.channelPreset = 'luma';
   }
   if (v < 22 && c.signal) {

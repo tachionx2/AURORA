@@ -1962,5 +1962,71 @@ app.goto('parla');
      'compreso quello dell assistente, che è l ultimo ad aver avuto il difetto');
 }
 
+/* ═══════════ Modalità infrarossa: forma e anteprima ═══════════
+ *
+ * ⚠️ Tutto ciò che segue vale SOLO per la modalità infrarossa. Con
+ * MediaPipe nulla deve cambiare: è la modalità che funziona, e non va
+ * sfiorata.                                                          */
+{
+  const fsR = await import('node:fs');
+  const pathR = await import('node:path');
+  const quiR = pathR.dirname(import.meta.filename || process.argv[1]);
+  const { DEFAULT_CONFIG: DR } = await import('../js/core/config.js');
+  const irSrc = fsR.readFileSync(pathR.join(quiR, '..', 'js/vision/IrTracker.js'), 'utf8');
+  const vpSrc = fsR.readFileSync(pathR.join(quiR, '..', 'js/vision/VisionPipeline.js'), 'utf8');
+
+  /* ⚠️ Una forma sbagliata va SCARTATA, non solo penalizzata: una
+   * regione lunga e stretta prendeva un punteggio basso e vinceva lo
+   * stesso, se era l'unica. È la causa del bordo ellittico con il
+   * centro sul bordo rosa. */
+  ok(/aspect > maxAllung\) continue/.test(irSrc),
+     'una regione troppo allungata viene scartata, non solo penalizzata');
+  ok(Number.isFinite(DR.detection.irMaxAllungamento) && DR.detection.irMaxAllungamento >= 2,
+     `il limite è generoso di default (${DR.detection.irMaxAllungamento}) — scartare troppo è peggio che trovare male`);
+
+  /* L'anteprima dei canali: si tarava alla cieca. */
+  ok(DR.detection.mostraCanali === false,
+     'l anteprima dei canali è spenta di default');
+  ok(/D\.mostraCanali && D\.mode !== 'rgb'/.test(vpSrc),
+     '⚠️ e vale SOLO fuori da MediaPipe: lì la combinazione non ha effetto');
+  ok(/putImageData/.test(vpSrc),
+     'quando accesa, il riquadro mostra ciò che il rilevatore vede davvero');
+
+  /* ⚠️ L'area sta dentro `px`: cercandola al primo livello non si
+   * trovava mai, e senza area la diagnostica non poteva proporre
+   * l'area massima — cioè proprio il parametro che serve. */
+  const stSrc = fsR.readFileSync(pathR.join(quiR, '..', 'js/signal/SessionStats.js'), 'utf8');
+  ok(/o2\.px\?\.area/.test(stSrc),
+     'la diagnostica cerca l area anche dove il rilevatore la mette davvero');
+  ok(/o2\.px\?\.axes/.test(stSrc),
+     'e misura anche quanto è allungato il bordo trovato');
+
+  /* La diagnostica deve proporre i parametri infrarossi nel caso reale
+   * osservato: bordo allungato, centro che salta, pupilla che si perde. */
+  const { SessionStats: SR } = await import('../js/signal/SessionStats.js');
+  const st = new SR();
+  st.modoRilevamento = 'auto';
+  st.cfgIr = { irDarkPercentile: 12 };
+  let t = 0;
+  for (let i = 0; i < 4000; i++) {
+    t += 33;
+    const salta = i % 9 === 0, perde = i % 14 === 0;
+    const o = () => perde ? null : {
+      x: 0, y: salta ? 0.35 : 0.02 * Math.sin(i / 5),
+      openness: 0.3, confidence: 0.57,
+      px: { area: 270, axes: { a: 26, b: 11, angle: 0 } },
+    };
+    st.push(t, { left: o(), right: o() }, 1.5, false);
+  }
+  const p = st.parametriConsigliati();
+  const irProp = Object.keys(p.proposta).filter(k => /^detection\.ir/.test(k));
+  ok(irProp.length >= 2,
+     `nel caso reale propone i parametri infrarossi (${irProp.join(', ')})`);
+  ok(p.motivi.some(m => /allungato/.test(m)),
+     'e riconosce il bordo allungato che non è un iride');
+  ok(p.motivi.some(m => /salta/.test(m)),
+     'e il centro che salta fuori dall occhio');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

@@ -216,6 +216,25 @@ export class IrTracker {
                   * (circularity > 0.6 && circularity < 1.6 ? 1 : 0.4)
                   * Math.min(1, count / 200);
 
+      /* ⚠️ Una forma sbagliata va SCARTATA, non solo penalizzata.
+       *
+       * I criteri esistevano già ma erano morbidi: una regione lunga e
+       * stretta prendeva un punteggio basso e vinceva lo stesso, se era
+       * l'unica. Il risultato è il bordo allungato che si vede nei
+       * fotogrammi — le ciglia o l'ombra dell'orbita scambiate per
+       * iride, con il centro che finisce sul bordo rosa.
+       *
+       * Un'iride resta TONDA anche tagliata dalla palpebra: il taglio
+       * le toglie una calotta senza allungarla. Quindi una regione
+       * molto più lunga che larga non è un'iride, e nessun punteggio
+       * dovrebbe poterla far vincere.
+       *
+       * ⚠️ Con il limite regolabile e generoso di default: scartare
+       * troppo significa non trovare nulla, che è peggio che trovare
+       * male. */
+      const maxAllung = this.cfg.detection.irMaxAllungamento ?? 2.6;
+      if (maxAllung > 0 && aspect > maxAllung) continue;
+
       if (!best || score > best.score) {
         best = { cx, cy, a, b, angle, count, score, fillRatio, aspect,
                  bbox: { x: minX, y: minY, w: bw, h: bh }, meanI: sumI / count };

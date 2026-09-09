@@ -157,6 +157,41 @@ export function drawEyeDebug(canvas, frame, obs, side, cfg, colors) {
   try { ctx.drawImage(frame.src, sx, sy, sw, sh, ox, oy, sw * scale, sh * scale); }
   catch { /* frame non ancora pronto */ }
 
+  /* ══════════════════════════════════════════════════════════════════
+   * ANTEPRIMA DEI CANALI SCELTI
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ⚠️ Il riquadro mostrava sempre l'immagine a colori, anche quando il
+   * rilevamento lavorava sul solo canale rosso o su una differenza fra
+   * canali. Si tarava alla cieca: si sceglieva una combinazione e non
+   * si vedeva l'effetto — proprio la cosa che quella scelta esiste per
+   * migliorare.
+   *
+   * Acceso, il riquadro mostra ciò che il rilevatore VEDE davvero.
+   *
+   * ⚠️ Vale SOLO per la modalità infrarossa: con MediaPipe la
+   * combinazione di canali non ha alcun effetto, e mostrare
+   * un'immagine grigia lì confonderebbe soltanto. */
+  const D = cfg?.detection || {};
+  if (D.mostraCanali && D.mode !== 'rgb' && sw > 0 && sh > 0) {
+    try {
+      const m = D.channelMix || { r: 0.299, g: 0.587, b: 0.114 };
+      const larg = Math.round(sw * scale), alt = Math.round(sh * scale);
+      const img = ctx.getImageData(ox, oy, larg, alt);
+      const d = img.data;
+      /* Con pesi negativi — per esempio rosso meno blu — il risultato
+       * può uscire dall'intervallo visibile: si riporta dentro invece
+       * di lasciarlo saturare, altrimenti mezza immagine diventa nera
+       * e non si vede più nulla. */
+      for (let i = 0; i < d.length; i += 4) {
+        let v = d[i] * m.r + d[i + 1] * m.g + d[i + 2] * m.b;
+        v = v < 0 ? 0 : (v > 255 ? 255 : v);
+        d[i] = d[i + 1] = d[i + 2] = v;
+      }
+      ctx.putImageData(img, ox, oy);
+    } catch { /* immagine non leggibile: si lascia quella a colori */ }
+  }
+
   const TX = x => ox + (x - sx) * scale;
   const TY = y => oy + (y - sy) * scale;
 

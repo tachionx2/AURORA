@@ -313,7 +313,24 @@ export class SessionStats {
         if (salto > 0.5 * scala) I.salti++;
       }
       this._irPrec[eye] = o2.y;
-      if (Number.isFinite(o2.area)) I.aree.add(o2.area);
+      /* ⚠️ L'area sta dentro `px`, non al primo livello.
+       *
+       * Cercandola in `o.area` non si trovava mai, e senza area la
+       * diagnostica non poteva proporre l'area massima — cioè proprio
+       * il parametro che serve quando il bordo scappa sulla palpebra.
+       * Si accettano entrambe le forme, così non dipende da dove il
+       * rilevatore decide di metterla. */
+      const areaCampione = Number.isFinite(o2.area) ? o2.area
+        : (Number.isFinite(o2.px?.area) ? o2.px.area : null);
+      if (areaCampione != null) I.aree.add(areaCampione);
+      // Rapporto fra gli assi dell'ellisse: se il bordo trovato è molto
+      // allungato non è un'iride, è un'ombra o una ciglia.
+      const ax = o2.px?.axes;
+      if (ax && ax.a > 0 && ax.b > 0) {
+        I.allunga = (I.allunga || []);
+        I.allunga.push(Math.max(ax.a, ax.b) / Math.min(ax.a, ax.b));
+        if (I.allunga.length > 600) I.allunga.shift();
+      }
     }
 
     // Analisi periodica: una volta al secondo, non a ogni fotogramma.
@@ -961,6 +978,23 @@ export class SessionStats {
         }
       }
 
+      /* ⚠️ Il bordo ALLUNGATO: se l'ellisse trovata è molto più lunga
+       * che larga, non è un'iride. Un'iride resta tonda anche tagliata
+       * dalla palpebra, perché il taglio le toglie una calotta senza
+       * allungarla. */
+      for (const eye of ['left', 'right']) {
+        const I = this.ir[eye];
+        if (!I.allunga?.length || I.allunga.length < 200) continue;
+        const ord = [...I.allunga].sort((a, b) => a - b);
+        const mediana = ord[ord.length >> 1];
+        if (mediana > 1.8) {
+          motivi.push(
+            `⚠️ infrarosso, occhio ${eye === 'left' ? 'sinistro' : 'destro'}: il bordo trovato è `
+            + `allungato ${mediana.toFixed(1)} volte più che largo — non è un'iride ma `
+            + 'un\'ombra o le ciglia; abbassare l\'area massima e alzare il percentile scuro');
+        }
+      }
+
       if (peggiore && peggiore.qSalti > 0.04) {
         /* ⚠️ SALTI: il centro si sposta troppo fra due fotogrammi. Non
          * è un movimento oculare — l'occhio non può attraversare mezza
@@ -994,6 +1028,15 @@ export class SessionStats {
       const perditaMax = Math.max(...perdite);
       if (perditaMax > 0.12) {
         p['detection.irDarkPercentile'] = clamp(Math.round(percAttuale * 1.5), 1, 90);
+      } else if (valPeggiore > 0.08) {
+        /* ⚠️ Molti salti: si accetta come pupilla anche ciò che non lo
+         * è. Vale a QUALUNQUE livello di perdita — prima si proponeva
+         * solo se la perdita era quasi nulla, e nella fascia di mezzo
+         * non si proponeva niente proprio nei casi peggiori. */
+        p['detection.irDarkPercentile'] = clamp(Math.round(percAttuale * 0.7), 1, 90);
+        motivi.push(
+          'infrarosso: il centro salta spesso, segno che viene accettata come pupilla '
+          + 'anche una zona che non lo è — si abbassa il percentile scuro');
       } else if (perditaMax < 0.02 && valPeggiore > 0.10) {
         // Nessuna perdita ma molti salti: si accetta troppo.
         p['detection.irDarkPercentile'] = clamp(Math.round(percAttuale * 0.7), 1, 90);

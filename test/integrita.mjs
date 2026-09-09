@@ -292,6 +292,41 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
      'nessuna variabile usata dentro un try senza essere dichiarata: ' + (problemi.slice(0, 3).join(' | ') || 'verificato'));
 }
 
+/* ── I metodi chiamati devono ESISTERE ──
+ *
+ * ⚠️ Avevo scritto `this.audio.speak(...)`, che non esiste: il metodo
+ * si chiama `say`. La voce CHIEDI dell'assistente falliva con un
+ * errore invece di funzionare.
+ *
+ * Nessun test se n'era accorto: il modulo dell'assistente è provato da
+ * solo, senza il resto del programma attorno, e JavaScript non
+ * segnala un metodo inesistente finché non lo si chiama davvero.
+ *
+ * È la stessa classe di difetto del pulsante mai aggiunto alla pagina
+ * e dell'import mancante: codice corretto, che non funziona.
+ */
+{
+  const coppie = [
+    ['js/main.js', 'this.audio.', 'js/audio/AudioDirector.js'],
+    ['js/main.js', 'this.media.', 'js/media/MediaPlayer.js'],
+    ['js/main.js', 'this.gestures.', 'js/signal/GestureEngine.js'],
+  ];
+  for (const [chiamante, prefisso, definitore] of coppie) {
+    const src = read(chiamante);
+    const dst = read(definitore);
+    if (!src || !dst) continue;
+    const re = new RegExp(prefisso.replace(/\./g, '\\.') + '([a-zA-Z_]+)\\s*\\(', 'g');
+    const usati = [...new Set([...src.matchAll(re)].map(m => m[1]))];
+    const definiti = new Set([
+      ...[...dst.matchAll(/^  (?:async |static |get |\* )?([a-zA-Z_]+)\s*\(/gm)].map(m => m[1]),
+      ...[...dst.matchAll(/^  ([a-zA-Z_]+)\s*=/gm)].map(m => m[1]),
+    ]);
+    const mancanti = usati.filter(m => !definiti.has(m));
+    ok(mancanti.length === 0,
+       `ogni metodo chiamato con "${prefisso}" esiste in ${definitore.split('/').pop()} (${mancanti.join(', ') || 'confermato'})`);
+  }
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 if (problems.length) { console.log('\nDA CORREGGERE:'); problems.forEach(p => console.log('  · ' + p)); }
 process.exit(fail ? 1 : 0);

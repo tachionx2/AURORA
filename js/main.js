@@ -984,14 +984,20 @@ class App {
   async chiediAssistente(testo) {
     try {
       const { chiedi, inFrasi } = await import('./lang/Assistant.js');
-      await this.audio.speak(this.cfg.ui.language === 'en' ? 'Asking…' : 'Chiedo…');
+      /* ⚠️ Il metodo si chiama `say`, non `speak`.
+       *
+       * Avevo scritto `speak`, che non esiste: la voce CHIEDI
+       * falliva con un errore invece di funzionare, e nessun test se
+       * n'era accorto perché il modulo dell'assistente è provato da
+       * solo, senza il resto del programma attorno. */
+      await this.audio.say(this.cfg.ui.language === 'en' ? 'Asking…' : 'Chiedo…', 'menu');
 
       const r = await chiedi(this.cfg, testo);
       if (!r.ok) {
         this.debugView?.logEvent(`assistente: ${r.errore}`);
-        await this.audio.speak(this.cfg.ui.language === 'en'
+        await this.audio.say(this.cfg.ui.language === 'en'
           ? `The assistant did not answer: ${r.errore}`
-          : `L'assistente non ha risposto: ${r.errore}`);
+          : `L'assistente non ha risposto: ${r.errore}`, 'menu');
         return;
       }
 
@@ -1001,9 +1007,12 @@ class App {
        * trappola per chi non può parlare. */
       const pezzi = this.cfg.assistente?.frasiSeparate === false
         ? [r.testo] : inFrasi(r.testo);
+      /* La risposta va sul canale della VOCE, non su quello dei menu:
+       * è un contenuto, non un annuncio, e deve poter avere volume e
+       * uscita audio propri. */
       for (const f of pezzi) {
         if (this._assistenteInterrotto) break;
-        await this.audio.speak(f);
+        await this.audio.say(f, 'speech', false);
       }
       this._assistenteInterrotto = false;
     } catch (e) {

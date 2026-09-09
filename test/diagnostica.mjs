@@ -262,6 +262,11 @@ function corri(mod, script) {
   ok(res.left.px.axes && res.left.px.axes.a > 20 && res.left.px.axes.a < 50,
      `11d. dimensione dell ellisse plausibile (${res.left.px.axes.a.toFixed(1)})`);
   ok(res.left.confidence > 0.3, `11e. confidenza ragionevole (${res.left.confidence.toFixed(2)})`);
+  /* ⚠️ Qui si verifica il PERCENTILE, non la forma: si toglie il
+   * controllo sull'allungamento, altrimenti con un percentile alto la
+   * regione cresce, diventa allungata e viene giustamente scartata —
+   * lasciando il test senza nulla da misurare. */
+  cfgIr.detection.irMaxAllungamento = 0;
   // il percentile deve cambiare la soglia
   cfgIr.detection.irDarkPercentile = 2;  const bassa = ir.detect({},W,H,{left:{x:0,y:0,w:120,h:120}});
   cfgIr.detection.irDarkPercentile = 40; const alta  = ir.detect({},W,H,{left:{x:0,y:0,w:120,h:120}});
