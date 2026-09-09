@@ -15,7 +15,7 @@
  * inviati altrove.
  */
 
-const VERSION = 'aurora-20260908-1715';
+const VERSION = 'aurora-20260909-0907';
 const APP_CACHE = `${VERSION}-app`;
 const CDN_CACHE = `${VERSION}-cdn`;
 
@@ -59,6 +59,7 @@ const APP_SHELL = [
   './js/lang/AutoCorrect.js',
   './js/vision/Watchdog.js',
   './js/lang/Mailer.js',
+  './js/lang/Assistant.js',
   './js/device/HomeAssistant.js',
   './js/core/Legal.js',
   './vendor/fonts/atkinson-hyperlegible-latin-400-italic.woff2',

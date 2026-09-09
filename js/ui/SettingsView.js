@@ -140,6 +140,7 @@ export class SettingsView {
           () => this._mouseCard(cfg),
           () => this._radioCard(cfg),
           () => this._emailCard(cfg),
+          () => this._assistenteCard(cfg),
           () => this._domoticaCard(cfg),
           () => this._deviceCard(cfg),
         ],
@@ -291,8 +292,16 @@ export class SettingsView {
              'Below this the sample is discarded. ⚠️ Raising it does NOT sharpen detection: it narrows it, exactly where it matters most — confidence drops as the lid lowers, that is, during a downward gaze. Above 0.45 that movement starts vanishing halfway. Recommended is 0.40; if the signal breaks before the peak, lower it.']),
           0.1, 0.9, 0.05),
         this._range('detection.roiPadding', 'Margine ROI', 'Quanto allargare l\'area attorno all\'occhio', 1, 3, 0.1, '×'),
-        this._number('detection.irDarkPercentile', 'IR · percentile scuro', 'Percentuale di pixel più scuri considerati pupilla', 1, 50),
-        this._number('detection.irMinArea', 'IR · area minima', 'px², scarta blob troppo piccoli', 5, 5000, 5),
+        /* ⚠️ Fino a 90, non a 50.
+         *
+         * Il percentile decide quanti pixel vengono considerati
+         * pupilla. Con un sensore a colori usato come infrarosso, o con
+         * un'iride chiara, la pupilla può occupare una frazione molto
+         * maggiore di quella prevista — e fermando il cursore a
+         * cinquanta non la si raggiunge mai. */
+        this._number('detection.irDarkPercentile', 'IR · percentile scuro', 'Percentuale di pixel più scuri considerati pupilla. Alzare se il bordo trovato è troppo piccolo o cade fuori dall\'iride', 1, 90),
+        this._number('detection.irMinArea', 'IR · area minima', 'px², scarta blob troppo piccoli', 5, 20000, 5),
+        this._number('detection.irMaxArea', 'IR · area massima', 'px², scarta blob troppo grandi: se il bordo scappa sulla palpebra o sull\'ombra dell\'orbita, abbassare questo valore', 100, 60000, 100),
         this._toggle('detection.irUseGlint', 'IR · usa glint (PCCR)', 'Sottrae il riflesso corneale: cancella i movimenti di testa'),
         this._toggle('detection.irInvert', 'IR · inverti immagine', 'Per sensori che restituiscono il negativo'),
       ]);
@@ -350,6 +359,9 @@ export class SettingsView {
       'signal.plafondSigma', 'signal.sogliaRelativa', 'signal.sogliaFrazione',
       // Rilevamento e durate.
       'detection.minConfidence',
+      // Parametri della modalità infrarossa, proposti dalla diagnostica
+      // quando quella modalità è in uso.
+      'detection.irDarkPercentile', 'detection.irMinArea', 'detection.irMaxArea',
       'gestures.UP.dwellMs', 'gestures.UP.maxMs',
       'gestures.blinkMaxPulseMs', 'gestures.blinkMinPulseMs',
     ];
@@ -493,8 +505,15 @@ export class SettingsView {
         this._range('signal.lowPassHz', 'Passa-basso', 'Più basso = più stabile ma più lento', 0.3, 6, 0.1, ' Hz'),
         this._range('signal.baselineTauSec', 'Costante baseline', 'Insegue derive lente di postura e supporto', 3, 120, 1, ' s'),
         this._toggle('signal.baselineFreezeDuringGesture', 'Congela baseline nel gesto', 'Lasciare acceso salvo prova contraria'),
-        this._range('signal.thresholdOn', 'Soglia attivazione', 'In deviazioni standard. Alzare se ci sono falsi positivi', 1, 10, 0.1, 'σ'),
-        this._range('signal.thresholdOff', 'Soglia rilascio', 'Deve restare sotto quella di attivazione', 0.2, 8, 0.1, 'σ'),
+        /* ⚠️ Fino a 40, non a 10.
+         *
+         * In modalità infrarossa il segnale e il rumore hanno scale
+         * molto diverse da quelle di MediaPipe, e le soglie utili
+         * possono stare ben oltre i dieci sigma. Un cursore che si
+         * ferma prima del valore necessario è un cursore che impedisce
+         * di tarare, e obbliga a rinunciare a una modalità intera. */
+        this._range('signal.thresholdOn', 'Soglia attivazione', 'In deviazioni standard. Alzare se ci sono falsi positivi', 1, 40, 0.1, 'σ'),
+        this._range('signal.thresholdOff', 'Soglia rilascio', 'Deve restare sotto quella di attivazione', 0.2, 40, 0.1, 'σ'),
         this._range('signal.blinkLidThreshold', 'Soglia ammiccamento', 'Sotto questa apertura il campione è invalidato', 0.1, 0.9, 0.01),
         this._toggle('signal.blinkDiscriminate',
           P(['Distingui ammiccamento da sguardo in basso', 'Tell blink from looking down']),
@@ -882,6 +901,99 @@ export class SettingsView {
     return this._card(t('sec.radio'), null, righe);
   }
 
+  _assistenteCard(cfg) {
+    const righe = [];
+    // Elenco dei servizi, letto dal modulo che li conosce davvero.
+    if (!this._provAI) {
+      import('../lang/Assistant.js').then((m) => {
+        this._provAI = m;
+        if (document.body.dataset.tab === 'impostazioni') this.render();
+      }).catch(() => {});
+    }
+    righe.push(h('p', 'note', P(
+      ['Per chi comunica con un solo movimento, è la differenza fra poter DIRE e poter anche CHIEDERE. Il testo composto diventa una domanda, e la risposta viene letta ad alta voce.',
+       'For someone who communicates with a single movement, this is the difference between being able to SAY and being able to ASK.'])));
+    righe.push(this._toggle('assistente.enabled',
+      P(['Attiva l\'assistente', 'Enable the assistant']),
+      P(['Acceso, compare la voce CHIEDI fra le azioni della scrittura, dopo RILEGGI. ⚠️ Il testo NON viene svuotato dopo la domanda: se la risposta non arriva, chi ha impiegato minuti a scrivere non deve ricominciare.',
+         'When on, a CHIEDI item appears among the writing actions.'])));
+
+    if (cfg.assistente?.enabled) {
+      const P_AI = {
+        openrouter: 'OpenRouter (ha modelli gratuiti)',
+        deepseek: 'DeepSeek (molto economico)',
+        google: 'Google Gemini',
+        openai: 'OpenAI',
+        anthropic: 'Anthropic Claude',
+        personale: 'Altro servizio',
+      };
+      righe.push(this._select('assistente.provider',
+        P(['Servizio', 'Service']),
+        P(['OpenRouter e DeepSeek sono i più economici; il primo ha modelli gratuiti.',
+           'OpenRouter and DeepSeek are the cheapest; the first has free models.']),
+        P_AI));
+
+      if (cfg.assistente.provider === 'personale') {
+        righe.push(this._text('assistente.url',
+          P(['Indirizzo del servizio', 'Service address']),
+          'https://.../v1/chat/completions'));
+      }
+      const { PROVIDER_AI } = this._provAI || {};
+      const mod = PROVIDER_AI?.[cfg.assistente.provider]?.modelli || [];
+      righe.push(this._text('assistente.modello',
+        P(['Modello', 'Model']),
+        mod.length ? mod[0] : 'lasciando vuoto usa il primo disponibile'));
+      if (mod.length) {
+        righe.push(h('p', 'sub', P(
+          [`Disponibili: ${mod.join(' · ')}`, `Available: ${mod.join(' · ')}`])));
+      }
+      if (cfg.assistente.provider === 'openrouter') {
+        righe.push(h('p', 'note', P(
+          ['💡 Lasciando il campo vuoto si usa openrouter/free, che sceglie da solo un modello fra quelli gratuiti disponibili e non costa nulla — né il router né le richieste che instrada. Evita anche di dover inseguire quale sia il modello gratuito del mese, che cambia di continuo. ⚠️ openrouter/auto invece sceglie fra TUTTI i modelli, anche a pagamento.',
+             '💡 Leaving the field empty uses openrouter/free, which picks a free model by itself at no cost. ⚠️ openrouter/auto instead picks among ALL models, including paid ones.'])));
+      }
+
+      /* ⚠️ Una chiave PER SERVIZIO, tutte visibili insieme.
+       *
+       * Con una chiave sola, cambiare fornitore per provarne un altro
+       * significava cancellare la precedente e riscriverla per tornare
+       * indietro. Così chi installa ne tiene diverse e passa dall'una
+       * all'altra scegliendo il fornitore, senza riscrivere nulla. */
+      righe.push(h('div', 'vb-testa', P(['CHIAVI DI ACCESSO', 'ACCESS KEYS'])));
+      for (const [id, nome] of Object.entries(P_AI)) {
+        const attivo = cfg.assistente.provider === id;
+        righe.push(this._text(`assistente.chiavi.${id}`,
+          nome + (attivo ? '  ← in uso' : ''), 'sk-...'));
+      }
+      righe.push(h('p', 'sub', P(
+        ['🔒 Le chiavi restano su questo computer, come tutte le altre impostazioni, e ciascuna viene inviata solo al proprio servizio. Un servizio senza chiave non può essere usato: scegliendolo, l\'assistente lo dirà invece di provare a contattarlo.',
+         '🔒 Keys stay on this computer and each is sent only to its own service.'])));
+
+      righe.push(this._range('assistente.maxParole',
+        P(['Lunghezza massima della risposta', 'Maximum answer length']),
+        P(['⚠️ Questo numero viene CHIESTO all\'assistente a ogni domanda — "rispondi usando al massimo N parole" — non applicato tagliando la risposta. La differenza è sostanziale: tagliando si ottengono frasi interrotte a metà, chiedendo si ottiene una risposta compiuta e della lunghezza voluta. La risposta viene ASCOLTATA, non letta: un paragrafo che a schermo si scorre in un istante, ad alta voce dura un minuto.',
+           '⚠️ This number is ASKED of the assistant on every question, not applied by truncating.']),
+        20, 2000, 10, ' parole'));
+      righe.push(this._toggle('assistente.frasiSeparate',
+        P(['Leggi una frase per volta', 'Read one sentence at a time']),
+        P(['Rende l\'ascolto interrompibile: una risposta lunga letta tutta d\'un fiato, senza poter dire "basta", è una trappola per chi non può parlare.',
+           'Makes listening interruptible.'])));
+      righe.push(this._range('assistente.attesaSec',
+        P(['Quanto attendere una risposta', 'How long to wait']),
+        P(['Scaduto questo tempo il programma dice che il servizio non ha risposto, invece di lasciare in attesa senza sapere.',
+           'After this the program says the service did not answer.']),
+        5, 90, 5, ' s'));
+      righe.push(this._text('assistente.istruzione',
+        P(['Istruzione all\'assistente', 'Instruction to the assistant']),
+        'vuoto = chiede risposte brevi e dirette'));
+      righe.push(h('p', 'sub', P(
+        ['⚠️ Scrivendo qui un\'istruzione propria, il limite di parole qui sopra NON viene più aggiunto automaticamente: va incluso nel testo.',
+         '⚠️ With a custom instruction the word limit above is no longer added automatically.'])));
+    }
+
+    return this._card(t('sec.assistente'), null, righe);
+  }
+
   _emailCard(cfg) {
     const righe = [];
     righe.push(this._toggle('email.enabled',
@@ -1238,7 +1350,9 @@ export class SettingsView {
           v => this.app.set(`gestures.${E.key}.maxMs`, parseInt(v, 10) || 6000))),
       );
       const th = h('input', 'input'); th.type = 'number';
-      th.min = 0.5; th.max = 20; th.step = 0.1;
+      /* Fino a 40 come le soglie generali: in modalità infrarossa i
+       * valori utili possono stare ben oltre. */
+      th.min = 0.5; th.max = 40; th.step = 0.1;
       th.placeholder = String(cfg.signal.thresholdOn);
       const cur = cfg.signal.thresholdExpr?.[E.id];
       th.value = (cur === null || cur === undefined) ? '' : cur;
@@ -1279,7 +1393,9 @@ export class SettingsView {
 
       // Soglia: vuoto = eredita la globale
       const th = h('input', 'input'); th.type = 'number';
-      th.min = 0.5; th.max = 20; th.step = 0.1;
+      /* Fino a 40 come le soglie generali: in modalità infrarossa i
+       * valori utili possono stare ben oltre. */
+      th.min = 0.5; th.max = 40; th.step = 0.1;
       th.placeholder = String(cfg.signal.thresholdOn);
       const cur = cfg.signal.thresholdDir?.[id];
       th.value = (cur === null || cur === undefined) ? '' : cur;

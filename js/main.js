@@ -79,6 +79,7 @@ class App {
       onMedia: (cmd) => this.media.command(cmd),
       onMediaOpen: (sel) => this.apriDallaLibreria(sel),
       onDraft: (op, arg) => this.onDraft(op, arg),
+      onAsk: (testo) => this.chiediAssistente(testo),
       onCorrect: (testo, prec, modo) => this.correggi(testo, prec, modo),
       onRadio: (st) => this.apriRadio(st),
       onCasa: (d, c) => this.comandaCasa(d, c),
@@ -700,6 +701,11 @@ class App {
     // la scansione, che è l'unico modo che la persona ha di parlare.
     if (this.cfg.ui.sessionStats !== false) {
       try {
+        /* La diagnostica deve sapere in quale modalità sta lavorando:
+         * i parametri dell'infrarosso non hanno senso con MediaPipe, e
+         * viceversa. */
+        this.sessione.modoRilevamento = this.cfg.detection.mode;
+        this.sessione.cfgIr = this.cfg.detection;
         this.sessione.push(tMs, obs, domUp ? Math.abs(domUp.n) : null, !!domUp?.active);
         if (domUp && domUp.active && !this._sopraSoglia) this.sessione.sogliaSuperata();
         this._sopraSoglia = !!domUp?.active;
@@ -962,6 +968,47 @@ class App {
       + ` | apert σ ${f(ch['left.wide']?.n, 1)}/${f(ch['right.wide']?.n, 1)}`
       + ` | scheda ${document.body.dataset.tab}`
     );
+  }
+
+  /**
+   * Manda la domanda all'assistente e ne legge la risposta.
+   *
+   * ⚠️ Restituisce una promessa che si risolve quando la lettura è
+   * FINITA: la scansione la attende, e riprende da sola. Senza,
+   * riprenderebbe ad annunciare mentre l'assistente parla, rendendo
+   * incomprensibili entrambi.
+   *
+   * ⚠️ E non solleva mai: un errore di rete non deve poter fermare la
+   * scansione, che è l'unico modo che la persona ha di comunicare.
+   */
+  async chiediAssistente(testo) {
+    try {
+      const { chiedi, inFrasi } = await import('./lang/Assistant.js');
+      await this.audio.speak(this.cfg.ui.language === 'en' ? 'Asking…' : 'Chiedo…');
+
+      const r = await chiedi(this.cfg, testo);
+      if (!r.ok) {
+        this.debugView?.logEvent(`assistente: ${r.errore}`);
+        await this.audio.speak(this.cfg.ui.language === 'en'
+          ? `The assistant did not answer: ${r.errore}`
+          : `L'assistente non ha risposto: ${r.errore}`);
+        return;
+      }
+
+      this.debugView?.logEvent(`assistente: risposta di ${r.testo.length} caratteri`);
+      /* A frasi separate, così l'ascolto è interrompibile: una risposta
+       * lunga letta tutta d'un fiato, senza poter dire "basta", è una
+       * trappola per chi non può parlare. */
+      const pezzi = this.cfg.assistente?.frasiSeparate === false
+        ? [r.testo] : inFrasi(r.testo);
+      for (const f of pezzi) {
+        if (this._assistenteInterrotto) break;
+        await this.audio.speak(f);
+      }
+      this._assistenteInterrotto = false;
+    } catch (e) {
+      this._safe('assistente', () => { throw e; });
+    }
   }
 
   /* ------------------- Selettore della telecamera ------------------- */
@@ -2164,6 +2211,9 @@ class App {
   mediaLabel() { return 'COMANDI FILE'; }
 
   onMediaEvent(e) {
+    // Il titolo serve a ricordare a che punto si era arrivati in
+    // QUEL testo: riaprendolo si riprende da lì, non dall'inizio.
+    if (e.type === 'opened') this._titoloMediaCorrente = e.title || null;
     if (e.type === 'opened') {
       document.body.classList.add('has-media');
       this.scheduleFit();
@@ -2189,10 +2239,53 @@ class App {
     if (e.type === 'page') this.setMediaInfo(`${e.title || ''} ${e.page}/${e.pages}`.trim());
     if (e.type === 'error') this.toast(e.message, true);
     if (e.type === 'readAloud') {
-      // Legge il testo visibile, non l'intero documento: ore di lettura
-      // in un colpo solo non si possono fermare con un gesto solo.
-      const txt = (e.text || '').slice(0, 1200);
-      if (txt) this.audio.speakProtected(txt, 'speech');
+      /* ══════════════════════════════════════════════════════════════
+       * LETTURA DI UN TESTO LUNGO
+       * ══════════════════════════════════════════════════════════════
+       *
+       * ⚠️ Si legge un TRATTO per volta, e la volta dopo si riprende da
+       * dove si era arrivati.
+       *
+       * Leggere un libro intero in un colpo solo sarebbe una trappola:
+       * chi ascolta con un solo gesto non può dire "basta" a metà, e
+       * resterebbe prigioniero per ore. Un tratto per volta, e alla
+       * fine di ogni tratto la scansione riprende — così può
+       * continuare, tornare indietro, o uscire.
+       *
+       * La posizione si ricorda per QUEL testo: riaprendolo domani si
+       * riparte da dove si era arrivati, non dall'inizio. */
+      const txt = e.text || '';
+      if (!txt) return;
+
+      const titolo = this._titoloMediaCorrente || 'testo';
+      this._letture = this._letture || {};
+      if (e.verso === 0) this._letture[titolo] = 0;
+
+      const passo = Math.max(400, this.cfg.drafts?.passoLetturaCar || 900);
+      let pos = this._letture[titolo] || 0;
+      if (e.verso === -1) pos = Math.max(0, pos - passo * 2);
+
+      if (pos >= txt.length) {
+        this.audio.speakProtected(
+          this.cfg.ui.language === 'en' ? 'End of the text.' : 'Testo finito.', 'speech');
+        this._letture[titolo] = 0;
+        return;
+      }
+
+      /* Si taglia alla fine di una FRASE, non a metà parola: una
+       * lettura che si interrompe a metà periodo costringe a rileggere
+       * per capire. */
+      let fine = Math.min(txt.length, pos + passo);
+      if (fine < txt.length) {
+        const punto = txt.lastIndexOf('.', fine);
+        if (punto > pos + passo * 0.4) fine = punto + 1;
+      }
+      const tratto = txt.slice(pos, fine).trim();
+      this._letture[titolo] = fine;
+
+      const quanto = Math.round(100 * fine / txt.length);
+      this.debugView?.logEvent(`lettura "${titolo}": ${quanto}%`);
+      if (tratto) this.audio.speakProtected(tratto, 'speech');
     }
   }
 

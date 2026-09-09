@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 38;
+export const CONFIG_VERSION = 40;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -864,6 +864,14 @@ export const DEFAULT_CONFIG = {
     autosave: true,              // salva il lavoro in corso di continuo
     speakBySentence: true,       // legge frase per frase: si può fermare
     stopSpeechOnGesture: true,   // un gesto interrompe una lettura lunga
+    /* ⚠️ Quanto testo si legge per volta, in caratteri.
+     *
+     * Leggere un libro intero in un colpo solo sarebbe una trappola:
+     * chi ascolta con un solo gesto non può dire "basta" a metà. Un
+     * tratto per volta — circa un minuto di ascolto — e alla fine la
+     * scansione riprende, così si può continuare, tornare indietro o
+     * uscire. */
+    passoLetturaCar: 900,
   },
 
   /* ── Radio online ──
@@ -939,6 +947,33 @@ export const DEFAULT_CONFIG = {
   debug: {
     console: false,
     ogniMs: 2000,
+  },
+
+  /* ══════════════════════════════════════════════════════════════════
+   * ASSISTENTE CONVERSAZIONALE
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * Per chi comunica con un solo movimento, è la differenza fra poter
+   * DIRE e poter anche CHIEDERE. Spento di default: richiede una chiave
+   * di accesso e una scelta consapevole di chi assiste.
+   *
+   * ⚠️ La chiave resta sul computer, come tutte le altre impostazioni,
+   * e viene inviata solo al servizio scelto.
+   */
+  assistente: {
+    enabled: false,
+    provider: 'openrouter',
+    modello: '',
+    chiave: '',           // conservata per compatibilità
+    /* Una chiave PER SERVIZIO: chi installa può tenerne diverse e
+     * passare dall'una all'altra scegliendo il fornitore, senza
+     * riscrivere nulla ogni volta. */
+    chiavi: { openrouter: '', deepseek: '', google: '', openai: '', anthropic: '', personale: '' },
+    url: '',              // solo per "Altro servizio"
+    maxParole: 100,       // risposte brevi: si ascoltano, non si leggono
+    attesaSec: 25,
+    istruzione: '',       // vuoto = quella predefinita
+    frasiSeparate: true,  // legge una frase per volta, interrompibile
   },
 
   media: {
@@ -1027,6 +1062,19 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 40 && c.assistente && !c.assistente.chiavi) {
+    // La chiave unica diventa quella del fornitore in uso.
+    c.assistente.chiavi = { openrouter: '', deepseek: '', google: '',
+                            openai: '', anthropic: '', personale: '' };
+    if (c.assistente.chiave) {
+      c.assistente.chiavi[c.assistente.provider || 'openrouter'] = c.assistente.chiave;
+    }
+  }
+  if (v < 39 && !c.assistente) {
+    c.assistente = { enabled: false, provider: 'openrouter', modello: '', chiave: '',
+                     url: '', maxParole: 100, attesaSec: 25, istruzione: '',
+                     frasiSeparate: true };
+  }
   if (v < 38 && c.signal) {
     if (c.signal.plafondSigma === undefined) c.signal.plafondSigma = 25;
     if (c.signal.sogliaRelativa === undefined) c.signal.sogliaRelativa = false;

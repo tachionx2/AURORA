@@ -49,6 +49,14 @@ export const MediaCommand = {
   SCROLL_DOWN: 'scrollDown',
   SCROLL_UP: 'scrollUp',
   READ_ALOUD: 'readAloud',
+  /* ⚠️ Leggere un libro non è leggere una pagina.
+   *
+   * La lettura si ferma dopo un tratto e RIPRENDE da dove era
+   * arrivata: ore di lettura in un colpo solo non si possono fermare
+   * con un solo gesto, e chi ascolta resterebbe prigioniero fino alla
+   * fine. Un tratto per volta, e chi ascolta decide se continuare. */
+  READ_BACK: 'readBack',
+  READ_RESTART: 'readRestart',
   EXIT: 'exit',
 };
 
@@ -89,7 +97,9 @@ export const COMMANDS_BY_KIND = {
   text: [
     { id: MediaCommand.SCROLL_DOWN,label: '↓ avanti',       spoken: 'avanti' },
     { id: MediaCommand.SCROLL_UP,  label: '↑ indietro',     spoken: 'indietro' },
-    { id: MediaCommand.READ_ALOUD, label: '🔊 LEGGI AD ALTA VOCE', spoken: 'leggi ad alta voce' },
+    { id: MediaCommand.READ_ALOUD, label: '🔊 LEGGI / CONTINUA', spoken: 'leggi' },
+    { id: MediaCommand.READ_BACK,  label: '⏪ rileggi il tratto prima', spoken: 'rileggi' },
+    { id: MediaCommand.READ_RESTART, label: '⏮ dall\'inizio', spoken: 'dall inizio' },
     { id: MediaCommand.ZOOM_IN,    label: '➕ ingrandisci', spoken: 'ingrandisci' },
     { id: MediaCommand.ZOOM_OUT,   label: '➖ rimpicciolisci', spoken: 'rimpicciolisci' },
     { id: MediaCommand.EXIT,       label: 'CHIUDI',         spoken: 'chiudi' },
@@ -401,7 +411,13 @@ export class MediaPlayer {
         else this._applyTextZoom();
         break;
       case MediaCommand.READ_ALOUD:
-        this._emit('readAloud', { text: this.textEl?.innerText || '' });
+        this._emit('readAloud', { text: this.textEl?.innerText || '', verso: +1 });
+        break;
+      case MediaCommand.READ_BACK:
+        this._emit('readAloud', { text: this.textEl?.innerText || '', verso: -1 });
+        break;
+      case MediaCommand.READ_RESTART:
+        this._emit('readAloud', { text: this.textEl?.innerText || '', verso: 0 });
         break;
       case MediaCommand.EXIT:
         this.close(true);

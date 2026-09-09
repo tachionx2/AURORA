@@ -50,6 +50,14 @@ export function buildTree(cfg, ctx = {}) {
       { kind: NodeKind.ACTION, id: 'a:speak',  label: 'PARLA',    spoken: 'parla',   action: 'SPEAK' },
       { kind: NodeKind.ACTION, id: 'a:repeat', label: 'RILEGGI',  spoken: 'rileggi', action: 'SPEAK_KEEP' },
       { kind: NodeKind.ACTION, id: 'a:save',   label: 'SALVA',    spoken: 'salva',   action: 'SAVE_DRAFT' },
+      /* L'assistente compare solo se acceso in impostazioni: chi non
+       * lo usa non deve trovarsi una voce in più nella scansione, che
+       * costa tempo a ogni giro. Sta qui, dopo RILEGGI, perché è
+       * un'altra cosa da fare con il testo appena scritto. */
+      ...(cfg?.assistente?.enabled
+        ? [{ kind: NodeKind.ACTION, id: 'a:ai', label: 'CHIEDI',
+             spoken: 'chiedi', action: 'ASK_AI' }]
+        : []),
       // Le pronunce sono volutamente brevi: un annuncio più lungo del
       // passo di scansione viene troncato dall'annuncio successivo.
       { kind: NodeKind.ACTION, id: 'a:delc',   label: '⌫ lettera', spoken: 'lettera', action: 'DEL_CHAR' },
@@ -912,6 +920,30 @@ export class ScanEngine {
         const text = this._composedText();
         if (!text) { this._hold(this.h.onOutput('menu', 'niente da leggere'), now); return; }
         const p = this.h.onOutput('speech', text, { keep: true });
+        this._backToWrite(now, true, 'azioni');
+        if (!this._hold(p, now)) this._announceNow(now);
+        return;
+      }
+      case 'ASK_AI': {
+        /* ══════════════════════════════════════════════════════════
+         * CHIEDI ALL'ASSISTENTE
+         * ══════════════════════════════════════════════════════════
+         *
+         * Il testo composto diventa una domanda, e la risposta viene
+         * letta ad alta voce.
+         *
+         * ⚠️ Il testo NON viene svuotato: se la risposta non arriva o
+         * non è quella sperata, chi ha impiegato minuti a scriverla non
+         * deve riscriverla da capo. A svuotare ci pensa PARLA, che è
+         * l'azione che dichiara il messaggio consegnato.
+         *
+         * ⚠️ E la scansione si ferma durante l'attesa e la lettura: la
+         * voce guida che continua ad annunciare mentre l'assistente
+         * parla renderebbe incomprensibili entrambe. Riprende da sola
+         * quando la risposta è finita, come per PARLA. */
+        const text = this._composedText();
+        if (!text) { this._hold(this.h.onOutput('menu', 'niente da chiedere'), now); return; }
+        const p = this.h.onAsk?.(text);
         this._backToWrite(now, true, 'azioni');
         if (!this._hold(p, now)) this._announceNow(now);
         return;

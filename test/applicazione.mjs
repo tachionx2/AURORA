@@ -1657,5 +1657,266 @@ app.goto('parla');
      'gli oggetti vengono copiati, non condivisi con i predefiniti');
 }
 
+/* ═══════════ Assistente conversazionale ═══════════
+ *
+ * Per chi comunica con un solo movimento è la differenza fra poter
+ * DIRE e poter anche CHIEDERE.
+ *
+ * ⚠️ Non deve poter danneggiare nulla: un errore di rete non può
+ * fermare la scansione, che è l'unico modo che la persona ha di
+ * comunicare.                                                       */
+{
+  const { chiedi, inFrasi, ripulisci, PROVIDER_AI, ISTRUZIONE } =
+    await import('../js/lang/Assistant.js');
+  const { DEFAULT_CONFIG: DCA, deepClone: dcA } = await import('../js/core/config.js');
+
+  ok(DCA.assistente.enabled === false,
+     'l assistente è spento di default: richiede una chiave e una scelta consapevole');
+  ok(Object.keys(PROVIDER_AI).length >= 5,
+     `sono disponibili più servizi (${Object.keys(PROVIDER_AI).length})`);
+
+  /* ⚠️ Non solleva MAI: restituisce sempre un esito. */
+  const c = dcA(DCA);
+  for (const [caso, prep, dom] of [
+    ['spento', (x) => x, 'ciao'],
+    ['senza chiave', (x) => { x.assistente.enabled = true; return x; }, 'ciao'],
+    ['domanda vuota', (x) => { x.assistente.enabled = true; return x; }, '   '],
+    ['configurazione assente', () => ({}), 'ciao'],
+  ]) {
+    const r = await chiedi(prep(dcA(DCA)), dom);
+    ok(r && r.ok === false && typeof r.errore === 'string',
+       `"${caso}" restituisce un esito invece di sollevare (${r?.errore})`);
+  }
+
+  /* ⚠️ L'istruzione deve chiedere risposte BREVI: la risposta viene
+   * ASCOLTATA, non letta, e chi ascolta non può dire "basta" con la
+   * stessa facilità con cui si distoglie lo sguardo. */
+  ok(/brev|LETTA AD ALTA VOCE/i.test(ISTRUZIONE),
+     'l istruzione chiede risposte brevi, perché verranno ascoltate');
+  ok(DCA.assistente.maxParole <= 150,
+     `e il tetto predefinito è basso (${DCA.assistente.maxParole} parole)`);
+
+  // La formattazione va tolta: ad alta voce diventa rumore.
+  const sporco = '**Certo!** Ecco:\n- primo\n- secondo\n```codice```\nFine.';
+  const pulito = ripulisci(sporco);
+  ok(!/[*`#]/.test(pulito), 'asterischi e cancelletti vengono tolti dalla lettura');
+  ok(!/codice/.test(pulito), 'e i blocchi di codice, che ad alta voce sono incomprensibili');
+
+  /* Spezzare in frasi rende l'ascolto interrompibile. */
+  const lunga = 'Prima frase. Seconda frase. ' + 'parola '.repeat(60) + 'fine.';
+  const pezzi = inFrasi(lunga);
+  ok(pezzi.length >= 3, `una risposta lunga viene spezzata (${pezzi.length} pezzi)`);
+  ok(Math.max(...pezzi.map(x => x.length)) <= 200,
+     `e nessun pezzo è interminabile (${Math.max(...pezzi.map(x => x.length))} caratteri)`);
+
+  /* ⚠️ La voce CHIEDI compare solo se l'assistente è acceso: chi non lo
+   * usa non deve trovarsi una voce in più nella scansione, che costa
+   * tempo a OGNI giro. */
+  const { buildTree } = await import('../js/scan/ScanEngine.js');
+  const trova = (n, id) => n.id === id ? n
+    : (n.children || []).reduce((acc, k) => acc || trova(k, id), null);
+  const spento = dcA(DCA), acceso = dcA(DCA);
+  acceso.assistente.enabled = true;
+  ok(!trova(buildTree(spento), 'a:ai'),
+     'a assistente spento la voce CHIEDI non compare nella scansione');
+  ok(!!trova(buildTree(acceso), 'a:ai'),
+     'accendendolo compare');
+
+  /* ⚠️ E non deve toccare NULLA del percorso del segnale. */
+  const fsA = await import('node:fs');
+  const pathA = await import('node:path');
+  const quiA = pathA.dirname(import.meta.filename || process.argv[1]);
+  const srcA = fsA.readFileSync(pathA.join(quiA, '..', 'js/lang/Assistant.js'), 'utf8');
+  ok(!/GestureEngine|sigma|baseline|escursione/i.test(srcA),
+     'il modulo non tocca in alcun modo il percorso del segnale');
+}
+
+/* ═══════════ Il limite di parole si CHIEDE, non si taglia ═══════════
+ *
+ * ⚠️ Serviva solo a limitare la risposta dall'esterno: l'assistente non
+ * lo sapeva, scriveva quanto voleva, e la risposta veniva troncata a
+ * metà frase. Chiedere "al massimo N parole" produce invece una
+ * risposta compiuta e della lunghezza voluta.                        */
+{
+  const { istruzione, PROVIDER_AI: PA } = await import('../js/lang/Assistant.js');
+  for (const n of [30, 100, 250]) {
+    ok(istruzione(n).includes(String(n)),
+       `il limite di ${n} parole compare nell istruzione data all assistente`);
+  }
+  ok(/AL MASSIMO/i.test(istruzione(50)),
+     'ed è espresso come richiesta, non come taglio');
+  ok(/completa e più corta/i.test(istruzione(50)),
+     'chiedendo esplicitamente di non interrompersi a metà');
+
+  /* ⚠️ Un'istruzione personale SOSTITUISCE quella predefinita: chi la
+   * scrive deve poter dire ciò che vuole, compreso ignorare il limite
+   * di parole. Ma dev'essere evidente, non una sorpresa. */
+  const fsI = await import('node:fs');
+  const pathI = await import('node:path');
+  const quiI = pathI.dirname(import.meta.filename || process.argv[1]);
+  const svP = fsI.readFileSync(pathI.join(quiI, '..', 'js/ui/SettingsView.js'), 'utf8');
+  ok(/il limite di parole qui sopra NON viene più aggiunto/.test(svP),
+     'ed è scritto sotto il campo che scrivendone una propria il limite non si aggiunge più');
+
+  /* ⚠️ Una chiave PER SERVIZIO: cambiare fornitore per provarne un
+   * altro non deve costringere a cancellare la chiave precedente. */
+  const { DEFAULT_CONFIG: DK, deepClone: dk } = await import('../js/core/config.js');
+  const { chiedi: ch } = await import('../js/lang/Assistant.js');
+  ok(!!DK.assistente.chiavi, 'esiste una chiave per ciascun servizio');
+  ok(Object.keys(DK.assistente.chiavi).length === Object.keys(PA).length,
+     `una per ogni servizio disponibile (${Object.keys(DK.assistente.chiavi).length})`);
+
+  const c1 = dk(DK);
+  c1.assistente.enabled = true;
+  c1.assistente.provider = 'deepseek';
+  c1.assistente.chiavi.openrouter = 'sk-or-1';
+  const r1 = await ch(c1, 'ciao');
+  ok(r1.errore === 'chiave di accesso non impostata',
+     'la chiave di un servizio non vale per un altro');
+
+  // ⚠️ E la vecchia chiave unica deve continuare a funzionare
+  const c2 = dk(DK);
+  c2.assistente.enabled = true;
+  c2.assistente.chiave = 'sk-vecchia';
+  delete c2.assistente.chiavi;
+  const r2 = await ch(c2, 'ciao');
+  ok(r2.errore !== 'chiave di accesso non impostata',
+     'una configurazione vecchia con chiave unica continua a funzionare');
+
+  /* ⚠️ Il router GRATUITO deve essere il primo, quindi il predefinito.
+   *
+   * Aurora è e resterà gratuito: chi non sceglie un modello non deve
+   * trovarsi un costo. `openrouter/free` sceglie da solo fra i modelli
+   * gratuiti disponibili, e non costa nulla — né il router né le
+   * richieste che instrada. `openrouter/auto` invece sceglie fra
+   * TUTTI, anche a pagamento. */
+  ok(PA.openrouter.modelli[0] === 'openrouter/free',
+     'il router gratuito è il primo, quindi il predefinito');
+
+  /* ⚠️ Nomi di modello RITIRATI.
+   *
+   * `deepseek-chat` e `deepseek-reasoner` sono stati ritirati il
+   * 24 luglio 2026: le chiamate con quei nomi falliscono. Erano
+   * l'unica voce dell'elenco DeepSeek, quindi quel servizio non
+   * avrebbe funzionato affatto — e nessun test se ne sarebbe accorto,
+   * perché il programma non contatta la rete durante le prove.
+   *
+   * Un elenco di modelli invecchia da solo: questa verifica non può
+   * sapere quali nomi saranno validi domani, ma può ricordare quelli
+   * che sappiamo essere morti. */
+  const RITIRATI = ['deepseek-chat', 'deepseek-reasoner'];
+  const morti = Object.entries(PA)
+    .flatMap(([k, v]) => (v.modelli || []).filter(m => RITIRATI.includes(m)).map(m => `${k}: ${m}`));
+  ok(morti.length === 0,
+     `nessun modello ritirato nell elenco (${morti.join(', ') || 'confermato'})`);
+  for (const [k, v] of Object.entries(PA)) {
+    if (k === 'personale') continue;
+    ok((v.modelli || []).length > 0, `il servizio "${k}" ha almeno un modello indicato`);
+  }
+  ok(PA.openrouter.modelli.includes('openrouter/auto'),
+     'e la scelta automatica fra tutti resta disponibile, più in basso');
+}
+
+/* ═══════════ Diagnostica della modalità infrarossa ═══════════
+ *
+ * ⚠️ La ricerca della pupilla per luminanza sbaglia in modi tutti suoi,
+ * che i parametri di MediaPipe non descrivono. E i suoi parametri non
+ * vanno MAI proposti in modalità MediaPipe: lì non hanno effetto, e
+ * proporli farebbe perdere fiducia in tutti gli altri.               */
+{
+  const { SessionStats: SI } = await import('../js/signal/SessionStats.js');
+
+  function sessione(modo, salta, perde) {
+    const st = new SI();
+    st.modoRilevamento = modo;
+    st.cfgIr = { irDarkPercentile: 12 };
+    let t = 0;
+    const R = (x) => 0.020 * Math.sin(2 * Math.PI * 4.2 * x / 1000);
+    for (let k = 0; k < 70; k++) {
+      for (let i = 0; i < 1400; i += 33) {
+        t += 33;
+        const s2 = salta && (k * 40 + i) % 7 === 0;
+        const p2 = perde && (k * 40 + i) % 5 === 0;
+        const o = (y) => p2 ? null
+          : { x: 0, y: y + R(t) + (s2 ? 0.12 : 0), openness: 0.44, confidence: 0.9, area: 900 };
+        st.push(t, { left: o(-0.16), right: o(-0.16) }, 8, true);
+      }
+      for (let i = 0; i < 2200; i += 33) {
+        t += 33;
+        const o = () => ({ x: 0, y: R(t), openness: 0.44, confidence: 0.9, area: 900 });
+        st.push(t, { left: o(), right: o() }, 1, false);
+      }
+    }
+    return st.parametriConsigliati();
+  }
+
+  const rgb = sessione('rgb', true, true);
+  const soloIr = (p) => Object.keys(p.proposta).filter(k => /^detection\.ir/.test(k));
+  ok(soloIr(rgb).length === 0,
+     `in modalità MediaPipe non propone parametri infrarossi (${soloIr(rgb).join(', ') || 'nessuno'})`);
+
+  const ir = sessione('ir', true, true);
+  ok(soloIr(ir).length > 0,
+     `in modalità infrarossa li propone (${soloIr(ir).join(', ')})`);
+  ok(ir.motivi.some(m => /infraross/.test(m)),
+     'spiegando quale sintomo ha osservato');
+  ok(ir.motivi.some(m => /salta|perde/.test(m)),
+     'e distinguendo il centro che salta dalla pupilla che si perde');
+
+  /* Con un rilevamento SANO non deve proporre nulla: proporre a vuoto
+   * fa perdere fiducia nei suggerimenti che contano. */
+  const sano = sessione('ir', false, false);
+  ok(soloIr(sano).length === 0,
+     `con rilevamento sano non propone nulla (${soloIr(sano).join(', ') || 'nessuno'})`);
+}
+
+/* ═══════════ Lettura di un testo lungo ═══════════
+ *
+ * ⚠️ Leggere un libro intero in un colpo solo sarebbe una trappola:
+ * chi ascolta con un solo gesto non può dire "basta" a metà, e
+ * resterebbe prigioniero per ore. Si legge un TRATTO per volta, e la
+ * volta dopo si riprende da dove si era arrivati.                    */
+{
+  const fsL = await import('node:fs');
+  const pathL = await import('node:path');
+  const quiL = pathL.dirname(import.meta.filename || process.argv[1]);
+  const mpL = fsL.readFileSync(pathL.join(quiL, '..', 'js/media/MediaPlayer.js'), 'utf8');
+  const mainL = fsL.readFileSync(pathL.join(quiL, '..', 'js/main.js'), 'utf8');
+  const { DEFAULT_CONFIG: DL } = await import('../js/core/config.js');
+  const { COMMANDS_BY_KIND, MediaCommand } = await import('../js/media/MediaPlayer.js');
+
+  const cmdTesto = (COMMANDS_BY_KIND.text || []).map(c => c.id);
+  for (const [id, nome] of [
+    [MediaCommand.READ_ALOUD, 'leggi e continua'],
+    [MediaCommand.READ_BACK, 'rileggi il tratto prima'],
+    [MediaCommand.READ_RESTART, 'ricomincia dall inizio'],
+  ]) {
+    ok(cmdTesto.includes(id), `un testo aperto ha il comando "${nome}"`);
+  }
+  ok(cmdTesto.includes(MediaCommand.EXIT), 'e quello per uscire');
+
+  ok(Number.isFinite(DL.drafts.passoLetturaCar) && DL.drafts.passoLetturaCar >= 400,
+     `il tratto letto per volta è regolabile (${DL.drafts.passoLetturaCar} caratteri)`);
+  ok(DL.drafts.passoLetturaCar <= 2000,
+     'e resta breve: circa un minuto di ascolto, non un\'ora');
+
+  /* ⚠️ La posizione si ricorda PER TESTO: riaprendo un libro domani si
+   * riparte da dove si era arrivati, non dall'inizio. */
+  ok(/_letture\[titolo\]/.test(mainL),
+     'la posizione di lettura si ricorda per ciascun testo');
+  ok(/_titoloMediaCorrente = e\.title/.test(mainL),
+     'e il testo viene riconosciuto dal titolo all apertura');
+
+  /* Il taglio cade a fine FRASE: interrompersi a metà periodo
+   * costringe a rileggere per capire. */
+  ok(/lastIndexOf\('\.', fine\)/.test(mainL),
+     'il tratto si chiude alla fine di una frase, non a metà parola');
+
+  ok(/Testo finito/.test(mainL),
+     'arrivati in fondo lo dice, invece di leggere il vuoto');
+  ok(/speakProtected/.test(mainL),
+     'la lettura mette in pausa la voce guida, altrimenti si sovrapporrebbero');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

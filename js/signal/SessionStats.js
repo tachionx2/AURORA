@@ -175,6 +175,31 @@ export class SessionStats {
      * misurare QUANTO la persona si muove senza chiederlo alle soglie,
      * che sono proprio ciò che stiamo cercando di tarare. */
     this.grezzoTutti  = { left: new Istogramma(0, 0.5, 100), right: new Istogramma(0, 0.5, 100) };
+
+    /* ══════════════════════════════════════════════════════════════
+     * SINTOMI DELLA MODALITÀ INFRAROSSA
+     * ══════════════════════════════════════════════════════════════
+     *
+     * La ricerca della pupilla per luminanza ha modi di sbagliare tutti
+     * suoi, che i parametri di MediaPipe non descrivono:
+     *
+     *  · il centro SALTA da un fotogramma all'altro, perché la regione
+     *    più scura smette di essere la pupilla e diventa la palpebra o
+     *    l'ombra dell'orbita;
+     *  · il bordo trovato è troppo PICCOLO o troppo GRANDE rispetto
+     *    all'occhio;
+     *  · il rilevamento si PERDE del tutto per interi tratti.
+     *
+     * Si contano qui, e servono a proporre i parametri specifici della
+     * modalità — percentile scuro, area minima e massima — che
+     * altrimenti nessuno taratura automatica tocca.
+     */
+    this.ir = {
+      left:  { salti: 0, campioni: 0, persi: 0, aree: new Istogramma(0, 30000, 60) },
+      right: { salti: 0, campioni: 0, persi: 0, aree: new Istogramma(0, 30000, 60) },
+    };
+    this._irPrec = { left: null, right: null };
+    this.modoRilevamento = 'rgb';
     this.campioniInGesto = 0;
     this.campioniTotali = 0;
     this.durataGesti = new Istogramma(0, 6000, 30);   // ms
@@ -222,7 +247,11 @@ export class SessionStats {
     for (const eye of ['left', 'right']) {
       const o = obs?.[eye];
       if (!o || !Number.isFinite(o.y)) {
-        this.c.persi += 0;   // conteggio per occhio non necessario qui
+        // ⚠️ Per occhio SÌ: in modalità infrarossa un occhio può
+        // perdersi mentre l'altro va bene, ed è proprio il sintomo da
+        // riconoscere.
+        this.ir[eye].persi++;
+        this.ir[eye].campioni++;
         continue;
       }
       almenoUno = true;
@@ -270,6 +299,21 @@ export class SessionStats {
       const scarto = Math.abs(o2.y - riposo);
       (inGesto ? this.grezzoGesto[eye] : this.grezzoRiposo[eye]).add(scarto);
       this.grezzoTutti[eye].add(scarto);
+
+      /* Sintomi della modalità infrarossa. Un SALTO è uno spostamento
+       * fra due fotogrammi consecutivi troppo grande per essere un
+       * movimento oculare vero: l'occhio non può attraversare mezza
+       * escursione in trentatré millesimi di secondo. */
+      const I = this.ir[eye];
+      I.campioni++;
+      const prec = this._irPrec[eye];
+      if (prec != null) {
+        const salto = Math.abs(o2.y - prec);
+        const scala = this.grezzoTutti[eye].percentile(0.97) || 0.1;
+        if (salto > 0.5 * scala) I.salti++;
+      }
+      this._irPrec[eye] = o2.y;
+      if (Number.isFinite(o2.area)) I.aree.add(o2.area);
     }
 
     // Analisi periodica: una volta al secondo, non a ogni fotogramma.
@@ -882,6 +926,81 @@ export class SessionStats {
           'parametri misurati SEPARATAMENTE per i due occhi — '
           + [d1, d2].filter(Boolean).join(' · ')
           + ' (le soglie restano comuni, è il guadagno a pareggiarli)');
+      }
+    }
+
+    /* ══════════════════════════════════════════════════════════════
+     * PARAMETRI DELLA MODALITÀ INFRAROSSA
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Si propongono SOLO in modalità infrarossa o ibrida. Con
+     * MediaPipe non hanno alcun effetto, e proporli lì significherebbe
+     * riempire l'elenco di valori che non servono — facendo perdere
+     * fiducia in tutti gli altri.
+     *
+     * La ricerca della pupilla per luminanza sbaglia in modi suoi, che
+     * si riconoscono da tre sintomi misurabili.
+     */
+    if (this.modoRilevamento === 'ir' || this.modoRilevamento === 'auto') {
+      const percAttuale = this.cfgIr?.irDarkPercentile ?? 12;
+      let peggiore = null, valPeggiore = 0;
+      for (const eye of ['left', 'right']) {
+        const I = this.ir[eye];
+        if (I.campioni < 600) continue;
+        const qSalti = I.salti / I.campioni;
+        const qPersi = I.persi / I.campioni;
+        const nome = eye === 'left' ? 'sinistro' : 'destro';
+
+        if (qSalti > valPeggiore) { valPeggiore = qSalti; peggiore = { eye, nome, qSalti, qPersi, I }; }
+
+        if (qPersi > 0.12) {
+          motivi.push(
+            `⚠️ infrarosso, occhio ${nome}: la pupilla si perde nel `
+            + `${(qPersi * 100).toFixed(0)}% dei fotogrammi — alzare il percentile scuro `
+            + 'fa considerare pupilla una porzione più ampia di pixel');
+        }
+      }
+
+      if (peggiore && peggiore.qSalti > 0.04) {
+        /* ⚠️ SALTI: il centro si sposta troppo fra due fotogrammi. Non
+         * è un movimento oculare — l'occhio non può attraversare mezza
+         * escursione in trentatré millesimi. È la regione più scura che
+         * smette di essere la pupilla e diventa la palpebra o l'ombra
+         * dell'orbita.
+         *
+         * Il rimedio è restringere ciò che può essere accettato come
+         * pupilla: un'area massima più bassa scarta le regioni troppo
+         * grandi, che sono proprio quelle. */
+        const areaTipica = peggiore.I.aree.tot > 200
+          ? peggiore.I.aree.percentile(0.75) : 0;
+        if (areaTipica > 0) {
+          p['detection.irMaxArea'] = Math.round(areaTipica * 2.5 / 100) * 100;
+        }
+        motivi.push(
+          `⚠️ infrarosso, occhio ${peggiore.nome}: il centro salta nel `
+          + `${(peggiore.qSalti * 100).toFixed(0)}% dei fotogrammi — la zona più scura `
+          + 'smette di essere la pupilla e diventa la palpebra o l\'ombra dell\'orbita'
+          + (areaTipica > 0
+            ? `; si propone un\'area massima di ${p['detection.irMaxArea']} px² per scartarle`
+            : ''));
+      }
+
+      /* Il percentile scuro: si propone solo se c'è un sintomo, e
+       * sempre a passi piccoli. Cambiarlo di molto in una volta
+       * sposterebbe il rilevamento su un'altra regione, e non si
+       * capirebbe più se il risultato è migliore o soltanto diverso. */
+      const perdite = ['left', 'right']
+        .map(e => this.ir[e].campioni > 600 ? this.ir[e].persi / this.ir[e].campioni : 0);
+      const perditaMax = Math.max(...perdite);
+      if (perditaMax > 0.12) {
+        p['detection.irDarkPercentile'] = clamp(Math.round(percAttuale * 1.5), 1, 90);
+      } else if (perditaMax < 0.02 && valPeggiore > 0.10) {
+        // Nessuna perdita ma molti salti: si accetta troppo.
+        p['detection.irDarkPercentile'] = clamp(Math.round(percAttuale * 0.7), 1, 90);
+        motivi.push(
+          'infrarosso: il rilevamento non si perde mai ma salta spesso, '
+          + 'segno che accetta come pupilla anche zone che non lo sono — '
+          + 'si abbassa il percentile scuro');
       }
     }
 
