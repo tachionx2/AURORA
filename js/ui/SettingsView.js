@@ -42,7 +42,34 @@ function field(label, desc, control, valueEl) {
  * ridisegnare a ogni tocco farebbe perdere il punto in cui si stava
  * scorrendo — fastidioso in una scheda lunga come questa.
  */
+/* ══════════════════════════════════════════════════════════════════
+ * INTERRUTTORI CHE RIVELANO ALTRI CONTROLLI
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * ⚠️ Un comando che non mostra subito ciò che governa sembra guasto.
+ *
+ * Le impostazioni si ridisegnano solo quando serve: ridisegnare a ogni
+ * tocco farebbe saltare il punto in cui si sta lavorando. Ma un
+ * interruttore che SVELA altri controlli deve ridisegnare, altrimenti
+ * quei controlli compaiono solo cambiando scheda e tornando indietro.
+ *
+ * È successo cinque volte in questo progetto — posta, radio, canale
+ * combinato, assistente — sempre allo stesso modo: si aggiunge una
+ * sezione condizionale e ci si dimentica di questa lista.
+ *
+ * ⚠️ Perciò la lista NON basta più da sola: c'è una verifica
+ * automatica che cerca nel file ogni `cfg.qualcosa.enabled ?` e
+ * controlla che sia elencato qui. Aggiungendo una sezione nuova senza
+ * dichiararla, il test lo dice subito invece di lasciarlo scoprire a
+ * chi la usa.
+ */
 const INTERRUTTORI_CHE_APRONO = new Set([
+  'assistente.enabled',
+  'debug.console',
+  'detection.irisOcclusionFix',
+  'signal.sogliaRelativa',
+  'signal.modoGrezzo',
+  'signal.normalizzaSuRumore',
   'email.enabled',
   'radio.enabled',
   'domotica.enabled',

@@ -1918,5 +1918,49 @@ app.goto('parla');
      'la lettura mette in pausa la voce guida, altrimenti si sovrapporrebbero');
 }
 
+/* ═══════ Un interruttore deve mostrare SUBITO ciò che governa ═══════
+ *
+ * ⚠️ Le impostazioni si ridisegnano solo quando serve: ridisegnare a
+ * ogni tocco farebbe saltare il punto in cui si sta lavorando. Ma un
+ * interruttore che SVELA altri controlli deve ridisegnare, altrimenti
+ * quei controlli compaiono solo cambiando scheda e tornando indietro —
+ * e il comando sembra guasto.
+ *
+ * È successo cinque volte in questo progetto — posta, radio, canale
+ * combinato, assistente, registro — sempre allo stesso modo: si
+ * aggiunge una sezione condizionale e ci si dimentica dell'elenco.
+ *
+ * Questa verifica lo cerca da sola nel file, così la dimenticanza si
+ * scopre qui invece che usando il programma.                        */
+{
+  const fsS = await import('node:fs');
+  const pathS = await import('node:path');
+  const quiS = pathS.dirname(import.meta.filename || process.argv[1]);
+  const sv = fsS.readFileSync(pathS.join(quiS, '..', 'js/ui/SettingsView.js'), 'utf8');
+
+  const i = sv.indexOf('const INTERRUTTORI_CHE_APRONO');
+  ok(i > 0, 'esiste l elenco degli interruttori che ridisegnano');
+  const lista = sv.slice(i, sv.indexOf(']);', i));
+  const elencati = new Set([...lista.matchAll(/'([\w.]+)'/g)].map(m => m[1]));
+
+  /* Si cercano i percorsi che governano contenuto condizionale, nelle
+   * due forme usate: `cfg.x.y ? [ … ]` e `if (cfg.x.y)`. */
+  const usati = new Set();
+  for (const m of sv.matchAll(/cfg\.([a-zA-Z]+)\??\.([a-zA-Z]+)[^?\n]{0,40}\?\s*\[/g)) {
+    usati.add(`${m[1]}.${m[2]}`);
+  }
+  for (const m of sv.matchAll(/if \(cfg\.([a-zA-Z]+)\??\.([a-zA-Z]+)\)/g)) {
+    usati.add(`${m[1]}.${m[2]}`);
+  }
+
+  const mancanti = [...usati].filter(x => !elencati.has(x));
+  ok(mancanti.length === 0,
+     `ogni interruttore che svela altri controlli ridisegna subito (mancano: ${mancanti.join(', ') || 'nessuno'})`);
+  ok(usati.size >= 5,
+     `la verifica trova davvero le sezioni condizionali (${usati.size})`);
+  ok(elencati.has('assistente.enabled'),
+     'compreso quello dell assistente, che è l ultimo ad aver avuto il difetto');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);
