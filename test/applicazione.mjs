@@ -310,8 +310,8 @@ ok(document.getElementById('ptLetters').textContent === 'ci', 'le lettere in cor
 
 // Le tre modalità sono esclusive
 const { MODES } = await import('../js/ui/PointerView.js');
-ok(MODES.length === 4 && MODES.includes('testi') && MODES.includes('media'),
-   'quattro modalità: ' + MODES.join(', '));
+ok(MODES.length === 5 && MODES.includes('testi') && MODES.includes('media'),
+   'cinque modalità: ' + MODES.join(', '));
 for (const m of MODES) {
   app.pointerView.setMode(m);
   const attive = MODES.filter(x => document.getElementById(`ptView-${x}`).classList.contains('is-active'));
@@ -2026,6 +2026,75 @@ app.goto('parla');
      'e riconosce il bordo allungato che non è un iride');
   ok(p.motivi.some(m => /salta/.test(m)),
      'e il centro che salta fuori dall occhio');
+}
+
+/* ═══════ La scansione si ferma fuori dalla scheda Parla ═══════
+ *
+ * ⚠️ Fuori da lì i gesti servono ad altro — puntare, tarare, guardare i
+ * grafici — e una scansione che continua ad annunciare voci mentre
+ * l'assistente lavora nelle impostazioni è nel migliore dei casi un
+ * rumore di fondo; nel peggiore un gesto involontario che sceglie una
+ * voce e pronuncia qualcosa che nessuno voleva.                     */
+{
+  const fsT = await import('node:fs');
+  const pathT = await import('node:path');
+  const quiT = pathT.dirname(import.meta.filename || process.argv[1]);
+  const mainT = fsT.readFileSync(pathT.join(quiT, '..', 'js/main.js'), 'utf8');
+  const { DEFAULT_CONFIG: DT } = await import('../js/core/config.js');
+
+  ok(DT.scan.soloInParla === true,
+     'la sospensione fuori da Parla è attiva di default');
+
+  const iG = mainT.indexOf('goto(tab) {');
+  const corpoG = mainT.slice(iG, iG + 2600);
+  ok(/tab === 'parla'/.test(corpoG),
+     'il cambio scheda distingue Parla dalle altre');
+  ok(/_pausaAutomatica/.test(corpoG),
+     '⚠️ e distingue la sospensione automatica da quella voluta dalla persona');
+
+  /* ⚠️ Se la persona aveva messo in pausa da sé, tornando in Parla la
+   * pausa deve RESTARE: riprendere da soli ciò che qualcuno aveva
+   * fermato è un modo sicuro di far perdere fiducia nel comando di
+   * pausa. */
+  ok(/inParla && this\._pausaAutomatica/.test(corpoG),
+     'tornando in Parla si riprende SOLO se era stata una sospensione automatica');
+  ok(/audio\?\.stop\?\.\(\)/.test(corpoG),
+     'e uscendo la voce guida tace subito, senza finire l annuncio in corso');
+
+  /* Deve essere spegnibile: serve per provare i gesti dalla
+   * diagnostica sentendo la voce guida. */
+  const svT = fsT.readFileSync(pathT.join(quiT, '..', 'js/ui/SettingsView.js'), 'utf8');
+  ok(svT.includes("'scan.soloInParla'"),
+     'l opzione è regolabile in impostazioni');
+  ok(/soloInParla !== false/.test(corpoG),
+     'e spegnendola la scansione continua ovunque, come prima');
+}
+
+/* ═══════ I video si aprono e si CHIUDONO davvero ═══════
+ *
+ * ⚠️ Un riproduttore che resta vivo dopo la chiusura continua a
+ * consumare e, nel caso di un video incorporato, può continuare a
+ * suonare sopra la voce guida — rendendo incomprensibile proprio ciò
+ * che serve per tornare indietro.                                    */
+{
+  const fsV = await import('node:fs');
+  const pathV = await import('node:path');
+  const quiV = pathV.dirname(import.meta.filename || process.argv[1]);
+  const mp = fsV.readFileSync(pathV.join(quiV, '..', 'js/media/MediaPlayer.js'), 'utf8');
+  const mainV = fsV.readFileSync(pathV.join(quiV, '..', 'js/main.js'), 'utf8');
+
+  const iC = mp.indexOf('close(notify = true)');
+  const corpoC = mp.slice(iC, iC + 700);
+  ok(/yt\?\.destroy\?\.\(\)/.test(corpoC),
+     'chiudendo, il riproduttore video incorporato viene distrutto');
+  ok(/revokeObjectURL/.test(corpoC),
+     'e i file aperti vengono liberati, invece di restare in memoria');
+  ok(/container\.innerHTML = ''/.test(corpoC),
+     'il riquadro viene svuotato: nulla resta a suonare sotto');
+  ok(/_emit\('closed'\)/.test(corpoC),
+     'e la chiusura viene annunciata');
+  ok(/e\.type === 'closed'/.test(mainV),
+     'così il programma torna al menu invece di restare sul contenuto');
 }
 
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);

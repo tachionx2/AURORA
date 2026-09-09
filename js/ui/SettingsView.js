@@ -65,6 +65,8 @@ function field(label, desc, control, valueEl) {
  */
 const INTERRUTTORI_CHE_APRONO = new Set([
   'assistente.enabled',
+  // Cambiando fornitore cambiano modello predefinito e note.
+  'assistente.provider',
   'debug.console',
   'detection.irisOcclusionFix',
   'signal.sogliaRelativa',
@@ -253,7 +255,17 @@ export class SettingsView {
       if (String(this.app.get(path)) === v) o.selected = true;
       sel.append(o);
     }
-    sel.onchange = () => this.app.set(path, sel.value);
+    /* ⚠️ Anche i MENU A TENDINA possono governare altri controlli.
+     *
+     * L'elenco degli interruttori che ridisegnano copriva solo le
+     * caselle. Ma cambiando fornitore dell'assistente cambiano il
+     * modello predefinito e le note del servizio: restavano quelli di
+     * prima finché non si usciva dalla scheda e si rientrava. Stessa
+     * classe di difetto, altra forma di controllo. */
+    sel.onchange = () => {
+      this.app.set(path, sel.value);
+      if (INTERRUTTORI_CHE_APRONO.has(path)) this.render();
+    };
     return field(label, desc, sel);
   }
 
@@ -404,6 +416,15 @@ export class SettingsView {
       // Parametri della modalità infrarossa, proposti dalla diagnostica
       // quando quella modalità è in uso.
       'detection.irDarkPercentile', 'detection.irMinArea', 'detection.irMaxArea',
+      /* ⚠️ Anche i filtri aggiunti dopo: erano stati dimenticati qui, e
+       * "torna ai predefiniti" li lasciava accesi — proprio quando
+       * servono di più, cioè quando una prova è andata male e si vuole
+       * ripartire puliti. */
+      'detection.irMaxAllungamento', 'detection.irBlur', 'detection.irApertura',
+      'detection.irPesoCentro', 'detection.irPesoContinuita', 'detection.irContinuitaMs',
+      'detection.irClahe', 'detection.irClaheRiquadri',
+      'detection.irRaffinaBordo', 'detection.irRaggi', 'detection.irGradienteMin',
+      'detection.mostraCanali',
       'gestures.UP.dwellMs', 'gestures.UP.maxMs',
       'gestures.blinkMaxPulseMs', 'gestures.blinkMinPulseMs',
     ];
@@ -1562,6 +1583,14 @@ export class SettingsView {
         P(['Meno frasi = ognuna si raggiunge prima', 'Fewer phrases = each is reached sooner']), 3, 30),
       this._number('scan.draftCount', P(['Testi nel menu', 'Texts in the menu']),
         P(['Meno testi = ognuno si raggiunge prima', 'Fewer texts = each is reached sooner']), 1, 30),
+      /* ⚠️ Fuori da Parla i gesti servono ad altro: puntare, tarare,
+         guardare i grafici. Una scansione che continua ad annunciare è
+         nel migliore dei casi rumore di fondo, nel peggiore un gesto
+         involontario che pronuncia qualcosa che nessuno voleva. */
+      this._toggle('scan.soloInParla',
+        P(['Ferma la scansione fuori dalla scheda Parla', 'Pause scanning outside the Speak tab']),
+        P(['ACCESO (predefinito): uscendo da Parla la voce guida tace e la scansione si ferma. ⚠️ Da SPEGNERE quando si vogliono provare i gesti dalla scheda Diagnostica sentendo la voce guida mentre si guardano i grafici. Se la persona aveva messo in pausa da sé, tornando in Parla la pausa resta com\'era.',
+           'ON (default): leaving the Speak tab pauses scanning and the guide voice. Turn OFF to test gestures from the Diagnostics tab.'])),
       this._toggle('scan.showBackItem', P(['Voce "indietro" nei sottomenu', 'Back item in submenus']),
         P(['Senza, per uscire da una sezione bisogna aspettare i giri a vuoto',
            'Without it, leaving a section means waiting for the empty cycles'])),
@@ -1717,7 +1746,17 @@ export class SettingsView {
       // Le voci arrivano in modo asincrono nei browser: si ricarica.
       setTimeout(riempi, 700);
       setTimeout(riempi, 2000);
-      sel.onchange = () => this.app.set(path, sel.value);
+      /* ⚠️ Anche i MENU A TENDINA possono governare altri controlli.
+     *
+     * L'elenco degli interruttori che ridisegnano copriva solo le
+     * caselle. Ma cambiando fornitore dell'assistente cambiano il
+     * modello predefinito e le note del servizio: restavano quelli di
+     * prima finché non si usciva dalla scheda e si rientrava. Stessa
+     * classe di difetto, altra forma di controllo. */
+    sel.onchange = () => {
+      this.app.set(path, sel.value);
+      if (INTERRUTTORI_CHE_APRONO.has(path)) this.render();
+    };
 
       const prova = h('button', 'btn btn-sm', '▶');
       prova.title = P(['Prova questa voce su questo canale', 'Test this voice on this channel']);
@@ -1984,7 +2023,22 @@ export class SettingsView {
         this._select('pointer.calibrationPoints', P(['Punti di calibrazione', 'Calibration points']),
           P(['Più punti = più preciso ma più faticoso', 'More points = more accurate but more tiring']),
           { 5: '5', 9: '9', 13: '13' }),
-        this._range('pointer.calibrationDwellMs', P(['Permanenza per punto', 'Dwell per point']), null, 400, 4000, 100, ' ms'),
+        this._range('pointer.calibrationGiri',
+          P(['Quanti giri sui bersagli', 'Passes over the targets']),
+          P(['⚠️ Un giro solo affida ogni punto a una manciata di fotogrammi consecutivi: se in quel momento la persona ammicca o si distrae, quel punto è compromesso e nessuno se ne accorge. Due giri danno due misure indipendenti per ogni bersaglio, che vengono mediate.',
+             '⚠️ A single pass leaves each point to a handful of consecutive frames.']),
+          1, 4, 1),
+        this._range('pointer.calibrationBordoGiri',
+          P(['Giri del bordo prima dei bersagli', 'Border laps before the targets']),
+          P(['Un punto percorre il perimetro dello schermo e si campiona seguendolo. ⚠️ Misura l\'escursione MASSIMA dello sguardo — quanto la persona riesce davvero a spostarsi verso i bordi. I bersagli fissi campionano solo l\'interno e sottostimano gli estremi: è la ragione principale per cui il puntatore risulta impreciso ai margini. 0 = nessun giro.',
+             'A dot travels the screen perimeter while sampling. Measures the MAXIMUM gaze range.']),
+          0, 4, 1),
+        this._range('pointer.calibrationBordoMs',
+          P(['Durata di un giro del bordo', 'Duration of one border lap']), null, 4000, 20000, 500, ' ms'),
+        this._range('pointer.calibrationDwellMs', P(['Permanenza per punto', 'Dwell per point']),
+          P(['⚠️ Con tempi troppo brevi la calibrazione risulta frettolosa: lo sguardo non fa in tempo ad assestarsi, i campioni contengono ancora il tragitto verso il bersaglio, e alla fine viene rifiutata per "movimento troppo piccolo" — dopo tutta la fatica. Meglio una calibrazione che dura il doppio e riesce.',
+             '⚠️ Too short and the calibration is rushed, then rejected at the end.']),
+          400, 5000, 100, ' ms'),
         this._range('pointer.smoothing', P(['Smorzamento', 'Smoothing']),
           P(['Alto = stabile ma lento. Serve contro nistagmo e tremore', 'High = steady but slow. Counters nystagmus and tremor']), 0, 0.95, 0.05),
         this._range('pointer.dwellClickMs', P(['Click per permanenza', 'Dwell click']), null, 200, 4000, 50, ' ms'),

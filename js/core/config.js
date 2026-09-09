@@ -711,7 +711,23 @@ export const DEFAULT_CONFIG = {
      * ha fatto tutto giusto.
      * Entro questo tempo dall'avanzamento, la selezione vale per la
      * voce PRECEDENTE. 0 = comportamento di sempre. */
+    /* Tolleranza sul tempo di reazione: selezionando mentre la
+     * scansione passa alla voce successiva, prende la precedente.
+     * 0 = comportamento invariato. */
     graceMs: 0,
+
+    /* ⚠️ La scansione si ferma uscendo dalla scheda Parla.
+     *
+     * Fuori da lì i gesti servono ad altro — puntare, tarare, guardare
+     * i grafici — e una scansione che continua ad annunciare voci
+     * mentre l'assistente lavora nelle impostazioni è, nel migliore
+     * dei casi, un rumore di fondo; nel peggiore, un gesto involontario
+     * che sceglie una voce e pronuncia qualcosa che nessuno voleva.
+     *
+     * ⚠️ Si può SPEGNERE, e serve davvero: per provare i gesti dalla
+     * scheda Diagnostica sentendo la voce guida mentre si guardano i
+     * grafici, occorre che la scansione continui a girare. */
+    soloInParla: true,
     enterDelayMs: 700,
     maxCycles: 3,                // dopo N giri a vuoto → pausa automatica
     // Giri a vuoto consentiti mentre si sta guardando un contenuto:
@@ -887,8 +903,38 @@ export const DEFAULT_CONFIG = {
     showCursor: true,
     // --- calibrazione (solo gaze) ---
     calibrationPoints: 9,        // 5 | 9 | 13
-    calibrationDwellMs: 1400,    // permanenza su ogni bersaglio
-    calibrationSettleMs: 500,    // attesa prima di raccogliere: lo
+    /* ⚠️ Quante volte si ripassa su TUTTI i bersagli.
+     *
+     * Un giro solo affida ogni punto a una manciata di fotogrammi
+     * consecutivi: se in quel momento la persona sbatte le palpebre o
+     * si distrae, quel punto è compromesso e non c'è modo di
+     * accorgersene. Due giri danno due misure indipendenti per ogni
+     * bersaglio, e i minimi quadrati le mediano. */
+    calibrationGiri: 2,
+    /* ⚠️ Giro del BORDO prima dei bersagli fissi.
+     *
+     * Un punto che percorre il perimetro dello schermo misura
+     * l'escursione MASSIMA dello sguardo — quanto la persona riesce
+     * davvero a spostarsi verso i bordi. I nove bersagli da soli
+     * campionano l'interno e sottostimano gli estremi, ed è la ragione
+     * principale per cui il puntatore risultava impreciso ai margini.
+     *
+     * 0 = nessun giro di bordo. */
+    calibrationBordoGiri: 2,
+    calibrationBordoMs: 9000,    // durata di un giro completo
+    calibrationBordoOgniMs: 250, // ogni quanto si prende un campione
+    /* ⚠️ Tempi allungati dopo le prove sul campo.
+     *
+     * Con 1400 ms la calibrazione risultava frettolosa: lo sguardo non
+     * faceva in tempo ad assestarsi, i campioni contenevano ancora il
+     * tragitto verso il bersaglio, e l'escursione misurata risultava
+     * troppo piccola — con il rifiuto "movimento verticale troppo
+     * piccolo" proprio alla fine, dopo tutta la fatica.
+     *
+     * Meglio una calibrazione che dura il doppio e riesce, di una
+     * rapida da rifare tre volte. */
+    calibrationDwellMs: 2400,    // permanenza su ogni bersaglio
+    calibrationSettleMs: 700,    // attesa prima di raccogliere: lo
                                  // sguardo deve prima arrivare
     // Escursione minima fra i bersagli perché la calibrazione sia
     // accettata. In luce visibile il movimento verticale è più

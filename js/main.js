@@ -2548,17 +2548,88 @@ class App {
 
   startCalibration() {
     if (!this.vision.source) { this.toast('Accendi prima la telecamera', true); return; }
-    const targets = calibrationTargets(this.cfg.pointer.calibrationPoints);
+    const P0 = this.cfg.pointer;
+    const base = calibrationTargets(P0.calibrationPoints);
+    /* ⚠️ Più giri sugli stessi bersagli.
+     *
+     * Un giro solo affida ogni punto a una manciata di fotogrammi
+     * consecutivi: se in quel momento la persona ammicca o si distrae,
+     * quel punto è compromesso e nessuno se ne accorge. Due giri danno
+     * due misure indipendenti, che i minimi quadrati mediano. */
+    const giri = Math.max(1, Math.min(4, P0.calibrationGiri || 1));
+    const targets = [];
+    for (let g = 0; g < giri; g++) targets.push(...base);
+
     this.calibration.reset();
-    this.calibration.minSpan = this.cfg.pointer.minSpan;
-    this.calibSession = { targets, index: 0, enteredAt: performance.now(), samples: [] };
+    this.calibration.minSpan = P0.minSpan;
+    this.calibSession = {
+      targets, index: 0, enteredAt: performance.now(), samples: [],
+      /* Fase del BORDO: un punto percorre il perimetro e si campiona
+       * mentre lo si segue. Misura l'escursione MASSIMA dello sguardo,
+       * che i bersagli fissi sottostimano — ed è la ragione principale
+       * per cui il puntatore risultava impreciso ai margini. */
+      bordoGiri: Math.max(0, P0.calibrationBordoGiri || 0),
+      bordoDa: performance.now(),
+      bordoUltimo: 0,
+    };
     this.overlay.setMode('calibrate');
-    this.overlay.calib = { target: targets[0], index: 0, total: targets.length, progress: 0, message: t('cal.look') };
-    this.audio.say(t('cal.look'), 'menu', true);
+    const primoMsg = this.calibSession.bordoGiri > 0
+      ? (this.cfg.ui.language === 'en' ? 'Follow the moving dot' : 'Segui il punto che si muove')
+      : t('cal.look');
+    this.overlay.calib = { target: targets[0], index: 0, total: targets.length, progress: 0, message: primoMsg };
+    this.audio.say(primoMsg, 'menu', true);
+  }
+
+  /** Posizione del punto lungo il perimetro, per la fase del bordo. */
+  _puntoBordo(frazione) {
+    const f = ((frazione % 1) + 1) % 1;
+    const m = 0.06;                    // margine: non proprio sul bordo
+    const a = m, b = 1 - m;
+    if (f < 0.25) return { x: a + (b - a) * (f / 0.25), y: a };
+    if (f < 0.50) return { x: b, y: a + (b - a) * ((f - 0.25) / 0.25) };
+    if (f < 0.75) return { x: b - (b - a) * ((f - 0.50) / 0.25), y: b };
+    return { x: a, y: b - (b - a) * ((f - 0.75) / 0.25) };
   }
 
   onCalibrationSample(now, eye) {
     const S = this.calibSession, P = this.cfg.pointer;
+
+    /* ══════════════════════════════════════════════════════════════
+     * FASE DEL BORDO
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Si segue un punto che percorre il perimetro, e si campiona
+     * durante il tragitto. A differenza dei bersagli fissi non si
+     * aspetta l'assestamento: qui interessa proprio la CORSA, cioè
+     * fin dove lo sguardo arriva.
+     */
+    if (S.bordoGiri > 0) {
+      const durata = Math.max(3000, P.calibrationBordoMs || 9000);
+      const tot = durata * S.bordoGiri;
+      const trascorso = now - S.bordoDa;
+      const frazione = trascorso / durata;
+      const p = this._puntoBordo(frazione);
+      this.overlay.calib = {
+        target: p, index: 0, total: S.targets.length,
+        progress: Math.min(1, trascorso / tot),
+        message: this.cfg.ui.language === 'en'
+          ? 'Follow the moving dot' : 'Segui il punto che si muove',
+      };
+      const ogni = Math.max(80, P.calibrationBordoOgniMs || 250);
+      if (now - S.bordoUltimo >= ogni && Number.isFinite(eye?.x)) {
+        S.bordoUltimo = now;
+        this.calibration.add(eye.x, eye.y,
+          p.x * window.innerWidth, p.y * window.innerHeight);
+      }
+      if (trascorso >= tot) {
+        S.bordoGiri = 0;
+        S.enteredAt = now;
+        S.samples = [];
+        this.audio.say(t('cal.look'), 'menu', true);
+      }
+      return;
+    }
+
     const elapsed = now - S.enteredAt;
     // Prima si attende che lo sguardo ARRIVI sul bersaglio, poi si
     // raccoglie: campionare subito registrerebbe il tragitto.
@@ -3057,6 +3128,25 @@ class App {
     }
     const ptBtn = (id, fn) => { const e = document.getElementById(id); if (e) e.onclick = fn; };
     ptBtn('ptSpeak', () => this.gestures.injectKey('SPEAK'));
+    /* ⚠️ Rileggere NON cancella, pronunciare sì.
+     *
+     * La scheda Parla distingue già le due cose; qui mancava, e chi
+     * voleva risentire il proprio testo doveva pronunciarlo —
+     * perdendolo. Per chi impiega minuti a comporre una frase non è un
+     * dettaglio.
+     *
+     * Si riusa la STESSA azione della scansione, non una copia: due
+     * strade che fanno la stessa cosa col tempo divergono. */
+    ptBtn('ptReread', () => {
+      const testo = [...this.scan.buffer.words, this.scan.buffer.letters].join(' ').trim();
+      if (!testo) { this.toast('Non c\'è ancora niente da rileggere', true); return; }
+      this.onOutput('speech', testo, { keep: true });
+    });
+    ptBtn('ptAsk', () => {
+      const testo = [...this.scan.buffer.words, this.scan.buffer.letters].join(' ').trim();
+      if (!testo) { this.toast('Non c\'è ancora niente da chiedere', true); return; }
+      this.chiediAssistente(testo);
+    });
     ptBtn('ptUndo', () => this.gestures.injectKey('UNDO'));
     ptBtn('ptClear', () => this.pointerView.clearBuffer());
     ptBtn('ptSaveDraft', () => {
@@ -3563,6 +3653,37 @@ class App {
      * davvero il programma deve poterlo fare, e al ritorno trovare
      * tutto come l'aveva lasciato. */
     this.gestures.setDiagnostics(tab === 'diagnostica' || !!this.cfg.ui.diagAlways);
+
+    /* ══════════════════════════════════════════════════════════════
+     * LA SCANSIONE SI FERMA FUORI DALLA SCHEDA PARLA
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Fuori da lì i gesti servono ad altro — puntare, tarare, guardare
+     * i grafici — e una scansione che continua ad annunciare voci
+     * mentre l'assistente lavora nelle impostazioni è nel migliore dei
+     * casi un rumore di fondo; nel peggiore un gesto involontario che
+     * sceglie una voce e pronuncia qualcosa che nessuno voleva.
+     *
+     * ⚠️ Si distingue la sospensione AUTOMATICA da quella VOLUTA: se la
+     * persona aveva messo in pausa da sé, tornando in Parla la pausa
+     * resta. Riprendere da soli ciò che qualcuno aveva fermato è un
+     * modo sicuro di far perdere fiducia nel comando di pausa.
+     */
+    if (this.cfg.scan?.soloInParla !== false) {
+      const inParla = tab === 'parla';
+      if (!inParla && !this.scan.paused) {
+        this.scan.paused = true;
+        this._pausaAutomatica = true;
+        try { this.audio?.stop?.(); } catch {}
+      } else if (inParla && this._pausaAutomatica) {
+        this._pausaAutomatica = false;
+        this.scan.paused = false;
+      }
+    } else if (this._pausaAutomatica) {
+      // L'opzione è stata spenta mentre una sospensione era in corso.
+      this._pausaAutomatica = false;
+      this.scan.paused = false;
+    }
     if (tab === 'diagnostica') {
       /* ⚠️ Il grafico NON si azzera più tornando in diagnostica.
        * Azzerarlo faceva sembrare che tutto ricominciasse da capo, e

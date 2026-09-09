@@ -1121,3 +1121,16 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
   font:600 .78rem var(--mono);color:var(--accent);
   font-variant-numeric:tabular-nums;
 }
+
+/* ── Frasi pronte nella scheda Punta ──
+ *
+ * ⚠️ Riquadri GRANDI e ben staccati: si colpiscono con lo sguardo, e
+ * un bersaglio piccolo accanto a un altro è un bersaglio che si sbaglia.
+ * Il testo è più grande di quello dei media perché qui il riquadro non
+ * ha titolo e sottotitolo: la frase è tutto ciò che c'è da leggere.
+ */
+.pt-frase{
+  min-height:74px;font:600 1.05rem/1.25 var(--font);
+  padding:.7rem .9rem;text-align:center;
+}
+.pt-frase .tt{white-space:normal;overflow:visible;text-overflow:clip}

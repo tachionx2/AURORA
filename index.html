@@ -163,6 +163,10 @@
   <div class="pt-top">
     <div class="pt-modes" role="tablist">
       <button class="pt-mode is-active ptr-target" id="ptMode-tastiera" data-ptmode="tastiera" data-i18n="pt.keyboard">Tastiera</button>
+      <!-- Frasi pronte: le voci più usate, senza comporre lettera per
+           lettera. Accanto alla tastiera perché sono l'alternativa
+           diretta a scriverle. -->
+      <button class="pt-mode ptr-target" id="ptMode-frasi" data-ptmode="frasi" data-i18n="pt.phrases">Frasi</button>
       <button class="pt-mode ptr-target" id="ptMode-testi" data-ptmode="testi" data-i18n="pt.texts">I miei testi</button>
       <button class="pt-mode ptr-target" id="ptMode-media" data-ptmode="media" data-i18n="pt.media">Media</button>
       <button class="pt-mode ptr-target" id="ptMode-braccio" data-ptmode="braccio" data-i18n="pt.arm">Braccio</button>
@@ -191,10 +195,28 @@
 
     <div class="pt-bottom">
       <button class="btn ptr-target btn-speak" id="ptSpeak" data-i18n="btn.speak">Pronuncia</button>
+      <!-- ⚠️ Rileggere NON cancella, pronunciare sì.
+           Sono due cose diverse e la scheda Parla le distingue già:
+           qui mancava, e chi voleva risentire il proprio testo doveva
+           pronunciarlo perdendolo. -->
+      <button class="btn ptr-target" id="ptReread" data-i18n="btn.reread">Rileggi</button>
+      <!-- Compare solo se l'assistente è acceso: chi non lo usa non
+           deve trovarsi un pulsante in più da evitare. -->
+      <button class="btn ptr-target" id="ptAsk" data-i18n="btn.ask" hidden>Chiedi</button>
       <button class="btn ptr-target" id="ptUndo" data-i18n="btn.undo">Annulla</button>
       <button class="btn ptr-target" id="ptSaveDraft" data-i18n="btn.saveDraft2">Salva testo</button>
       <button class="btn ptr-target" id="ptClear" data-i18n="btn.clear">Svuota</button>
     </div>
+  </div>
+
+  <!-- MODALITÀ FRASI: le voci più usate, tutte visibili insieme.
+       ⚠️ Raggruppate ma NON nascoste: con il puntatore a bande
+       raggiungere un riquadro costa due gesti qualunque sia la sua
+       posizione, quindi nascondere le frasi dietro un gruppo
+       aggiungerebbe due gesti senza far guadagnare nulla. Le
+       intestazioni servono a trovarle con l'occhio, non a contenerle. -->
+  <div class="pt-view" id="ptView-frasi">
+    <div class="pt-tiles" id="ptFrasi"></div>
   </div>
 
   <!-- MODALITÀ TESTI: qui vivono le lettere e i discorsi lunghi -->

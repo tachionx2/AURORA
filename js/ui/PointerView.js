@@ -42,7 +42,7 @@ const LAYOUTS = {
 const NUMBERS = '1 2 3 4 5 6 7 8 9 0';
 
 /** Modalità della scheda: elenco chiuso, una sola visibile alla volta. */
-export const MODES = ['tastiera', 'testi', 'media', 'braccio'];
+export const MODES = ['tastiera', 'frasi', 'testi', 'media', 'braccio'];
 
 export class PointerView {
   constructor(app) { this.app = app; }
@@ -150,6 +150,55 @@ export class PointerView {
     }
   }
 
+  /* ------------------------------- Frasi ------------------------------- */
+
+  /**
+   * Frasi pronte come riquadri grandi.
+   *
+   * Sono le stesse della scansione, con lo stesso testo e lo stesso
+   * effetto: pronunciarle subito. Per chi comunica sono le voci più
+   * usate, perché evitano di comporre lettera per lettera proprio
+   * quando serve fare in fretta.
+   *
+   * ⚠️ Raggruppate ma tutte VISIBILI insieme, e la ragione è nel modo
+   * di puntare: con le bande, raggiungere un riquadro costa due gesti
+   * qualunque sia la sua posizione sullo schermo. Nascondere le frasi
+   * dentro un gruppo da aprire aggiungerebbe due gesti per ognuna
+   * senza far guadagnare nulla. Le intestazioni servono a trovarle con
+   * l'occhio, non a contenerle.
+   */
+  renderFrasi() {
+    const wrap = document.getElementById('ptFrasi');
+    if (!wrap) return;
+    const gruppi = (this.app.cfg.scan.phraseGroups || [])
+      .filter(g => Array.isArray(g.phrases) && g.phrases.length);
+
+    wrap.innerHTML = '';
+    if (!gruppi.length) {
+      wrap.append(h('p', 'sub',
+        'Nessuna frase. Si aggiungono in Impostazioni, nei gruppi di frasi.'));
+      return;
+    }
+
+    for (const g of gruppi) {
+      const sez = h('div', 'pt-tilegroup');
+      sez.append(h('div', 'pt-tilehead', String(g.label || '').toUpperCase()));
+      const riga = h('div', 'pt-tilerow');
+      for (const frase of g.phrases) {
+        const b = h('button', 'pt-tile pt-frase ptr-target');
+        b.innerHTML = `<span class="tt">${esc(frase)}</span>`;
+        /* ⚠️ Pronuncia SUBITO, senza passare dal testo in
+         * composizione: è il senso stesso di una frase pronta. E non
+         * tocca ciò che la persona stava scrivendo — perderlo per aver
+         * detto "ho sete" sarebbe inaccettabile. */
+        b.onclick = () => this.app.onOutput('speech', frase, { keep: true });
+        riga.append(b);
+      }
+      sez.append(riga);
+      wrap.append(sez);
+    }
+  }
+
   /* ------------------------------ Braccio ------------------------------ */
 
   renderArm() {
@@ -215,7 +264,18 @@ export class PointerView {
    * schermata: informazione utile all'assistente, ingombro inutile per
    * chi deve scrivere.
    */
+  /* ⚠️ Il pulsante CHIEDI compare solo se l'assistente è acceso.
+   *
+   * Chi non lo usa non deve trovarsi un pulsante in più da evitare:
+   * su una barra puntata con lo sguardo, ogni bersaglio inutile è un
+   * bersaglio che si può colpire per sbaglio. */
+  _aggiornaAzioni() {
+    const b = document.getElementById('ptAsk');
+    if (b) b.hidden = !this.app.cfg.assistente?.enabled;
+  }
+
   renderStatus() {
+    this._aggiornaAzioni();
     const el = document.getElementById('ptrStatus');
     if (!el) return;
     const P = this.app.cfg.pointer;
@@ -259,6 +319,7 @@ export class PointerView {
       view?.classList.toggle('is-active', m === this.mode);
       btn?.classList.toggle('is-active', m === this.mode);
     }
+    if (this.mode === 'frasi') this.renderFrasi();
     if (this.mode === 'braccio') this.renderArm();
     if (this.mode === 'testi') this.app.renderDrafts?.();
     if (this.mode === 'media') this.renderMedia();
