@@ -17,7 +17,7 @@ cfg.signal.thresholdOff = 1.5;
 const round = importProfile(exportProfile(cfg, null));
 ok(JSON.stringify(round.config)===JSON.stringify(cfg), 'export→import fedele');
 const old = migrateConfig({version:1, scan:{stepMs:900}});
-ok(old.version===40 && old.scan.groups.length===4 && old.scan.stepMs===900, 'migrazione v1→v40 preserva i valori');
+ok(old.version===41 && old.scan.groups.length===4 && old.scan.stepMs===900, 'migrazione v1→v41 preserva i valori');
 
 // ---------- 2. Filtri ----------
 const med=new MedianWindow(250);

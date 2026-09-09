@@ -66,7 +66,17 @@ export class StripeCursor {
   /** Posizione corrente della banda, in frazioni di schermo. */
   tick(now) {
     if (!this.active) return;
-    const dur = Math.max(300, this.cfg.pointer.stripeSpeedMs);
+    /* ⚠️ La passata FINE può avere una velocità propria.
+     *
+     * Chi seleziona alzando l'occhio ha bisogno di tempo per reagire
+     * dopo aver visto dove la banda sta arrivando, e sulla passata
+     * fine — dove si decide il punto esatto — quel tempo conta di più.
+     * Poterla rallentare senza rallentare anche la prima evita di
+     * pagare la precisione con la lentezza dappertutto. */
+    const fine = this.pass > 0 && (this.cfg.pointer.stripeSpeedFineMs || 0) > 0;
+    const dur = Math.max(300, fine
+      ? this.cfg.pointer.stripeSpeedFineMs
+      : this.cfg.pointer.stripeSpeedMs);
     const elapsed = now - this.sweepStart;
     let f = (elapsed % dur) / dur;
     // Scorrimento avanti-indietro: un solo verso costringerebbe ad
@@ -76,9 +86,32 @@ export class StripeCursor {
     if (cycle > 0 && cycle % 2 === 0 && this._lastCycle !== cycle) {
       this._lastCycle = cycle;
       this.counters.sweeps++;
-      // Dopo un numero di passate a vuoto si esce da solo, invece di
-      // lasciare la banda a scorrere all'infinito.
-      if (this.counters.sweeps > (this.cfg.pointer.stripeMaxSweeps || 4)) { this.cancel(); return; }
+      /* ══════════════════════════════════════════════════════════════
+       * DOPO LE PASSATE A VUOTO SI RICOMINCIA, NON SI SPEGNE
+       * ══════════════════════════════════════════════════════════════
+       *
+       * ⚠️ Prima si spegneva da solo. Ma chi ha UN SOLO GESTO non può
+       * riaccendere nulla: il pulsante che riavvia le bande può
+       * premerlo soltanto chi assiste, e se non c'è nessuno la persona
+       * resta senza alcun modo di comandare. Le bande sono il suo
+       * cursore, come la voce guida è la sua tastiera — e la voce
+       * guida non si spegne da sola dopo qualche giro.
+       *
+       * Ora si torna all'inizio: la banda riparte dalla prima fase, a
+       * schermo intero, come se si ricominciasse. È la stessa cosa che
+       * fa la scansione quando arriva in fondo a un menu senza che
+       * nessuno abbia scelto.
+       *
+       * ⚠️ Fermarsi resta possibile, ma solo se qualcuno lo CHIEDE: il
+       * gesto di pausa, o chi assiste dal pulsante. Mai da sé. */
+      if (this.counters.sweeps > (this.cfg.pointer.stripeMaxSweeps || 4)) {
+        if (this.cfg.pointer.stripeContinua === false) { this.cancel(); return; }
+        this.counters.sweeps = 0;
+        this.counters.ricomincia = (this.counters.ricomincia || 0) + 1;
+        this._lastCycle = -1;
+        this.start(now);
+        return;
+      }
     }
 
     if (this.phase === StripePhase.X) {

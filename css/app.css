@@ -1134,3 +1134,29 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
   padding:.7rem .9rem;text-align:center;
 }
 .pt-frase .tt{white-space:normal;overflow:visible;text-overflow:clip}
+
+/* ── Scelta del destinatario nella scheda Punta ──
+ *
+ * ⚠️ Compare solo dopo aver premuto MANDA: una lista di indirizzi
+ * sempre a schermo è una lista di bersagli che si possono colpire per
+ * sbaglio, e una mail parte e non torna indietro.
+ */
+.pt-dest{
+  position:absolute;left:0;right:0;bottom:5.5rem;z-index:30;
+  background:var(--surface);border:1px solid var(--accent);border-radius:12px;
+  padding:.7rem .8rem;margin:0 .8rem;box-shadow:0 8px 28px rgba(0,0,0,.45);
+}
+.pt-dest[hidden]{display:none}
+.pt-desthead{
+  font:700 .95rem var(--font);color:var(--accent);
+  margin-bottom:.5rem;text-align:center;
+}
+.pt-annulla{border-color:var(--line);opacity:.85}
+
+/* Riquadro delle istruzioni passo-passo: testo a larghezza fissa,
+   scorrevole, così i passaggi restano allineati e leggibili. */
+.code-box{
+  background:var(--raised);border:1px solid var(--line);border-radius:8px;
+  padding:.6rem .7rem;margin:.5rem 0;overflow:auto;max-height:20rem;
+  font:400 .74rem/1.5 var(--mono);color:var(--text);white-space:pre-wrap;
+}

@@ -11,6 +11,7 @@
 
 import { DEFAULT_CONFIG, GESTURE_CHANNELS, ACTIONS, DEFAULT_GROUPS, ALPHABETICAL_GROUPS, DEFAULT_PHRASE_GROUPS, deepClone } from '../core/config.js';
 import { EXPR_CHECKS } from '../signal/GestureEngine.js';
+import { ISTRUZIONI as ISTRUZIONI_TG } from '../lang/Telegram.js';
 import { CHANNEL_PRESETS } from '../core/config.js';
 import { ESEMPIO_NETLIFY, indirizzoValido, verificaConfigurazione } from '../lang/Mailer.js';
 import { MODELLI, ISTRUZIONI, entitaValida, verificaDomotica, comandiDi, provaConnessione } from '../device/HomeAssistant.js';
@@ -65,6 +66,7 @@ function field(label, desc, control, valueEl) {
  */
 const INTERRUTTORI_CHE_APRONO = new Set([
   'assistente.enabled',
+  'telegram.enabled',
   // Cambiando fornitore cambiano modello predefinito e note.
   'assistente.provider',
   'debug.console',
@@ -170,6 +172,7 @@ export class SettingsView {
           () => this._radioCard(cfg),
           () => this._emailCard(cfg),
           () => this._assistenteCard(cfg),
+          () => this._telegramCard(cfg),
           () => this._domoticaCard(cfg),
           () => this._deviceCard(cfg),
         ],
@@ -964,6 +967,79 @@ export class SettingsView {
     return this._card(t('sec.radio'), null, righe);
   }
 
+  _telegramCard(cfg) {
+    const righe = [];
+    righe.push(h('p', 'note', P(
+      ['Manda messaggi a persone o canali di Telegram. ⚠️ Telegram e non WhatsApp: WhatsApp non permette di inviare messaggi da una pagina web se non attraverso un\'interfaccia commerciale a pagamento; Telegram mette a disposizione un\'interfaccia gratuita e diretta.',
+       'Sends messages to Telegram people or channels. WhatsApp does not allow sending from a web page except through a paid commercial interface.'])));
+    righe.push(this._toggle('telegram.enabled',
+      P(['Attiva Telegram', 'Enable Telegram']),
+      P(['Acceso, compare la voce TELEGRAM fra le azioni dei testi salvati, e il pulsante Telegram nella tastiera a puntamento.',
+         'When on, a TELEGRAM item appears among the saved-text actions.'])));
+
+    if (cfg.telegram?.enabled) {
+      righe.push(h('pre', 'code-box', ISTRUZIONI_TG));
+      righe.push(this._text('telegram.token',
+        P(['Gettone del robot', 'Bot token']), '123456:ABC-DEF...'));
+      const bp = h('button', 'btn btn-sm', P(['Prova il gettone', 'Test the token']));
+      bp.onclick = async () => {
+        const { prova } = await import('../lang/Telegram.js');
+        const r = await prova(this.app.cfg);
+        this.app.toast(r.ok ? `Robot "${r.nome}" raggiunto` : `Non riuscito: ${r.errore}`, !r.ok);
+      };
+      const az = h('div', 'profile-actions'); az.append(bp);
+      righe.push(az);
+
+      righe.push(h('div', 'vb-testa', P(['DESTINATARI', 'RECIPIENTS'])));
+      righe.push(h('p', 'sub', P(
+        ['⚠️ Ogni persona deve aver scritto almeno una volta al robot, altrimenti Telegram rifiuta il messaggio: un robot non può scrivere per primo a nessuno. Per un canale, aggiungi il robot come amministratore e usa @nomecanale.',
+         '⚠️ Each person must have written to the bot at least once, otherwise Telegram refuses the message.'])));
+      righe.push(this._listaContatti('telegram.contatti', 'chatId',
+        P(['identificativo o @canale', 'chat id or @channel'])));
+
+      righe.push(this._toggle('telegram.conferma',
+        P(['Chiedi conferma prima di mandare', 'Ask before sending']),
+        P(['Un messaggio parte una volta sola e non torna indietro.',
+           'A message is sent once and cannot be recalled.'])));
+      righe.push(this._toggle('telegram.silenzioso',
+        P(['Manda senza suono di notifica', 'Send silently']), null));
+      righe.push(this._text('telegram.firma',
+        P(['Firma in fondo al messaggio', 'Signature']), 'es. Daniela'));
+    }
+
+    return this._card(t('sec.telegram'), null, righe);
+  }
+
+  /**
+   * Elenco di destinatari, con nome e campo di recapito.
+   *
+   * ⚠️ Uno solo per posta e Telegram: due elenchi separati col tempo
+   * divergono, e chi assiste si troverebbe due modi diversi di fare la
+   * stessa cosa.
+   */
+  _listaContatti(via, campo, segnaposto) {
+    const box = h('div');
+    const lista = (this.app.get(via) || []).slice();
+    lista.forEach((c, i) => {
+      const riga = h('div', 'row');
+      const n = h('input'); n.type = 'text'; n.value = c?.nome || '';
+      n.placeholder = 'nome';
+      n.oninput = () => { lista[i] = { ...lista[i], nome: n.value }; this.app.set(via, lista); };
+      const d = h('input'); d.type = 'text'; d.value = c?.[campo] || '';
+      d.placeholder = segnaposto;
+      d.oninput = () => { lista[i] = { ...lista[i], [campo]: d.value.trim() }; this.app.set(via, lista); };
+      const x = h('button', 'btn btn-sm btn-danger', '✕');
+      x.onclick = () => { lista.splice(i, 1); this.app.set(via, lista); this.render(); };
+      riga.append(n, d, x);
+      box.append(riga);
+    });
+    const add = h('button', 'btn btn-sm', P(['Aggiungi destinatario', 'Add recipient']));
+    add.onclick = () => { this.app.set(via, [...lista, { nome: '', [campo]: '' }]); this.render(); };
+    const az = h('div', 'profile-actions'); az.append(add);
+    box.append(az);
+    return box;
+  }
+
   _assistenteCard(cfg) {
     const righe = [];
     // Elenco dei servizi, letto dal modulo che li conosce davvero.
@@ -1037,6 +1113,11 @@ export class SettingsView {
         P(['⚠️ Questo numero viene CHIESTO all\'assistente a ogni domanda — "rispondi usando al massimo N parole" — non applicato tagliando la risposta. La differenza è sostanziale: tagliando si ottengono frasi interrotte a metà, chiedendo si ottiene una risposta compiuta e della lunghezza voluta. La risposta viene ASCOLTATA, non letta: un paragrafo che a schermo si scorre in un istante, ad alta voce dura un minuto.',
            '⚠️ This number is ASKED of the assistant on every question, not applied by truncating.']),
         20, 2000, 10, ' parole'));
+      righe.push(this._toggle('assistente.ricercaWeb',
+        P(['Cerca sul web', 'Search the web']),
+        P(['⚠️ Indispensabile per i video. Senza, l\'assistente non cerca su YouTube ma RICORDA indirizzi visti durante l\'addestramento: molti sono vecchi, alcuni rimossi, e qualcuno inventato con la stessa sicurezza di uno vero — chi chiede un video si troverebbe una pagina che non esiste. Con la ricerca attiva, scrivendo "documentario africa v" alla fine del testo si ottiene il video più pertinente, che si apre da solo. Su OpenRouter e Gemini funziona; con gli altri servizi la richiesta viene fatta lo stesso ma senza ricerca.',
+           '⚠️ Required for videos. Without it the assistant recalls addresses instead of searching, and many no longer exist.'])),
+        );
       righe.push(this._toggle('assistente.frasiSeparate',
         P(['Leggi una frase per volta', 'Read one sentence at a time']),
         P(['Rende l\'ascolto interrompibile: una risposta lunga letta tutta d\'un fiato, senza poter dire "basta", è una trappola per chi non può parlare.',
@@ -2028,13 +2109,28 @@ export class SettingsView {
           P(['⚠️ Un giro solo affida ogni punto a una manciata di fotogrammi consecutivi: se in quel momento la persona ammicca o si distrae, quel punto è compromesso e nessuno se ne accorge. Due giri danno due misure indipendenti per ogni bersaglio, che vengono mediate.',
              '⚠️ A single pass leaves each point to a handful of consecutive frames.']),
           1, 4, 1),
+        this._range('pointer.calibrationBordoPunti',
+          P(['Bersagli lungo il bordo', 'Targets along the border']),
+          P(['Punti FERMI agli angoli e a metà dei lati, in aggiunta ai nove interni. Misurano fin dove arriva lo sguardo — i bersagli interni campionano solo il centro e sottostimano gli estremi, ed è la ragione per cui il puntatore non raggiunge i margini. ⚠️ Fermi e non in movimento: un punto che scorre viene inseguito con un ritardo che si può solo stimare, e la stima sbaglia proprio sulle curve. 0 = nessuno.',
+             'FIXED points at the corners and mid-edges, in addition to the nine inner ones.']),
+          0, 12, 4),
         this._range('pointer.calibrationBordoGiri',
-          P(['Giri del bordo prima dei bersagli', 'Border laps before the targets']),
+          P(['Giri del punto in movimento (sconsigliato)', 'Moving-dot laps (not recommended)']),
           P(['Un punto percorre il perimetro dello schermo e si campiona seguendolo. ⚠️ Misura l\'escursione MASSIMA dello sguardo — quanto la persona riesce davvero a spostarsi verso i bordi. I bersagli fissi campionano solo l\'interno e sottostimano gli estremi: è la ragione principale per cui il puntatore risulta impreciso ai margini. 0 = nessun giro.',
              'A dot travels the screen perimeter while sampling. Measures the MAXIMUM gaze range.']),
           0, 4, 1),
         this._range('pointer.calibrationBordoMs',
           P(['Durata di un giro del bordo', 'Duration of one border lap']), null, 4000, 20000, 500, ' ms'),
+        this._range('pointer.calibrationRitardoMs',
+          P(['Ritardo dello sguardo', 'Gaze lag']),
+          P(['⚠️ Seguendo un punto in movimento l\'occhio arriva sempre DOPO: circa due decimi di secondo. Senza tenerne conto ogni campione del bordo porta un errore nella stessa direzione del moto — che non si media via, e comprime la mappatura verso il centro facendo sì che il puntatore non arrivi ai lati. Alzalo se il puntatore resta troppo al centro, abbassalo se esagera verso i bordi.',
+             '⚠️ The eye always lags behind a moving dot. Without compensation the mapping is compressed toward the centre.']),
+          0, 500, 25, ' ms'),
+        this._range('pointer.calibrationPesoBersagli',
+          P(['Quanto valgono i bersagli fissi', 'Weight of the fixed targets']),
+          P(['⚠️ Sui bersagli l\'occhio è FERMO e guarda un punto noto: la corrispondenza è esatta. Sul bordo insegue un punto in movimento: è approssimata. Ma i campioni del bordo sono molti di più, e senza questo peso comanderebbero l\'ottanta per cento della calibrazione. A 1 tornano a contare uguale.',
+             '⚠️ Fixed targets are exact, border samples approximate — but far more numerous.']),
+          1, 10, 1, '×'),
         this._range('pointer.calibrationDwellMs', P(['Permanenza per punto', 'Dwell per point']),
           P(['⚠️ Con tempi troppo brevi la calibrazione risulta frettolosa: lo sguardo non fa in tempo ad assestarsi, i campioni contengono ancora il tragitto verso il bersaglio, e alla fine viene rifiutata per "movimento troppo piccolo" — dopo tutta la fatica. Meglio una calibrazione che dura il doppio e riesce.',
              '⚠️ Too short and the calibration is rushed, then rejected at the end.']),
@@ -2051,7 +2147,16 @@ export class SettingsView {
         this._range('pointer.doubleWindowMs', P(['Finestra doppio click', 'Double click window']), null, 200, 3000, 50, ' ms'),
         this._range('pointer.holdMs', P(['Click prolungato', 'Long press']),
           P(['0 = disattivo. Permanenza molto lunga per click destro', '0 = off. Very long dwell for right click']), 0, 6000, 100, ' ms'),
-        this._range('pointer.stripeSpeedMs', P(['Velocità bande', 'Stripe speed']), null, 600, 6000, 100, ' ms'),
+        this._range('pointer.stripeSpeedMs',
+          P(['Velocità bande — prima passata', 'Stripe speed — first pass']),
+          P(['Quanto impiega la banda ad attraversare lo schermo. ⚠️ Chi seleziona alzando l\'occhio ha bisogno di tempo per reagire dopo aver visto dove la banda sta arrivando: se le selezioni cadono sempre un po\' oltre il punto voluto, rallentare.',
+             'How long the stripe takes to cross the screen.']),
+          600, 8000, 100, ' ms'),
+        this._range('pointer.stripeSpeedFineMs',
+          P(['Velocità bande — seconda passata', 'Stripe speed — second pass']),
+          P(['La passata fine percorre una fascia stretta invece dello schermo intero, ed è lì che si decide il punto esatto. Poterla rallentare separatamente evita di pagare la precisione con la lentezza dappertutto. 0 = come la prima.',
+             'The fine pass covers a narrow band. 0 = same as the first.']),
+          0, 8000, 100, ' ms'),
         this._select('pointer.stripePasses', P(['Passate per asse', 'Passes per axis']),
           P(['2 = precisione al pixel, due gesti in più', '2 = pixel accuracy, two extra gestures']),
           { 1: P(['1 — due gesti', '1 — two gestures']), 2: P(['2 — quattro gesti', '2 — four gestures']) }),

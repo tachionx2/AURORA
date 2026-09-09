@@ -30,7 +30,7 @@ import { BUILD } from './core/version.js';
 import { SettingsView } from './ui/SettingsView.js';
 import { StatsView, DebugView } from './ui/Panels.js';
 import { PointerView, MODES as PT_MODES } from './ui/PointerView.js';
-import { GazeCalibration, calibrationTargets } from './pointer/calibration.js';
+import { GazeCalibration, calibrationTargets, bordoTargets } from './pointer/calibration.js';
 import { GazePointer } from './pointer/GazePointer.js';
 import { StripeCursor } from './pointer/StripeCursor.js';
 import { PointerOverlay } from './pointer/PointerOverlay.js';
@@ -85,6 +85,7 @@ class App {
       onCasa: (d, c) => this.comandaCasa(d, c),
       onPrint: (testo, id, ok) => this.stampa(testo, id, ok),
       onEmail: (dest, testo, ok) => this.mandaEmail(dest, testo, ok),
+      onTelegram: (dest, testo, ok) => this.mandaTelegram(dest, testo, ok),
     });
 
     this.gestures = new GestureEngine(this.cfg, (e) => this.onGesture(e));
@@ -624,6 +625,23 @@ class App {
     if (bandeInUso) {
       if (e.action === 'SELECT') { this.stripe.select(performance.now()); return; }
       if (e.action === 'UNDO') { this.stripe.cancel(); return; }
+      /* ⚠️ Pausa e ripresa con lo stesso gesto della scansione.
+       *
+       * Le bande sono il cursore di chi ha un solo gesto: deve poterle
+       * fermare per guardare un video o riposare, e RIACCENDERLE da
+       * sé. Senza, fermarle equivarrebbe a spegnere il programma. */
+      if (e.action === 'PAUSE' || e.action === 'WAKE') {
+        if (this.stripe.active) {
+          this.stripe.cancel();
+          this._bandeSospese = true;
+          this.audio.earcon('pause');
+        } else {
+          this._bandeSospese = false;
+          this.stripe.start(performance.now());
+          this.audio.earcon('wake');
+        }
+        return;
+      }
     }
     this.scan.handleAction(e.action, performance.now());
     this.gestures.setPaused(this.scan.paused);
@@ -983,6 +1001,23 @@ class App {
    */
   async chiediAssistente(testo) {
     try {
+      /* ══════════════════════════════════════════════════════════════
+       * "…v" ALLA FINE CHIEDE UN VIDEO
+       * ══════════════════════════════════════════════════════════════
+       *
+       * Scrivendo «documentario africa v» si chiede un video invece di
+       * una risposta parlata. Una lettera sola, perché comporre con un
+       * gesto costa, e la parola "video" costerebbe cinque volte tanto.
+       *
+       * ⚠️ Richiede la ricerca sul web: senza, l'assistente non cerca
+       * ma RICORDA indirizzi, e molti non esistono più. Se non è
+       * attiva lo si dice, invece di aprire una pagina rotta.
+       */
+      const chiedeVideo = /\s+(v|video|vid)\s*$/i.test(testo);
+      if (chiedeVideo && this.cfg.assistente?.ricercaWeb) {
+        const argomento = testo.replace(/\s+(v|video|vid)\s*$/i, '').trim();
+        if (argomento) return this.cercaEApriVideo(argomento);
+      }
       const { chiedi, inFrasi } = await import('./lang/Assistant.js');
       /* ⚠️ Il metodo si chiama `say`, non `speak`.
        *
@@ -1017,6 +1052,69 @@ class App {
       this._assistenteInterrotto = false;
     } catch (e) {
       this._safe('assistente', () => { throw e; });
+    }
+  }
+
+  /**
+   * Cerca un video sull'argomento e lo apre come se fosse in libreria.
+   *
+   * ⚠️ Se non trova nulla di sicuro lo DICE, invece di aprire una
+   * pagina che non esiste: un video che non parte, senza spiegazione,
+   * è peggio di un "non l'ho trovato".
+   */
+  async cercaEApriVideo(argomento) {
+    try {
+      const { cercaVideo } = await import('./lang/Assistant.js');
+      await this.audio.say(this.cfg.ui.language === 'en'
+        ? 'Looking for a video…' : 'Cerco un video…', 'menu');
+
+      const r = await cercaVideo(this.cfg, argomento);
+      if (!r.ok) {
+        this.debugView?.logEvent(`video: ${r.errore}`);
+        await this.audio.say(this.cfg.ui.language === 'en'
+          ? `No video found: ${r.errore}` : `Nessun video trovato: ${r.errore}`, 'menu');
+        return;
+      }
+
+      this.debugView?.logEvent(`video trovato: ${r.id} — ${r.titolo}`);
+      await this.audio.say(`Apro: ${r.titolo}`, 'menu');
+      /* Si apre con lo STESSO percorso dei video di libreria: la
+       * scansione si ferma, riprende alla chiusura, e i comandi del
+       * riproduttore compaiono come sempre. */
+      await this.media.openYouTube(r.id);
+      document.body.classList.add('has-media');
+      this.refreshContext();
+      this.renderMediaBar();
+    } catch (e) {
+      this._safe('ricerca video', () => { throw e; });
+    }
+  }
+
+  /**
+   * Manda un messaggio su Telegram.
+   *
+   * ⚠️ Come per la posta: il testo NON viene svuotato. Se l'invio
+   * fallisce, chi ha impiegato minuti a scriverlo non ricomincia.
+   */
+  async mandaTelegram(destinatario, testo, giaConfermato = false) {
+    try {
+      const { invia } = await import('./lang/Telegram.js');
+      if (!giaConfermato && this.cfg.telegram?.conferma) {
+        if (!confirm(`Mandare il messaggio a ${destinatario?.nome || 'destinatario'}?`)) return;
+      }
+      await this.audio.say(this.cfg.ui.language === 'en' ? 'Sending…' : 'Mando…', 'menu');
+      const r = await invia(this.cfg, destinatario, testo);
+      if (r.ok) {
+        this.debugView?.logEvent(`telegram: inviato a ${destinatario?.nome}`);
+        await this.audio.say(this.cfg.ui.language === 'en'
+          ? 'Message sent' : 'Messaggio mandato', 'menu');
+      } else {
+        this.debugView?.logEvent(`telegram: ${r.errore}`);
+        await this.audio.say(this.cfg.ui.language === 'en'
+          ? `Not sent: ${r.errore}` : `Non mandato: ${r.errore}`, 'menu');
+      }
+    } catch (e) {
+      this._safe('telegram', () => { throw e; });
     }
   }
 
@@ -1081,6 +1179,62 @@ class App {
       };
     }
     if (senzaNomi) this._camNomiMancanti = true;
+  }
+
+  /**
+   * Mostra i destinatari come riquadri, e manda a quello scelto.
+   *
+   * ⚠️ Il testo NON viene svuotato: se l'invio fallisce — rete assente,
+   * servizio non raggiungibile — chi ha impiegato minuti a scriverlo
+   * non deve ricominciare.
+   */
+  scegliDestinatarioPuntatore(via = 'email') {
+    const box = document.getElementById('ptDest');
+    if (!box) return;
+    const testo = [...this.scan.buffer.words, this.scan.buffer.letters].join(' ').trim();
+    if (!testo) { this.toast('Non c\'è ancora niente da mandare', true); return; }
+
+    /* Posta e Telegram condividono tutto tranne il campo che
+     * identifica il destinatario: una funzione sola, così le due
+     * strade non divergono col tempo. */
+    const perPosta = via === 'email';
+    const elenco = perPosta ? this.cfg.email?.contatti : this.cfg.telegram?.contatti;
+    const campo = perPosta ? 'indirizzo' : 'chatId';
+    const contatti = (elenco || []).filter(c => c && c[campo]);
+    if (!contatti.length) {
+      this.toast('Nessun destinatario: si aggiungono in Impostazioni', true);
+      return;
+    }
+
+    box.innerHTML = '';
+    box.hidden = false;
+    const testa = document.createElement('div');
+    testa.className = 'pt-desthead';
+    testa.textContent = perPosta ? 'A chi mando la mail?' : 'A chi mando il messaggio?';
+    box.append(testa);
+
+    const riga = document.createElement('div');
+    riga.className = 'pt-tilerow';
+    for (const c of contatti) {
+      const b = document.createElement('button');
+      b.className = 'pt-tile pt-frase ptr-target';
+      b.innerHTML = `<span class="tt">${String(c.nome || c[campo]).replace(/[<>&]/g, '')}</span>`;
+      b.onclick = () => {
+        box.hidden = true;
+        if (perPosta) this.mandaEmail(c, testo, false);
+        else this.mandaTelegram(c, testo, false);
+      };
+      riga.append(b);
+    }
+    /* ⚠️ Sempre un modo per tirarsi indietro, e ben visibile: chi ha
+     * aperto per sbaglio deve poter uscire senza mandare nulla. */
+    const ann = document.createElement('button');
+    ann.className = 'pt-tile pt-frase ptr-target pt-annulla';
+    ann.innerHTML = '<span class="tt">Annulla</span>';
+    ann.onclick = () => { box.hidden = true; };
+    riga.append(ann);
+
+    box.append(riga);
   }
 
   /* -------------------- Mouse del sistema operativo -------------------- */
@@ -2222,7 +2376,21 @@ class App {
   onMediaEvent(e) {
     // Il titolo serve a ricordare a che punto si era arrivati in
     // QUEL testo: riaprendolo si riprende da lì, non dall'inizio.
-    if (e.type === 'opened') this._titoloMediaCorrente = e.title || null;
+    if (e.type === 'opened') {
+      this._titoloMediaCorrente = e.title || null;
+      /* ⚠️ Le bande si fermano solo per ciò che si GUARDA.
+       *
+       * Video, immagini e testi hanno bisogno dello schermo libero:
+       * una banda che scorre sopra un film è fastidiosa e copre i
+       * sottotitoli. Musica e audiolibri no — lì lo schermo non serve,
+       * e togliere il cursore vorrebbe dire togliere il comando senza
+       * alcun guadagno. */
+      const daGuardare = ['youtube', 'video', 'image', 'text', 'pdf'].includes(e.kind);
+      if (daGuardare && this.stripe?.active) {
+        this.stripe.cancel();
+        this._bandeSospeseDaMedia = true;
+      }
+    }
     if (e.type === 'opened') {
       document.body.classList.add('has-media');
       this.scheduleFit();
@@ -2238,6 +2406,18 @@ class App {
     }
     if (e.type === 'closed') {
       document.body.classList.remove('has-media');
+      /* ⚠️ Le bande riprendono da sole a contenuto chiuso.
+       *
+       * Erano state sospese per non scorrere sopra un video o un testo;
+       * finito quello, chi ha un solo gesto deve ritrovare il proprio
+       * cursore senza doverlo riaccendere — non potrebbe. */
+      if (this._bandeSospeseDaMedia) {
+        this._bandeSospeseDaMedia = false;
+        if (this.cfg.pointer.enabled && this.cfg.pointer.mode === 'scanStripe'
+            && document.body.dataset.tab === 'punta' && !this._bandeSospese) {
+          this.stripe.start(performance.now());
+        }
+      }
       this.scheduleFit();
       this.refreshContext();
       this.renderMediaBar();
@@ -2549,7 +2729,23 @@ class App {
   startCalibration() {
     if (!this.vision.source) { this.toast('Accendi prima la telecamera', true); return; }
     const P0 = this.cfg.pointer;
-    const base = calibrationTargets(P0.calibrationPoints);
+    /* ⚠️ Bersagli FERMI anche lungo il bordo.
+     *
+     * Prima un punto percorreva il perimetro e si campionava
+     * inseguendolo. Sembrava l'idea giusta per misurare l'escursione
+     * massima, ma portava due errori che nessuna compensazione toglie
+     * del tutto: l'occhio insegue con un ritardo che si può solo
+     * STIMARE, e sulle curve la stima sbaglia di più. Con i campioni
+     * del bordo più numerosi di quelli precisi, quell'errore
+     * comandava la calibrazione.
+     *
+     * Un bersaglio fermo non ha il problema: l'occhio arriva, si
+     * ferma, e la corrispondenza è esatta. */
+    const base = [
+      ...calibrationTargets(P0.calibrationPoints),
+      ...((P0.calibrationBordoPunti || 0) > 0
+        ? bordoTargets(P0.calibrationBordoPunti) : []),
+    ];
     /* ⚠️ Più giri sugli stessi bersagli.
      *
      * Un giro solo affida ogni punto a una manciata di fotogrammi
@@ -2568,6 +2764,8 @@ class App {
        * mentre lo si segue. Misura l'escursione MASSIMA dello sguardo,
        * che i bersagli fissi sottostimano — ed è la ragione principale
        * per cui il puntatore risultava impreciso ai margini. */
+      // La fase con il punto in movimento resta spegnibile, ma di
+      // default non si usa più: i bersagli fermi la sostituiscono.
       bordoGiri: Math.max(0, P0.calibrationBordoGiri || 0),
       bordoDa: performance.now(),
       bordoUltimo: 0,
@@ -2580,15 +2778,42 @@ class App {
     this.audio.say(primoMsg, 'menu', true);
   }
 
-  /** Posizione del punto lungo il perimetro, per la fase del bordo. */
+  /**
+   * Posizione del punto lungo il perimetro, a VELOCITÀ COSTANTE.
+   *
+   * ⚠️ Prima ogni lato riceveva un quarto del tempo. Ma i lati non sono
+   * lunghi uguali: su uno schermo panoramico gli orizzontali misurano
+   * quasi il doppio dei verticali, quindi il punto li percorreva al
+   * doppio della velocità.
+   *
+   * Due conseguenze, entrambe dannose: i campioni si addensavano sui
+   * lati corti e si diradavano sui lunghi, sbilanciando la stima verso
+   * il movimento verticale; e sui lati veloci l'occhio faticava a
+   * stare dietro, aggiungendo errore proprio dove i campioni erano
+   * pochi.
+   *
+   * Parametrizzando sulla LUNGHEZZA invece che sul tempo, il punto
+   * mantiene la stessa velocità ovunque e i campioni si distribuiscono
+   * uniformemente.
+   */
   _puntoBordo(frazione) {
     const f = ((frazione % 1) + 1) % 1;
     const m = 0.06;                    // margine: non proprio sul bordo
     const a = m, b = 1 - m;
-    if (f < 0.25) return { x: a + (b - a) * (f / 0.25), y: a };
-    if (f < 0.50) return { x: b, y: a + (b - a) * ((f - 0.25) / 0.25) };
-    if (f < 0.75) return { x: b - (b - a) * ((f - 0.50) / 0.25), y: b };
-    return { x: a, y: b - (b - a) * ((f - 0.75) / 0.25) };
+    // Lunghezze reali dei lati, in pixel: è la forma dello schermo a
+    // decidere quanto tempo merita ciascuno.
+    const W = window.innerWidth || 1600, H = window.innerHeight || 900;
+    const lo = (b - a) * W, lv = (b - a) * H;
+    const per = 2 * (lo + lv);
+    let d = f * per;                   // distanza percorsa lungo il bordo
+
+    if (d < lo) return { x: a + (b - a) * (d / lo), y: a };
+    d -= lo;
+    if (d < lv) return { x: b, y: a + (b - a) * (d / lv) };
+    d -= lv;
+    if (d < lo) return { x: b - (b - a) * (d / lo), y: b };
+    d -= lo;
+    return { x: a, y: b - (b - a) * (d / lv) };
   }
 
   onCalibrationSample(now, eye) {
@@ -2615,11 +2840,36 @@ class App {
         message: this.cfg.ui.language === 'en'
           ? 'Follow the moving dot' : 'Segui il punto che si muove',
       };
+      /* ══════════════════════════════════════════════════════════════
+       * ⚠️ IL RITARDO DELLO SGUARDO
+       * ══════════════════════════════════════════════════════════════
+       *
+       * Seguendo un punto in movimento l'occhio arriva SEMPRE dopo: il
+       * sistema di inseguimento umano ha un ritardo di circa due
+       * decimi di secondo.
+       *
+       * Accoppiando lo sguardo di ADESSO con la posizione del punto di
+       * ADESSO si introduce un errore sistematico — sempre nella
+       * direzione del moto, quindi non si media via. E siccome i
+       * campioni del bordo sono molti più di quelli dei bersagli
+       * fissi, quell'errore domina la stima e comprime tutta la
+       * mappatura verso il centro: il puntatore non arriva più ai
+       * lati.
+       *
+       * Lo sguardo di adesso corrisponde a dov'era il punto un quinto
+       * di secondo fa: è con quella posizione che va accoppiato.
+       */
       const ogni = Math.max(80, P.calibrationBordoOgniMs || 250);
-      if (now - S.bordoUltimo >= ogni && Number.isFinite(eye?.x)) {
+      const ritardo = Math.max(0, P.calibrationRitardoMs ?? 200);
+      /* ⚠️ E si scartano i primi istanti: all'avvio l'occhio deve
+       * ancora trovare il punto, e quei campioni non descrivono un
+       * inseguimento ma una ricerca. */
+      const avviato = trascorso > Math.max(800, ritardo * 3);
+      if (avviato && now - S.bordoUltimo >= ogni && Number.isFinite(eye?.x)) {
         S.bordoUltimo = now;
+        const pRitardato = this._puntoBordo((trascorso - ritardo) / durata);
         this.calibration.add(eye.x, eye.y,
-          p.x * window.innerWidth, p.y * window.innerHeight);
+          pRitardato.x * window.innerWidth, pRitardato.y * window.innerHeight);
       }
       if (trascorso >= tot) {
         S.bordoGiri = 0;
@@ -2664,7 +2914,24 @@ class App {
       return;
     }
 
-    this.calibration.add(ex, ey, tgt.x * window.innerWidth, tgt.y * window.innerHeight);
+    /* ⚠️ I BERSAGLI FISSI VALGONO DI PIÙ.
+     *
+     * Sui bersagli l'occhio è FERMO e guarda un punto noto: la
+     * corrispondenza è esatta. Sul bordo insegue un punto in
+     * movimento, con un ritardo che si può solo stimare: la
+     * corrispondenza è approssimata.
+     *
+     * Ma i campioni del bordo erano quattro volte tanti, quindi
+     * pesavano l'ottanta per cento della stima. I minimi quadrati non
+     * sanno che alcuni valgono più di altri: glielo si dice
+     * ripetendoli.
+     *
+     * Il bordo resta utile — è l'unico che misura l'escursione massima
+     * — ma non deve comandare la mappatura. */
+    const pesoB = Math.max(1, Math.round(P.calibrationPesoBersagli || 4));
+    for (let k = 0; k < pesoB; k++) {
+      this.calibration.add(ex, ey, tgt.x * window.innerWidth, tgt.y * window.innerHeight);
+    }
     this.audio.earcon('confirm');
 
     S.index++; S.samples = []; S.enteredAt = now;
@@ -3147,6 +3414,21 @@ class App {
       if (!testo) { this.toast('Non c\'è ancora niente da chiedere', true); return; }
       this.chiediAssistente(testo);
     });
+    /* ══════════════════════════════════════════════════════════════
+     * MANDARE UNA MAIL DALLA TASTIERA A PUNTAMENTO
+     * ══════════════════════════════════════════════════════════════
+     *
+     * In Parla si poteva mandare un testo salvato per posta; qui no.
+     * Ma chi usa il puntatore compone più in fretta, ed è proprio chi
+     * scriverebbe volentieri a qualcuno.
+     *
+     * ⚠️ Il destinatario si sceglie DOPO, da riquadri grandi che
+     * compaiono solo in quel momento: una lista di indirizzi sempre a
+     * schermo è una lista di bersagli che si possono colpire per
+     * sbaglio, e una mail parte e non torna indietro.
+     */
+    ptBtn('ptMail', () => this.scegliDestinatarioPuntatore('email'));
+    ptBtn('ptTg', () => this.scegliDestinatarioPuntatore('telegram'));
     ptBtn('ptUndo', () => this.gestures.injectKey('UNDO'));
     ptBtn('ptClear', () => this.pointerView.clearBuffer());
     ptBtn('ptSaveDraft', () => {

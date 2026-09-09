@@ -255,6 +255,28 @@ export function buildTree(cfg, ctx = {}) {
                   ],
                 }]
               : []),
+            /* ⚠️ Telegram con la STESSA struttura della posta, conferma
+             * compresa: un messaggio parte una volta sola e non torna
+             * indietro, e chi comanda con un gesto solo non deve poterlo
+             * mandare per sbaglio. */
+            ...((cfg.telegram?.enabled && (cfg.telegram.contatti || []).some(x => x?.chatId))
+              ? [{
+                  kind: NodeKind.GROUP, id: `dt:${d.id}`, label: 'TELEGRAM', spoken: 'telegram',
+                  children: [
+                    ...(showBack ? [back(`dt:${d.id}`)] : []),
+                    ...cfg.telegram.contatti.filter(x => x?.chatId).map((con, ci) => ({
+                      kind: NodeKind.GROUP, id: `dtc:${d.id}:${ci}`,
+                      label: con.nome || String(con.chatId), spoken: con.nome || 'destinatario',
+                      children: [
+                        ...(showBack ? [back(`dtc:${d.id}:${ci}`)] : []),
+                        { kind: NodeKind.ACTION, id: `dtm:${d.id}:${ci}`,
+                          label: 'CONFERMA INVIO', spoken: 'conferma invio',
+                          action: 'DRAFT_TELEGRAM', payload: { id: d.id, contatto: con } },
+                      ],
+                    })),
+                  ],
+                }]
+              : []),
           ],
         })),
       ],
@@ -984,6 +1006,14 @@ export class ScanEngine {
         this.h.onPrint?.(testo || '', node.payload, true);
         const p = this.h.onOutput('menu', 'stampa');
         this._hold(p, now) || this._announceNow(now);
+        return;
+      }
+      case 'DRAFT_TELEGRAM': {
+        const { id: idT, contatto: conT } = node.payload || {};
+        const testoT = this.h.onDraft('text', { id: idT });
+        this.h.onTelegram?.(conT, testoT || '', true);
+        const pT = this.h.onOutput('menu', `messaggio a ${conT?.nome || 'destinatario'}`);
+        this._hold(pT, now) || this._announceNow(now);
         return;
       }
       case 'DRAFT_EMAIL': {

@@ -203,6 +203,9 @@
       <!-- Compare solo se l'assistente è acceso: chi non lo usa non
            deve trovarsi un pulsante in più da evitare. -->
       <button class="btn ptr-target" id="ptAsk" data-i18n="btn.ask" hidden>Chiedi</button>
+      <!-- Compare solo se la posta è attiva e ci sono destinatari. -->
+      <button class="btn ptr-target" id="ptMail" data-i18n="btn.mail" hidden>Manda</button>
+      <button class="btn ptr-target" id="ptTg" data-i18n="btn.telegram" hidden>Telegram</button>
       <button class="btn ptr-target" id="ptUndo" data-i18n="btn.undo">Annulla</button>
       <button class="btn ptr-target" id="ptSaveDraft" data-i18n="btn.saveDraft2">Salva testo</button>
       <button class="btn ptr-target" id="ptClear" data-i18n="btn.clear">Svuota</button>
@@ -215,6 +218,12 @@
        posizione, quindi nascondere le frasi dietro un gruppo
        aggiungerebbe due gesti senza far guadagnare nulla. Le
        intestazioni servono a trovarle con l'occhio, non a contenerle. -->
+  <!-- Scelta del destinatario: riquadri grandi, tutti visibili.
+       ⚠️ Compare solo dopo aver premuto MANDA, e sparisce subito dopo:
+       una lista di indirizzi sempre a schermo è una lista di bersagli
+       che si possono colpire per sbaglio. -->
+  <div class="pt-dest" id="ptDest" hidden></div>
+
   <div class="pt-view" id="ptView-frasi">
     <div class="pt-tiles" id="ptFrasi"></div>
   </div>

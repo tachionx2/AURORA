@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 40;
+export const CONFIG_VERSION = 41;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -910,7 +910,17 @@ export const DEFAULT_CONFIG = {
      * si distrae, quel punto è compromesso e non c'è modo di
      * accorgersene. Due giri danno due misure indipendenti per ogni
      * bersaglio, e i minimi quadrati le mediano. */
-    calibrationGiri: 2,
+    /* ⚠️ Un giro basta, ora che i bersagli sono diciassette.
+     *
+     * Due giri servivano quando i punti erano nove: se in quel momento
+     * la persona ammiccava, quel punto era compromesso e pesava un
+     * nono della calibrazione. Con diciassette punti ben distribuiti
+     * uno sbagliato pesa molto meno, e i minimi quadrati lo assorbono.
+     *
+     * E la durata conta: chi calibra con un solo gesto si stanca, e
+     * una calibrazione stancante viene fatta male. Trentaquattro soste
+     * erano quasi due minuti. */
+    calibrationGiri: 1,
     /* ⚠️ Giro del BORDO prima dei bersagli fissi.
      *
      * Un punto che percorre il perimetro dello schermo misura
@@ -920,9 +930,41 @@ export const DEFAULT_CONFIG = {
      * principale per cui il puntatore risultava impreciso ai margini.
      *
      * 0 = nessun giro di bordo. */
-    calibrationBordoGiri: 2,
+    /* ⚠️ Bersagli FERMI lungo il bordo: sostituiscono il punto in
+     * movimento.
+     *
+     * Un punto che scorre sembrava l'idea giusta per misurare
+     * l'escursione massima, ma l'occhio lo insegue con un ritardo che
+     * si può solo STIMARE, e sulle curve la stima sbaglia di più. Un
+     * bersaglio fermo non ha il problema: l'occhio arriva, si ferma, e
+     * la corrispondenza è esatta.
+     *
+     * 8 punti: quattro angoli e quattro lati. 0 = nessuno. */
+    calibrationBordoPunti: 8,
+    // Il punto in movimento resta disponibile ma spento: si è
+    // dimostrato meno preciso dei bersagli fermi.
+    calibrationBordoGiri: 0,
     calibrationBordoMs: 9000,    // durata di un giro completo
     calibrationBordoOgniMs: 250, // ogni quanto si prende un campione
+    /* ⚠️ Ritardo dello sguardo nell'inseguire un punto in movimento.
+     *
+     * L'occhio arriva sempre dopo: circa due decimi di secondo. Senza
+     * tenerne conto, ogni campione del bordo porta un errore
+     * sistematico nella direzione del moto — che non si media via, e
+     * comprime la mappatura verso il centro facendo sì che il
+     * puntatore non arrivi più ai lati.
+     *
+     * A 0 si torna al comportamento di prima. */
+    calibrationRitardoMs: 200,
+    /* ⚠️ Quanto vale un bersaglio fisso rispetto a un campione del
+     * bordo.
+     *
+     * Sui bersagli l'occhio è fermo e guarda un punto noto: la
+     * corrispondenza è esatta. Sul bordo insegue un punto in
+     * movimento, con un ritardo che si può solo stimare. Senza questo
+     * peso i campioni approssimati sarebbero quattro volte tanti e
+     * peserebbero l'ottanta per cento della stima. */
+    calibrationPesoBersagli: 4,
     /* ⚠️ Tempi allungati dopo le prove sul campo.
      *
      * Con 1400 ms la calibrazione risultava frettolosa: lo sguardo non
@@ -952,7 +994,29 @@ export const DEFAULT_CONFIG = {
     holdMs: 0,                   // 0 = disattivo; >0 → click prolungato
     // --- cursore a bande ---
     stripeSpeedMs: 2200,
+    /* ⚠️ Velocità della SECONDA passata, quella fine.
+     *
+     * La seconda passata percorre una fascia stretta invece dello
+     * schermo intero: con lo stesso tempo la banda sembra rallentare,
+     * ma il tempo per REAGIRE resta lo stesso — ed è quello che conta
+     * per chi deve alzare l'occhio dopo aver visto dove la banda sta
+     * arrivando.
+     *
+     * Chi ha bisogno di più tempo sulla passata fine, dove serve
+     * precisione, può allungarla senza rallentare anche la prima.
+     * 0 = come la prima. */
+    stripeSpeedFineMs: 0,
     stripePasses: 2,             // 2 = passata fine, precisione al pixel
+    /* ⚠️ Le bande RICOMINCIANO invece di spegnersi.
+     *
+     * Chi ha un solo gesto non può riaccenderle: il pulsante può
+     * premerlo soltanto chi assiste, e se non c'è nessuno la persona
+     * resta senza alcun modo di comandare. Le bande sono il suo
+     * cursore, come la voce guida è la sua tastiera — e la voce guida
+     * non si spegne da sola dopo qualche giro.
+     *
+     * Spegnendo questa opzione si torna al comportamento di prima. */
+    stripeContinua: true,
     stripeMaxSweeps: 4,          // passate a vuoto prima di annullare
     // Trasformazione sguardo→schermo salvata. Dichiarata qui perché
     // faccia parte del profilo esportato in modo prevedibile, invece
@@ -1071,6 +1135,13 @@ export const DEFAULT_CONFIG = {
    */
   assistente: {
     enabled: false,
+    /* ⚠️ Ricerca sul web: indispensabile per i video.
+     *
+     * Senza, l'assistente non cerca su YouTube ma RICORDA indirizzi
+     * visti durante l'addestramento — molti vecchi, alcuni rimossi,
+     * qualcuno inventato con la stessa sicurezza di uno vero. Chi
+     * chiede un video si troverebbe una pagina che non esiste. */
+    ricercaWeb: false,
     provider: 'openrouter',
     modello: '',
     chiave: '',           // conservata per compatibilità
@@ -1083,6 +1154,28 @@ export const DEFAULT_CONFIG = {
     attesaSec: 25,
     istruzione: '',       // vuoto = quella predefinita
     frasiSeparate: true,  // legge una frase per volta, interrompibile
+  },
+
+  /* ══════════════════════════════════════════════════════════════════
+   * MESSAGGI SU TELEGRAM
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ⚠️ Telegram e non WhatsApp: WhatsApp non permette di inviare
+   * messaggi da una pagina web, se non attraverso un'interfaccia
+   * commerciale a pagamento. Telegram mette a disposizione
+   * un'interfaccia gratuita e diretta.
+   *
+   * Spento di default: richiede un robot da creare e una scelta
+   * consapevole di chi assiste.
+   */
+  telegram: {
+    enabled: false,
+    token: '',           // gettone del robot, da BotFather
+    contatti: [],        // { nome, chatId }
+    firma: '',           // aggiunta in fondo a ogni messaggio
+    silenzioso: false,   // arriva senza suono di notifica
+    conferma: true,      // chiedere conferma prima di mandare
+    attesaSec: 20,
   },
 
   media: {
@@ -1171,6 +1264,13 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 41) {
+    if (!c.telegram) {
+      c.telegram = { enabled: false, token: '', contatti: [], firma: '',
+                     silenzioso: false, conferma: true, attesaSec: 20 };
+    }
+    if (c.assistente && c.assistente.ricercaWeb === undefined) c.assistente.ricercaWeb = false;
+  }
   if (v < 40 && c.assistente && !c.assistente.chiavi) {
     // La chiave unica diventa quella del fornitore in uso.
     c.assistente.chiavi = { openrouter: '', deepseek: '', google: '',

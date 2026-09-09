@@ -272,6 +272,18 @@ export class PointerView {
   _aggiornaAzioni() {
     const b = document.getElementById('ptAsk');
     if (b) b.hidden = !this.app.cfg.assistente?.enabled;
+    /* La posta compare solo se è attiva E c'è almeno un destinatario:
+     * un pulsante che apre una lista vuota è un pulsante che delude. */
+    const m = document.getElementById('ptMail');
+    if (m) {
+      const E = this.app.cfg.email;
+      m.hidden = !(E?.enabled && (E.contatti || []).some(c => c && c.indirizzo));
+    }
+    const g = document.getElementById('ptTg');
+    if (g) {
+      const T = this.app.cfg.telegram;
+      g.hidden = !(T?.enabled && (T.contatti || []).some(c => c && c.chatId));
+    }
   }
 
   renderStatus() {

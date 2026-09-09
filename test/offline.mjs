@@ -110,12 +110,12 @@ const conRete = tuttoJs.filter(x => /\bfetch\(/.test(x.src)).map(x => x.f);
  * è il suo scopo — ma è spento di default e la sua assenza non
  * impedisce nulla. */
 const attese = ['js/lang/Dictation.js', 'js/lang/Mailer.js',
-                'js/lang/Assistant.js',
+                'js/lang/Assistant.js', 'js/lang/Telegram.js',
                 'js/device/HomeAssistant.js', 'js/main.js',
                 'js/ui/FloatWindow.js'];
 const inattese = conRete.filter(f => !attese.includes(f));
 ok(inattese.length === 0,
-   `5b. solo traduzione, posta, domotica e assistente contattano la rete: ${inattese.join(', ') || 'confermato'}`);
+   `5b. solo traduzione, posta, domotica, assistente e Telegram contattano la rete: ${inattese.join(', ') || 'confermato'}`);
 
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail ? 1 : 0);

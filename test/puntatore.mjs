@@ -93,11 +93,33 @@ ok(!s2.active, 'annullamento ferma le bande');
 // riparte da sola dopo il click
 sr=stripeRun(c=>{c.pointer.stripePasses=1;},[300,300]);
 ok(sr.s.active, 'dopo il click riparte da sola: chi ha un solo gesto non deve riattivarla');
-// esce da sola dopo troppe passate a vuoto
+/* ⚠️ NON esce da sola dopo le passate a vuoto: RICOMINCIA.
+ *
+ * Prima si spegneva. Ma chi ha UN SOLO GESTO non può riaccenderla: il
+ * pulsante che riavvia le bande può premerlo soltanto chi assiste, e
+ * se non c'è nessuno la persona resta senza alcun modo di comandare.
+ *
+ * Le bande sono il suo cursore, come la voce guida è la sua tastiera —
+ * e la voce guida non si spegne da sola dopo qualche giro.
+ *
+ * Fermarsi resta possibile, ma solo se qualcuno lo CHIEDE. */
 const s3=new StripeCursor(cfg,()=>{}); s3.setViewport(1000,800);
 let t3=0; s3.start(t3);
 for(let i=0;i<2000;i++){ t3+=20; s3.tick(t3); }
-ok(!s3.active, 'esce da sola dopo le passate a vuoto invece di scorrere all infinito');
+ok(s3.active,
+   'dopo le passate a vuoto RICOMINCIA invece di spegnersi: chi ha un solo gesto non potrebbe riaccenderla');
+ok((s3.counters.ricomincia || 0) > 0,
+   `e riparte dall inizio, a schermo intero (${s3.counters.ricomincia || 0} volte)`);
+
+// ⚠️ Ma resta possibile spegnerla, per chi lo preferisce.
+{
+  const cSpenta = deepClone(DEFAULT_CONFIG);
+  cSpenta.pointer.stripeContinua = false;
+  const sc = new StripeCursor(cSpenta, () => {});
+  let tt = 0; sc.start(tt);
+  for (let i = 0; i < 40; i++) { tt += cSpenta.pointer.stripeSpeedMs; sc.tick(tt); }
+  ok(!sc.active, 'spegnendo l opzione si torna al comportamento di prima');
+}
 
 // ---------- configurazione ----------
 ok(validateConfig(cfg).length===0, 'config con puntatore e dispositivo valida');
@@ -123,21 +145,41 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      `1. la permanenza su ogni bersaglio è generosa (${P.calibrationDwellMs} ms)`);
   ok(P.calibrationSettleMs >= 600,
      `2. e si attende che lo sguardo ARRIVI prima di raccogliere (${P.calibrationSettleMs} ms)`);
-  ok(P.calibrationGiri >= 2,
-     `3. si ripassa più volte su ogni bersaglio (${P.calibrationGiri} giri)`);
-  ok(P.calibrationBordoGiri >= 1,
-     `4. e si percorre il perimetro per misurare l escursione massima (${P.calibrationBordoGiri} giri)`);
+  /* ⚠️ Bersagli FERMI anche lungo il bordo.
+   *
+   * Il punto che percorreva il perimetro sembrava l'idea giusta per
+   * misurare l'escursione massima, ma l'occhio lo insegue con un
+   * ritardo che si può solo STIMARE, e sulle curve la stima sbaglia di
+   * più. Con i campioni del bordo più numerosi di quelli precisi,
+   * quell'errore comandava la calibrazione: il puntatore restava al
+   * centro invece di raggiungere i margini.
+   *
+   * Un bersaglio fermo non ha il problema: l'occhio arriva, si ferma,
+   * e la corrispondenza fra dove guarda e dove si trova il punto è
+   * esatta. */
+  const { bordoTargets: bt, calibrationTargets: ct } = await import('../js/pointer/calibration.js');
+  ok(P.calibrationBordoPunti >= 4,
+     `3. ci sono bersagli FERMI lungo il bordo (${P.calibrationBordoPunti})`);
+  ok(P.calibrationBordoGiri === 0,
+     '4. e il punto in movimento è spento: si è dimostrato meno preciso');
 
-  /* Quanti campioni si raccolgono in tutto: era nove, uno per punto. */
-  const daBordo = Math.round(P.calibrationBordoGiri * P.calibrationBordoMs / P.calibrationBordoOgniMs);
-  const daBersagli = P.calibrationPoints * P.calibrationGiri;
-  ok(daBordo + daBersagli >= 60,
-     `5. in tutto si raccolgono ~${daBordo + daBersagli} campioni (erano ${P.calibrationPoints})`);
+  const tutti = [...ct(P.calibrationPoints), ...bt(P.calibrationBordoPunti)];
+  const daBersagli = tutti.length * P.calibrationGiri;
+  ok(daBersagli >= 15,
+     `5. in tutto ci sono ${daBersagli} bersagli, tutti a occhio fermo (erano ${P.calibrationPoints})`);
+
+  /* ⚠️ E devono coprire gli ESTREMI: i bersagli interni campionano
+   * solo il centro, ed è la ragione per cui il puntatore non
+   * raggiungeva i margini. */
+  const xs2 = tutti.map(p => p.x), ys2 = tutti.map(p => p.y);
+  ok(Math.min(...xs2) <= 0.06 && Math.max(...xs2) >= 0.94,
+     `5b. e coprono lo schermo in orizzontale (${Math.min(...xs2).toFixed(2)} → ${Math.max(...xs2).toFixed(2)})`);
+  ok(Math.min(...ys2) <= 0.06 && Math.max(...ys2) >= 0.94,
+     `5c. e in verticale (${Math.min(...ys2).toFixed(2)} → ${Math.max(...ys2).toFixed(2)})`);
 
   /* ⚠️ Ma non deve durare troppo: chi calibra con un solo gesto si
    * stanca, e una calibrazione stancante viene fatta male. */
-  const durataSec = (P.calibrationBordoGiri * P.calibrationBordoMs
-    + daBersagli * (P.calibrationDwellMs + P.calibrationSettleMs)) / 1000;
+  const durataSec = daBersagli * (P.calibrationDwellMs + P.calibrationSettleMs) / 1000;
   ok(durataSec < 150,
      `6. e dura ${Math.round(durataSec)} secondi: abbastanza da riuscire, non da stancare`);
 
@@ -266,6 +308,208 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
    * detto "ho sete" sarebbe inaccettabile. */
   ok(/keep: true/.test(corpo),
      '28. pronunciare una frase pronta non tocca il testo in composizione');
+}
+
+/* ══════ Mandare una mail dalla tastiera a puntamento ══════
+ *
+ * In Parla si poteva mandare un testo salvato per posta; in Punta no.
+ * Ma chi usa il puntatore compone più in fretta, ed è proprio chi
+ * scriverebbe volentieri a qualcuno.                                 */
+{
+  const fsM = await import('node:fs');
+  const pathM = await import('node:path');
+  const quiM = pathM.dirname(import.meta.filename || process.argv[1]);
+  const html = fsM.readFileSync(pathM.join(quiM, '..', 'index.html'), 'utf8');
+  const main = fsM.readFileSync(pathM.join(quiM, '..', 'js/main.js'), 'utf8');
+  const pv = fsM.readFileSync(pathM.join(quiM, '..', 'js/ui/PointerView.js'), 'utf8');
+
+  ok(/id="ptMail"/.test(html), '29. la barra ha il pulsante per mandare');
+  ok(/ptBtn\('ptMail'/.test(main), '30. ed è collegato');
+  ok(/id="ptDest"/.test(html), '31. c è il riquadro per scegliere il destinatario');
+
+  /* ⚠️ Il pulsante compare solo se la posta è attiva E c'è almeno un
+   * destinatario: un pulsante che apre una lista vuota delude. */
+  ok(/id="ptMail"[^>]*hidden/.test(html), '32. parte nascosto');
+  ok(/E\?\.enabled && \(E\.contatti \|\| \[\]\)\.some/.test(pv),
+     '33. e compare solo con posta attiva E almeno un destinatario');
+
+  const iM = main.indexOf("scegliDestinatarioPuntatore(via = 'email')");
+  const corpo = main.slice(iM, iM + 3200);
+
+  /* ⚠️ La lista compare SOLO al momento: una lista di indirizzi sempre
+   * a schermo è una lista di bersagli che si possono colpire per
+   * sbaglio, e una mail parte e non torna indietro. */
+  ok(/box\.hidden = false/.test(corpo), '34. la lista si apre solo premendo Manda');
+  ok(/box\.hidden = true/.test(corpo), '35. e si chiude subito dopo la scelta');
+  ok(/Annulla/.test(corpo),
+     '36. con un modo per tirarsi indietro senza mandare nulla');
+
+  /* ⚠️ Il testo NON va svuotato: se l'invio fallisce, chi ha impiegato
+   * minuti a scriverlo non deve ricominciare. */
+  ok(!/clearBuffer|svuota/i.test(corpo),
+     '37. mandare non svuota il testo: se l invio fallisce non si ricomincia');
+  ok(/this\.mandaEmail\(c, testo/.test(corpo),
+     '38. e si usa la stessa funzione di invio della scansione, non una copia');
+
+  /* ══════ Telegram, con la stessa forma della posta ══════
+   *
+   * ⚠️ WhatsApp non permette di inviare da una pagina web se non
+   * attraverso un'interfaccia commerciale a pagamento. Telegram sì,
+   * gratuitamente. */
+  ok(/id="ptTg"/.test(html), '39. la barra ha anche il pulsante Telegram');
+  ok(/ptBtn\('ptTg'/.test(main), '40. ed è collegato');
+  ok(/id="ptTg"[^>]*hidden/.test(html), '41. parte nascosto');
+  ok(/T\?\.enabled && \(T\.contatti \|\| \[\]\)\.some/.test(pv),
+     '42. e compare solo con Telegram attivo E almeno un destinatario');
+
+  /* ⚠️ Una funzione SOLA per entrambi: posta e Telegram condividono
+   * tutto tranne il campo del destinatario, e due strade separate col
+   * tempo divergono. */
+  ok(/const perPosta = via === 'email'/.test(corpo),
+     '43. posta e Telegram usano la stessa funzione, non due copie');
+  ok(/this\.mandaTelegram\(c, testo/.test(corpo),
+     '44. e Telegram usa la stessa funzione di invio della scansione');
+}
+
+/* ══════ Le bande sono il cursore di chi ha un solo gesto ══════
+ *
+ * ⚠️ Devono comportarsi come la voce guida della scansione: continuano
+ * finché qualcuno non le ferma, e si riprendono con un gesto. Mai
+ * spegnersi da sole, perché nessuno potrebbe riaccenderle.           */
+{
+  const fsS = await import('node:fs');
+  const pathS = await import('node:path');
+  const quiS = pathS.dirname(import.meta.filename || process.argv[1]);
+  const main = fsS.readFileSync(pathS.join(quiS, '..', 'js/main.js'), 'utf8');
+  const { DEFAULT_CONFIG: DS } = await import('../js/core/config.js');
+
+  ok(DS.pointer.stripeContinua === true,
+     '45. di default le bande continuano invece di spegnersi');
+  ok(/e\.action === 'PAUSE' \|\| e\.action === 'WAKE'/.test(main),
+     '46. il gesto di pausa le ferma e quello di ripresa le riaccende');
+
+  /* ⚠️ Si fermano solo per ciò che si GUARDA. Musica e audiolibri no:
+   * lì lo schermo non serve, e togliere il cursore vorrebbe dire
+   * togliere il comando senza alcun guadagno. */
+  ok(/'youtube', 'video', 'image', 'text', 'pdf'/.test(main),
+     '47. si fermano per video, immagini e testi');
+  ok(!/'audio'/.test(main.slice(main.indexOf('const daGuardare'), main.indexOf('const daGuardare') + 200)),
+     '48. ma NON per musica e audiolibri, dove lo schermo non serve');
+  ok(/_bandeSospeseDaMedia = false/.test(main),
+     '49. e riprendono da sole a contenuto chiuso');
+
+  /* ⚠️ Distinguere la sospensione VOLUTA da quella per i media: se la
+   * persona le aveva fermate da sé, chiudendo un video non devono
+   * ripartire contro la sua volontà. */
+  ok(/!this\._bandeSospese/.test(main),
+     '50. una pausa voluta resta tale anche dopo un video');
+}
+
+/* ══════ Due difetti della calibrazione, misurati ══════
+ *
+ * Sul campo il puntatore non arrivava ai lati e vibrava. Due cause
+ * distinte, entrambe nella fase del bordo.                          */
+{
+  const { DEFAULT_CONFIG: DC2 } = await import('../js/core/config.js');
+  const P2 = DC2.pointer;
+
+  /* ⚠️ 1. VELOCITÀ NON COSTANTE.
+   *
+   * Ogni lato riceveva un quarto del tempo, ma su uno schermo
+   * panoramico gli orizzontali misurano quasi il doppio: il punto li
+   * percorreva al doppio della velocità. I campioni si addensavano sui
+   * lati corti, sbilanciando la stima verso il verticale. */
+  const punto = (f, W, H) => {
+    f = ((f % 1) + 1) % 1;
+    const m = 0.06, a = m, b = 1 - m;
+    const lo = (b - a) * W, lv = (b - a) * H, per = 2 * (lo + lv);
+    let d = f * per;
+    if (d < lo) return { x: a + (b - a) * (d / lo), y: a };
+    d -= lo;
+    if (d < lv) return { x: b, y: a + (b - a) * (d / lv) };
+    d -= lv;
+    if (d < lo) return { x: b - (b - a) * (d / lo), y: b };
+    d -= lo;
+    return { x: a, y: b - (b - a) * (d / lv) };
+  };
+  for (const [W, H] of [[1920, 1080], [1280, 800], [1024, 768]]) {
+    let prec = punto(0, W, H); const passi = [];
+    for (let i = 1; i <= 800; i++) {
+      const p = punto(i / 800, W, H);
+      passi.push(Math.hypot((p.x - prec.x) * W, (p.y - prec.y) * H));
+      prec = p;
+    }
+    /* ⚠️ Si scartano i passi agli ANGOLI: lì il punto cambia
+     * direzione fra un campione e il successivo, e la distanza in
+     * linea retta è più corta del tragitto percorso. È un artefatto
+     * della misura, non una variazione di velocità. */
+    passi.sort((a, b) => a - b);
+    const senzaAngoli = passi.slice(2, -2);
+    const r = Math.max(...senzaAngoli) / Math.max(1e-9, Math.min(...senzaAngoli));
+    ok(r < 1.3,
+       `51. su ${W}x${H} il punto mantiene velocità costante (${r.toFixed(2)}× fra il passo minimo e il massimo)`);
+  }
+
+  /* ⚠️ 2. IL RITARDO DELLO SGUARDO. */
+  ok(P2.calibrationRitardoMs >= 100,
+     `52. si tiene conto del ritardo con cui l occhio insegue (${P2.calibrationRitardoMs} ms)`);
+
+  const fsC = await import('node:fs');
+  const pathC = await import('node:path');
+  const quiC = pathC.dirname(import.meta.filename || process.argv[1]);
+  const main = fsC.readFileSync(pathC.join(quiC, '..', 'js/main.js'), 'utf8');
+  ok(/_puntoBordo\(\(trascorso - ritardo\) \/ durata\)/.test(main),
+     '53. accoppiando lo sguardo con dov ERA il punto, non con dov è adesso');
+  ok(/const avviato = trascorso >/.test(main),
+     '54. e scartando i primi istanti, quando l occhio sta ancora cercando il punto');
+
+  /* ⚠️ 3. LO SBILANCIAMENTO.
+   *
+   * Sui bersagli l'occhio è fermo: corrispondenza esatta. Sul bordo
+   * insegue: approssimata. Ma i campioni del bordo erano quattro volte
+   * tanti e pesavano l'ottanta per cento della stima. */
+  const daBordo = Math.round(P2.calibrationBordoGiri * P2.calibrationBordoMs / P2.calibrationBordoOgniMs);
+  const daBersagli = P2.calibrationPoints * P2.calibrationGiri * P2.calibrationPesoBersagli;
+  const quotaBersagli = daBersagli / (daBordo + daBersagli);
+  ok(quotaBersagli >= 0.4,
+     `55. i bersagli fissi pesano il ${(quotaBersagli * 100).toFixed(0)}% della calibrazione (erano il 20%)`);
+  ok(/for \(let k = 0; k < pesoB; k\+\+\)/.test(main),
+     '56. il peso si ottiene ripetendo il campione: i minimi quadrati non sanno da soli quali valgono di più');
+}
+
+/* ══════ Velocità separata per la passata fine ══════
+ *
+ * ⚠️ Chi seleziona ALZANDO L'OCCHIO ha bisogno di tempo per reagire
+ * dopo aver visto dove la banda sta arrivando. Sulla passata fine —
+ * dove si decide il punto esatto — quel tempo conta di più. Poterla
+ * rallentare separatamente evita di pagare la precisione con la
+ * lentezza dappertutto.                                             */
+{
+  const { StripeCursor: SC } = await import('../js/pointer/StripeCursor.js');
+  const { DEFAULT_CONFIG: DV, deepClone: dv } = await import('../js/core/config.js');
+
+  ok(DV.pointer.stripeSpeedFineMs === 0,
+     '57. di default la passata fine usa la stessa velocità della prima');
+
+  const c = dv(DV);
+  c.pointer.stripeSpeedMs = 2000;
+  c.pointer.stripeSpeedFineMs = 5000;
+  const sc = new SC(c, () => {});
+  sc.start(0);
+  ok(sc.pass === 0, '58. si parte dalla prima passata');
+  sc.select(500);
+  ok(sc.pass === 1, '59. e un gesto porta alla seconda');
+
+  const fsV = await import('node:fs');
+  const pathV = await import('node:path');
+  const quiV = pathV.dirname(import.meta.filename || process.argv[1]);
+  const src = fsV.readFileSync(pathV.join(quiV, '..', 'js/pointer/StripeCursor.js'), 'utf8');
+  ok(/this\.pass > 0 && \(this\.cfg\.pointer\.stripeSpeedFineMs \|\| 0\) > 0/.test(src),
+     '60. la seconda passata usa la propria velocità solo se impostata');
+
+  const sv = fsV.readFileSync(pathV.join(quiV, '..', 'js/ui/SettingsView.js'), 'utf8');
+  ok(sv.includes("'pointer.stripeSpeedFineMs'"),
+     '61. ed è regolabile in impostazioni, accanto a quella della prima');
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

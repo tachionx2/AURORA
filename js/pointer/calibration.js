@@ -229,6 +229,35 @@ export class GazeCalibration {
  * Il margine tiene i punti lontani dai bordi: guardare esattamente
  * l'angolo è scomodo e produce campioni rumorosi.
  */
+/**
+ * Bersagli FERMI lungo il bordo dello schermo.
+ *
+ * ⚠️ Sostituiscono il punto che percorreva il perimetro.
+ *
+ * Un punto in movimento sembrava l'idea giusta per misurare
+ * l'escursione massima, ma portava con sé due errori che nessuna
+ * compensazione toglie del tutto: l'occhio insegue con un ritardo che
+ * si può solo STIMARE, e sulle curve la stima sbaglia di più.
+ *
+ * Un bersaglio fermo non ha questo problema: l'occhio arriva, si
+ * ferma, e la corrispondenza fra dove guarda e dove si trova il punto
+ * è esatta. Si perde il fascino del punto che scorre, si guadagna una
+ * calibrazione che funziona.
+ *
+ * Il margine è più stretto di quello dei bersagli interni: è proprio
+ * agli estremi che serve sapere fin dove arriva lo sguardo.
+ */
+export function bordoTargets(count = 8, margin = 0.05) {
+  const a = margin, b = 0.5, c = 1 - margin;
+  const otto = [[a,a],[b,a],[c,a],[c,b],[c,c],[b,c],[a,c],[a,b]];
+  if (count <= 4) return [[a,a],[c,a],[c,c],[a,c]].map(([x,y]) => ({ x, y }));
+  if (count >= 12) {
+    const q = 0.25, t = 0.75;
+    return [...otto, [q,a],[t,a],[q,c],[t,c]].map(([x,y]) => ({ x, y }));
+  }
+  return otto.map(([x,y]) => ({ x, y }));
+}
+
 export function calibrationTargets(count, margin = 0.12) {
   const a = margin, b = 0.5, c = 1 - margin;
   const grid3 = [[a,a],[b,a],[c,a],[a,b],[b,b],[c,b],[a,c],[b,c],[c,c]];

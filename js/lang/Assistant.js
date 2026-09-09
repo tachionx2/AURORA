@@ -169,9 +169,9 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
    * Il tetto tecnico resta, ma largo: serve solo come rete di
    * sicurezza contro una risposta interminabile, non come strumento
    * di misura. */
-  const nParole = A.maxParole || 100;
-  const testoIstruzione = (A.istruzione && A.istruzione.trim())
-    ? A.istruzione : istruzione(nParole);
+  const nParole = opzioni.maxParole || A.maxParole || 100;
+  const testoIstruzione = opzioni.istruzione
+    || ((A.istruzione && A.istruzione.trim()) ? A.istruzione : istruzione(nParole));
   /* ⚠️ Il tetto tecnico segue il limite chiesto, invece di essere
    * fisso: con un tetto a quattromila token una richiesta da duemila
    * parole sarebbe stata tagliata a metà — e il taglio è proprio ciò
@@ -186,6 +186,8 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
       systemInstruction: { parts: [{ text: testoIstruzione }] },
       contents: [{ role: 'user', parts: [{ text: domanda }] }],
       generationConfig: { maxOutputTokens: maxTok },
+      // Gemini chiede la ricerca come strumento, non come suffisso.
+      ...(opzioni.ricerca ? { tools: [{ google_search: {} }] } : {}),
     };
   } else if (prov.formato === 'anthropic') {
     intestazioni['x-api-key'] = chiave;
@@ -194,8 +196,13 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
               messages: [{ role: 'user', content: domanda }] };
   } else {
     if (chiave) intestazioni.Authorization = `Bearer ${chiave}`;
+    /* ⚠️ Con la ricerca, OpenRouter vuole il suffisso `:online`: è il
+     * modo con cui si chiede al modello di guardare davvero sul web
+     * invece di rispondere a memoria. */
+    const modelloUsato = (opzioni.ricerca && A.provider === 'openrouter'
+      && !/:online$/.test(modello)) ? `${modello}:online` : modello;
     corpo = {
-      model: modello, max_tokens: maxTok,
+      model: modelloUsato, max_tokens: maxTok,
       messages: [{ role: 'system', content: testoIstruzione },
                  { role: 'user', content: domanda }],
     };
@@ -235,6 +242,59 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
     if (e?.name === 'AbortError') return { ok: false, errore: 'il servizio non ha risposto in tempo' };
     return { ok: false, errore: 'non raggiungibile', dettaglio: String(e?.message || e).slice(0, 200) };
   }
+}
+
+/**
+ * ══════════════════════════════════════════════════════════════════
+ * CERCARE UN VIDEO
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * ⚠️ Serve la RICERCA SUL WEB, e non è un dettaglio.
+ *
+ * Un assistente conversazionale non cerca su YouTube: ricorda
+ * identificativi visti durante l'addestramento. Molti sono vecchi,
+ * alcuni rimossi, e qualcuno inventato di sana pianta — con la stessa
+ * sicurezza di uno vero. Chi chiede "documentario africa" si
+ * troverebbe una pagina che non esiste, senza capire perché.
+ *
+ * Con la ricerca attiva l'assistente guarda davvero, e l'indirizzo che
+ * restituisce è un indirizzo che ha visto.
+ */
+export const ISTRUZIONE_VIDEO = [
+  'Cerca su internet e restituisci UN SOLO video di YouTube, il più pertinente',
+  'e in lingua italiana se esiste.',
+  'Rispondi ESATTAMENTE in questa forma, senza aggiungere altro:',
+  'ID|titolo',
+  "dove ID è l'identificativo di undici caratteri del video YouTube.",
+  'Se non trovi nulla di sicuro, rispondi soltanto: NIENTE',
+  'Non inventare mai un identificativo: meglio NIENTE che un video inesistente.',
+].join(' ');
+
+/** Estrae un identificativo YouTube da una risposta, comunque scritta. */
+export function idYouTube(testo) {
+  const t = String(testo || '');
+  // Prima le forme complete, poi l'identificativo nudo.
+  const m = t.match(/(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/)
+    || t.match(/(?:^|[\s|>])([A-Za-z0-9_-]{11})(?:[\s|<]|$)/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Chiede un video sull'argomento e restituisce identificativo e titolo.
+ */
+export async function cercaVideo(cfg, argomento) {
+  const A = cfg?.assistente;
+  if (!A?.enabled) return { ok: false, errore: 'assistente non attivo' };
+  if (!A.ricercaWeb) return { ok: false, errore: 'la ricerca sul web non è attiva' };
+  const r = await chiedi(cfg, `Trova un video su: ${argomento}`, {
+    istruzione: ISTRUZIONE_VIDEO, ricerca: true, maxParole: 40,
+  });
+  if (!r.ok) return { ok: false, errore: r.errore };
+  if (/^\s*NIENTE/i.test(r.testo)) return { ok: false, errore: 'nessun video trovato' };
+  const id = idYouTube(r.testo);
+  if (!id) return { ok: false, errore: 'risposta non riconosciuta' };
+  const titolo = (r.testo.split('|')[1] || '').trim().slice(0, 120);
+  return { ok: true, id, titolo: titolo || argomento };
 }
 
 /**
