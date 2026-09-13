@@ -159,6 +159,20 @@ export class PointerOverlay {
     c.fillStyle = C.muted;
     c.font = '400 15px ui-monospace, monospace';
     c.fillText(`punto ${k.index + 1} di ${k.total}`, this.w / 2, this.h - 50);
+    /* ⚠️ Come uscire, sempre visibile.
+     *
+     * Mancava del tutto: chi avviava la calibrazione per sbaglio, o si
+     * accorgeva a metà che la telecamera non vedeva bene, doveva
+     * arrivare in fondo a tutti i bersagli prima di poter fare altro.
+     *
+     * Scritto in piccolo e in basso, dove non attira lo sguardo: un
+     * testo troppo visibile durante la calibrazione sarebbe esso
+     * stesso un bersaglio, e falserebbe la misura. */
+    c.save();
+    c.globalAlpha = 0.45;
+    c.font = '12px ui-monospace, monospace';
+    c.fillText('Esc per annullare', this.w / 2, this.h - 22);
+    c.restore();
     c.textAlign = 'left';
   }
 

@@ -512,5 +512,60 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '61. ed è regolabile in impostazioni, accanto a quella della prima');
 }
 
+/* ══════ Tre correzioni chieste dopo le prove sul campo ══════ */
+{
+  const fsX = await import('node:fs');
+  const pathX = await import('node:path');
+  const quiX = pathX.dirname(import.meta.filename || process.argv[1]);
+  const main = fsX.readFileSync(pathX.join(quiX, '..', 'js/main.js'), 'utf8');
+  const html = fsX.readFileSync(pathX.join(quiX, '..', 'index.html'), 'utf8');
+  const ov = fsX.readFileSync(pathX.join(quiX, '..', 'js/pointer/PointerOverlay.js'), 'utf8');
+
+  /* ⚠️ 1. La sospensione fuori da Parla deve RESISTERE ai gesti.
+   *
+   * Metterla in pausa non bastava: qualunque gesto la risveglia — è il
+   * comportamento giusto quando la pausa l'ha chiesta la persona, ed è
+   * quello sbagliato quando è il programma ad aver sospeso. Bastava un
+   * gesto in diagnostica e la voce guida ripartiva. */
+  ok(/this\._pausaAutomatica && document\.body\.dataset\.tab !== 'parla'\) return;/.test(main),
+     '62. fuori da Parla i gesti non risvegliano la scansione sospesa');
+
+  /* ⚠️ 2. Si deve poter USCIRE dalla calibrazione.
+   *
+   * Mancava del tutto: chi la avviava per sbaglio doveva arrivare in
+   * fondo a tutti i bersagli prima di poter fare altro. */
+  ok(/annullaCalibrazione\(motivo = ''\)/.test(main),
+     '63. esiste un modo di annullare la calibrazione');
+  ok(/if \(this\.calibSession\) this\.annullaCalibrazione\(\)/.test(main),
+     '64. il tasto Esc la annulla invece di mettere in pausa');
+  ok(/id="btnCalibStop"/.test(html),
+     '65. e c è un pulsante, per chi assiste senza tastiera');
+  ok(/id="btnCalibStop"[^>]*hidden/.test(html),
+     '66. che compare solo durante la calibrazione');
+  ok(/Esc per annullare/.test(ov),
+     '67. e la schermata dice come uscire');
+  ok(/globalAlpha = 0\.45/.test(ov),
+     '68. scritto in modo discreto: un testo troppo visibile sarebbe esso stesso un bersaglio');
+  ok(/this\.calibration\.reset\(\)/.test(main.slice(main.indexOf('annullaCalibrazione(motivo'), main.indexOf('annullaCalibrazione(motivo') + 700)),
+     '69. annullando, i campioni parziali vengono buttati');
+  /* ⚠️ E il pulsante deve sparire in ENTRAMBI i modi di finire:
+   * annullando e arrivando in fondo. Un pulsante di annullamento che
+   * resta a schermo dopo la fine è un bersaglio che non fa nulla. */
+  ok((main.match(/_mostraAnnullaCalib\(false\)/g) || []).length >= 2,
+     '69b. il pulsante sparisce sia annullando sia finendo');
+
+  /* ⚠️ 3. Finita la calibrazione si torna al MIRINO, non alle bande.
+   *
+   * Le bande erano rimaste la modalità di una sessione precedente e
+   * ripartivano da sole. Ma una calibrazione appena fatta serve
+   * proprio al puntatore continuo: è quello il suo risultato. */
+  const iF = main.indexOf('this.audio.speakProtected(t(\'cal.done\')');
+  const corpoF = main.slice(iF, iF + 900);
+  ok(/this\.set\('pointer\.mode', 'gaze'\)/.test(corpoF),
+     '70. finita la calibrazione si torna al puntatore a mirino');
+  ok(/this\.stripe\.cancel\(\)/.test(corpoF),
+     '71. e le bande non ripartono da sole: restano al loro pulsante');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

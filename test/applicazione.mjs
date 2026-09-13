@@ -2068,6 +2068,27 @@ app.goto('parla');
      'l opzione è regolabile in impostazioni');
   ok(/soloInParla !== false/.test(corpoG),
      'e spegnendola la scansione continua ovunque, come prima');
+
+  /* ⚠️ Raggiungibile in due modi: dalle impostazioni e dalla scheda
+   * Parla.
+   *
+   * La scelta si cambia proprio nel momento in cui si sta per uscire —
+   * per andare in diagnostica a provare i gesti sentendo la voce
+   * guida, o per lavorare in pace nelle impostazioni. Averla solo
+   * nelle impostazioni significherebbe attraversarle ogni volta per
+   * una scelta che dura pochi minuti. */
+  const htmlT = fsT.readFileSync(pathT.join(quiT, '..', 'index.html'), 'utf8');
+  ok(/id="btnSoloParla"/.test(htmlT),
+     'c è un comando rapido anche nella scheda Parla');
+  ok(/btn\.soloparlaNo/.test(mainT),
+     'e mostra lo stato corrente invece di limitarsi a cambiarlo');
+
+  /* Spegnendo mentre una sospensione è in corso si riprende subito:
+   * altrimenti bisognerebbe rientrare in Parla e riuscirne per vederne
+   * l'effetto. */
+  const iB = mainT.indexOf("bSolo.onclick");
+  ok(/_pausaAutomatica = false/.test(mainT.slice(iB, iB + 700)),
+     'spegnendo il comando la scansione riprende subito');
 }
 
 /* ═══════ I video si aprono e si CHIUDONO davvero ═══════

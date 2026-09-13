@@ -74,6 +74,11 @@
   <section class="controls">
     <button class="btn btn-primary" id="btnStart" data-i18n="btn.start">Avvia</button>
     <button class="btn" id="btnPause" data-i18n="btn.pause">Pausa</button>
+    <!-- ⚠️ Comando rapido per la sospensione fuori da questa scheda.
+         È in Impostazioni, ma si cambia proprio nel momento in cui si
+         sta per uscire: averlo qui evita di attraversare le
+         impostazioni per una scelta che dura pochi minuti. -->
+    <button class="btn btn-sm" id="btnSoloParla" data-i18n="btn.soloparla">Ferma fuori da qui: SÌ</button>
     <button class="btn" id="btnSelect" data-i18n="btn.select">Seleziona</button>
     <button class="btn" id="btnUndo" data-i18n="btn.undo">Annulla</button>
     <button class="btn" id="btnBack" data-i18n="btn.back">Indietro</button>
@@ -174,6 +179,10 @@
     <div class="pt-actions">
       <button class="btn btn-sm ptr-target" id="btnPtrToggle" data-i18n="btn.ptrStart">Attiva puntatore</button>
       <button class="btn btn-sm ptr-target" id="btnCalibrate" data-i18n="btn.calibrate">Calibra</button>
+      <!-- Compare solo DURANTE la calibrazione: un pulsante per
+           annullare, sempre visibile, sarebbe un bersaglio in più da
+           evitare nel resto del tempo. -->
+      <button class="btn btn-sm btn-danger" id="btnCalibStop" data-i18n="btn.calibstop" hidden>Annulla calibrazione</button>
       <button class="btn btn-sm ptr-target" id="btnRecenter" data-i18n="btn.recenter">Ricentra</button>
       <button class="btn btn-sm ptr-target" id="btnStripe" data-i18n="btn.stripe">Bande</button>
       <button class="btn btn-sm ptr-target ptr-danger" id="ptCam" data-i18n="btn.camStart">Avvia camera</button>

@@ -643,6 +643,19 @@ class App {
         return;
       }
     }
+    /* ⚠️ La sospensione automatica deve RESISTERE ai gesti.
+     *
+     * Qui stava il difetto: mettere in pausa la scansione non bastava,
+     * perché qualunque gesto la risveglia — è il comportamento giusto
+     * quando la pausa l'ha chiesta la persona, ed è quello sbagliato
+     * quando è il programma ad aver sospeso perché si è usciti da
+     * Parla. Bastava un gesto in diagnostica e la voce guida
+     * ripartiva.
+     *
+     * Finché si è fuori da Parla e la sospensione è automatica, i
+     * gesti non arrivano alla scansione. */
+    if (this._pausaAutomatica && document.body.dataset.tab !== 'parla') return;
+
     this.scan.handleAction(e.action, performance.now());
     this.gestures.setPaused(this.scan.paused);
   }
@@ -2770,6 +2783,7 @@ class App {
       bordoDa: performance.now(),
       bordoUltimo: 0,
     };
+    this._mostraAnnullaCalib(true);
     this.overlay.setMode('calibrate');
     const primoMsg = this.calibSession.bordoGiri > 0
       ? (this.cfg.ui.language === 'en' ? 'Follow the moving dot' : 'Segui il punto che si muove')
@@ -2942,7 +2956,35 @@ class App {
     };
   }
 
+  /**
+   * Interrompe la calibrazione senza applicarla.
+   *
+   * ⚠️ Mancava del tutto: chi la avviava per sbaglio, o si accorgeva a
+   * metà che la telecamera non vedeva bene, doveva arrivare in fondo a
+   * tutti i bersagli prima di poter fare altro. Un minuto di
+   * bersagli guardati per niente.
+   */
+  /** Mostra o nasconde il pulsante di annullamento. */
+  _mostraAnnullaCalib(on) {
+    const b = document.getElementById('btnCalibStop');
+    if (b) b.hidden = !on;
+  }
+
+  annullaCalibrazione(motivo = '') {
+    if (!this.calibSession) return;
+    this._mostraAnnullaCalib(false);
+    this.calibSession = null;
+    this.overlay.calib = null;
+    this.overlay.setMode('off');
+    this.calibration.reset();
+    this.audio.say(this.cfg.ui.language === 'en'
+      ? 'Calibration cancelled' : 'Calibrazione annullata', 'menu');
+    this.toast(motivo || 'Calibrazione annullata: la precedente resta valida');
+    this.pointerView?.renderStatus();
+  }
+
   finishCalibration() {
+    this._mostraAnnullaCalib(false);
     this.calibSession = null;
     const r = this.calibration.fit();
     this.overlay.setMode('off');
@@ -2965,6 +3007,16 @@ class App {
     const msg = `${t('cal.done')} · errore medio ${Math.round(r.error)} px${worst}`;
     this.toast(msg);
     this.audio.speakProtected(t('cal.done'), 'menu');
+    /* ⚠️ Finita la calibrazione si torna al MIRINO, non alle bande.
+     *
+     * Le bande erano rimaste la modalità scelta da una sessione
+     * precedente, e ripartivano da sole appena il puntatore si
+     * riaccendeva. Ma una calibrazione appena fatta serve proprio al
+     * puntatore continuo: è quello il suo risultato, ed è quello che
+     * va mostrato. Le bande restano a un tocco di distanza, dal loro
+     * pulsante. */
+    this.set('pointer.mode', 'gaze');
+    this.stripe.cancel();
     this.enablePointer(true);
     this.pointerView.renderStatus();
   }
@@ -3539,6 +3591,41 @@ class App {
       this.toast('Preferito aggiunto');
     };
     document.getElementById('btnPtrToggle').onclick = () => this.enablePointer(!this.cfg.pointer.enabled);
+    /* ⚠️ Comando rapido per la sospensione fuori da questa scheda.
+     *
+     * L'opzione è in Impostazioni, ma si cambia proprio nel momento in
+     * cui si sta per uscire — per andare in diagnostica a provare i
+     * gesti sentendo la voce guida, o per lavorare in pace nelle
+     * impostazioni. Averlo qui evita di attraversare tutto per una
+     * scelta che dura pochi minuti. */
+    const bSolo = document.getElementById('btnSoloParla');
+    if (bSolo) {
+      const aggiorna = () => {
+        const on = this.cfg.scan?.soloInParla !== false;
+        bSolo.textContent = on ? t('btn.soloparla') : t('btn.soloparlaNo');
+        bSolo.classList.toggle('btn-danger', !on);
+      };
+      bSolo.onclick = () => {
+        const nuovo = !(this.cfg.scan?.soloInParla !== false);
+        this.set('scan.soloInParla', nuovo);
+        /* Spegnendo mentre una sospensione automatica è in corso, si
+         * riprende subito: altrimenti bisognerebbe rientrare in Parla
+         * e riuscirne per vederne l'effetto. */
+        if (!nuovo && this._pausaAutomatica) {
+          this._pausaAutomatica = false;
+          this.scan.paused = false;
+        }
+        aggiorna();
+        this.toast(nuovo
+          ? 'La scansione si ferma uscendo da questa scheda'
+          : 'La scansione continua anche nelle altre schede');
+      };
+      aggiorna();
+      this._aggiornaSoloParla = aggiorna;
+    }
+
+    const bStop = document.getElementById('btnCalibStop');
+    if (bStop) bStop.onclick = () => this.annullaCalibrazione();
     document.getElementById('btnStripe').onclick = () => {
       this.set('pointer.mode', 'scanStripe');
       this.enablePointer(true);
@@ -3921,7 +4008,14 @@ class App {
       if (ev.code === 'Space') { ev.preventDefault(); this.gestures.injectKey('SELECT'); }
       else if (ev.code === 'Backspace') { ev.preventDefault(); this.gestures.injectKey('UNDO'); }
       else if (ev.code === 'Enter') { ev.preventDefault(); this.gestures.injectKey('SPEAK'); }
-      else if (ev.code === 'Escape') { ev.preventDefault(); this.gestures.injectKey('TOGGLE_PAUSE'); }
+      else if (ev.code === 'Escape') {
+        ev.preventDefault();
+        /* ⚠️ Durante la calibrazione, Esc ANNULLA invece di mettere in
+         * pausa: mettere in pausa una calibrazione non significa
+         * niente, e chi preme Esc a metà vuole uscire. */
+        if (this.calibSession) this.annullaCalibrazione();
+        else this.gestures.injectKey('TOGGLE_PAUSE');
+      }
       else if (ev.code === 'ArrowLeft') { ev.preventDefault(); this.gestures.injectKey('BACK'); }
     });
   }
