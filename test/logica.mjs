@@ -1,5 +1,5 @@
 global.localStorage={_d:{},getItem(k){return this._d[k]??null},setItem(k,v){this._d[k]=v},removeItem(k){delete this._d[k]}};
-import { DEFAULT_CONFIG, deepClone, validateConfig, migrateConfig, exportProfile, importProfile } from '../js/core/config.js';
+import { DEFAULT_CONFIG, deepClone, validateConfig, migrateConfig, exportProfile, importProfile, CONFIG_VERSION } from '../js/core/config.js';
 import { ScanEngine, buildTree, DEFAULT_PHRASES } from '../js/scan/ScanEngine.js';
 import { Predictor } from '../js/lang/Predictor.js';
 import { MedianWindow, LowPass, AdaptiveBaseline, Hysteresis, BlinkDetector } from '../js/signal/filters.js';
@@ -138,6 +138,100 @@ feed(1000, t=>0.01*Math.sin(2*Math.PI*4*t/1000) - 0.08);
 feed(3000, t=>0.01*Math.sin(2*Math.PI*4*t/1000));
 ok(ev.length>=1, 'gradino rilevato come gesto (eventi: '+ev.length+')');
 ok(ev.some(e=>e.action==='SELECT'), 'gesto breve mappato su SELECT');
+
+/* ══════ Nessuna configurazione salvata deve poter bloccare l'avvio ══════
+ *
+ * ⚠️ È successo davvero, ed è il difetto peggiore che questo programma
+ * abbia avuto: una configurazione salvata illeggibile fermava il
+ * caricamento prima della fine, il pulsante per iniziare restava
+ * spento, e per chi comunica solo con Aurora significava restare
+ * senza voce — senza nemmeno un messaggio che spiegasse perché.
+ *
+ * La causa: `typeof null` vale 'object' in JavaScript. Un valore
+ * predefinito nullo superava il controllo come se fosse un oggetto, e
+ * `'samples' in null` sollevava un'eccezione.
+ *
+ * Il difetto era latente da sempre: serviva una calibrazione salvata
+ * per raggiungerlo, quindi si presentava solo a chi aveva davvero
+ * usato il programma a lungo. */
+{
+  /* Tutti i campi che nascono nulli: ognuno è una trappola potenziale,
+   * perché prima o poi qualcosa ci verrà salvato dentro. */
+  const nulli = [];
+  (function vai(o, via) {
+    for (const [k, v] of Object.entries(o || {})) {
+      if (v === null) nulli.push(via + k);
+      else if (typeof v === 'object' && !Array.isArray(v)) vai(v, `${via}${k}.`);
+    }
+  })(DEFAULT_CONFIG, '');
+  ok(nulli.length > 0, `ci sono ${nulli.length} campi con valore predefinito nullo`);
+
+  /* Per ciascuno: salvarci dentro un oggetto e ricaricare. */
+  for (const via of nulli) {
+    const salvata = { version: CONFIG_VERSION };
+    let n = salvata;
+    const parti = via.split('.');
+    for (let i = 0; i < parti.length - 1; i++) { n[parti[i]] = n[parti[i]] || {}; n = n[parti[i]]; }
+    n[parti[parti.length - 1]] = { qualcosa: [1, 2], altro: 'x' };
+    let esito = 'ok';
+    try { migrateConfig(salvata); } catch (e) { esito = e.message; }
+    ok(esito === 'ok', `un oggetto salvato in "${via}" non blocca l avvio (${esito})`);
+  }
+
+  /* Il caso reale che ha bloccato il programma. */
+  const reale = { version: CONFIG_VERSION, pointer: { calibrationData: {
+    samples: [{ ex: 0.1, ey: 0.2, sx: 100, sy: 200 }],
+    coefX: [1, 0, 0], coefY: [0, 1, 0], full: true, error: 12.3,
+    offset: { x: 0, y: 0 }, perPoint: [],
+  } } };
+  let c = null, errore = null;
+  try { c = migrateConfig(reale); } catch (e) { errore = e.message; }
+  ok(!errore, `una calibrazione salvata si ricarica (${errore || 'confermato'})`);
+  ok(c?.pointer?.calibrationData?.samples?.length === 1,
+     'e i campioni restano intatti: non si perde la taratura');
+  ok(Array.isArray(c?.pointer?.calibrationData?.coefX),
+     'compresi i coefficienti');
+
+  /* ⚠️ Una calibrazione può andare male in molti modi: interrotta a
+   * metà, senza campioni, con campi mancanti. Ognuno lascia nei dati
+   * salvati una forma diversa, e NESSUNA deve poter bloccare l'avvio —
+   * perché è proprio dopo una calibrazione andata male che si riapre
+   * il programma per riprovare. */
+  const modiDiRompersi = {
+    'interrotta a metà': { samples: [{ ex: 0.1, ey: 0.2, sx: 100, sy: 200 }],
+                           coefX: null, coefY: null, full: false, error: null,
+                           offset: null, perPoint: null },
+    'senza campioni': { samples: [], coefX: null, coefY: null },
+    'campi mancanti': { samples: [1, 2, 3] },
+    'oggetto vuoto': {},
+    'valori anomali': { samples: 'rotto', coefX: 42, offset: 'x' },
+    'annidata strana': { samples: [{ a: { b: { c: null } } }], offset: { x: null, y: null } },
+  };
+  for (const [nome, dati] of Object.entries(modiDiRompersi)) {
+    let err = null;
+    try { migrateConfig({ version: CONFIG_VERSION, pointer: { calibrationData: dati } }); }
+    catch (e) { err = e.message; }
+    ok(!err, `una calibrazione "${nome}" non blocca l avvio (${err || 'confermato'})`);
+  }
+
+  /* ⚠️ E la rete: se nonostante tutto la lettura fallisce, il
+   * programma parte dai predefiniti invece di non partire. Si perde
+   * una taratura, non la possibilità di parlare. */
+  const fsN = await import('node:fs');
+  const pathN = await import('node:path');
+  const quiN = pathN.dirname(import.meta.filename || process.argv[1]);
+  const main = fsN.readFileSync(pathN.join(quiN, '..', 'js/main.js'), 'utf8');
+  const iC = main.indexOf('this.cfg = migrateConfig');
+  const corpo = main.slice(iC - 200, iC + 900);
+  ok(/try \{[\s\S]*migrateConfig[\s\S]*\} catch/.test(corpo),
+     'la lettura delle impostazioni è protetta: un guasto non ferma l avvio');
+  ok(/deepClone\(DEFAULT_CONFIG\)/.test(corpo),
+     'e in quel caso si riparte dai valori predefiniti');
+  ok(/guasta/.test(corpo),
+     'conservando da parte la copia illeggibile, invece di cancellarla');
+  ok(/LS_CONFIG/.test(corpo),
+     'con la chiave vera, non una scritta a mano che un domani non corrisponderebbe');
+}
 
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

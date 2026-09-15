@@ -7,7 +7,7 @@
  */
 
 import { DEFAULT_CONFIG, migrateConfig, validateConfig, exportProfile, importProfile, deepClone } from './core/config.js';
-import { bus, saveConfig, loadConfig, saveStats, loadStats, appendLog } from './core/store.js';
+import { bus, saveConfig, loadConfig, saveStats, loadStats, appendLog, LS_CONFIG } from './core/store.js';
 import { GestureEngine } from './signal/GestureEngine.js';
 import { analizza as analizzaSegnale } from './signal/AutoTune.js';
 import { SessionStats } from './signal/SessionStats.js';
@@ -44,7 +44,42 @@ const COLORS = {
 
 class App {
   constructor() {
-    this.cfg = migrateConfig(loadConfig() || deepClone(DEFAULT_CONFIG));
+    /* ══════════════════════════════════════════════════════════════
+     * IL PROGRAMMA DEVE PARTIRE, SEMPRE
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Una configurazione salvata che non si riesce a leggere ha
+     * bloccato il programma all'avvio: un'eccezione qui ferma il
+     * caricamento prima della fine, il pulsante per iniziare resta
+     * spento, e per chi comunica solo con Aurora questo significa
+     * restare senza voce — senza nemmeno un messaggio che spieghi
+     * perché.
+     *
+     * Nessun difetto in un file di impostazioni deve poter arrivare a
+     * tanto. Se la lettura fallisce si riparte dai valori predefiniti,
+     * conservando il file guasto da parte: si perde una taratura, non
+     * la possibilità di parlare.
+     */
+    try {
+      this.cfg = migrateConfig(loadConfig() || deepClone(DEFAULT_CONFIG));
+    } catch (e) {
+      console.error('[aurora] impostazioni illeggibili, si riparte dai predefiniti:', e);
+      try {
+        const grezza = localStorage.getItem(LS_CONFIG);
+        if (grezza) localStorage.setItem(`${LS_CONFIG}.guasta`, grezza);
+      } catch { /* spazio esaurito: si procede comunque */ }
+      this.cfg = deepClone(DEFAULT_CONFIG);
+      this._configRipristinata = String(e?.message || e).slice(0, 200);
+    }
+
+    /* Lo si dice, appena c'è modo di dirlo: chi assiste deve sapere
+     * che la taratura è tornata ai valori di fabbrica, altrimenti
+     * passerebbe ore a chiedersi perché tutto si comporta diversamente. */
+    if (this._configRipristinata) {
+      setTimeout(() => this.toast?.(
+        'Impostazioni illeggibili: ripartito dai valori predefiniti. '
+        + `La copia guasta è conservata come "${LS_CONFIG}.guasta".`, true), 1500);
+    }
 
     this.predictor = new Predictor(this.cfg, loadStats());
     if (this.predictor.phrases.size === 0) this.predictor.seedPhrases(DEFAULT_PHRASES);

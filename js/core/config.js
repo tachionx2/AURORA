@@ -1232,6 +1232,23 @@ export function deepClone(o) { return JSON.parse(JSON.stringify(o)); }
 export function mergeConfig(base, patch) {
   if (patch === null || patch === undefined) return deepClone(base);
   if (Array.isArray(base)) return Array.isArray(patch) ? deepClone(patch) : deepClone(base);
+  /* ⚠️ `typeof null` vale 'object' in JavaScript.
+   *
+   * È una stranezza storica del linguaggio, e qui bloccava il
+   * programma all'avvio. Un valore predefinito nullo — per esempio i
+   * dati di calibrazione, che nascono `null` — superava il controllo
+   * come se fosse un oggetto, e poi `'samples' in null` sollevava
+   * un'eccezione che fermava il caricamento prima della fine: il
+   * pulsante per iniziare restava spento, e l'unico modo di uscirne
+   * era svuotare i dati salvati.
+   *
+   * Il difetto era latente da sempre: serviva una calibrazione salvata
+   * per raggiungerlo, quindi si presentava solo a chi aveva davvero
+   * usato il programma.
+   *
+   * Quando il valore predefinito è nullo, ciò che conta è il valore
+   * salvato: non c'è nessuna struttura con cui fonderlo. */
+  if (base === null) return deepClone(patch);
   if (typeof base !== 'object') return patch !== undefined ? patch : base;
   const out = deepClone(base);
   for (const k of Object.keys(patch)) {

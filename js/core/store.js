@@ -31,7 +31,10 @@ export const bus = new Bus();
 
 /* --------------------------- Persistenza --------------------------- */
 
-const LS_CONFIG = 'aurora.config.v3';
+/* Esportata: chi deve mettere da parte una configurazione illeggibile
+ * non deve riscrivere il nome a mano, altrimenti il giorno che cambia
+ * la copia di sicurezza salva la chiave sbagliata in silenzio. */
+export const LS_CONFIG = 'aurora.config.v3';
 const LS_STATS  = 'aurora.stats.v3';
 const LS_LOG    = 'aurora.log.v3';
 
