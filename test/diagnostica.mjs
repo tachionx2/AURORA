@@ -3445,5 +3445,68 @@ function corri(mod, script) {
   }
 }
 
+/* ══════ Chiusura prolungata: il canale che non emetteva nulla ══════
+ *
+ * ⚠️ `LONG_CLOSE` era dichiarato nelle impostazioni, con tanto di
+ * cursori per la durata, ma nel motore non generava alcun evento:
+ * compariva solo per accendere la misura dell'apertura palpebrale.
+ *
+ * In diagnostica la chiusura si vedeva benissimo, con il tempo che
+ * scorreva oltre la soglia — e non diventava mai un comando. Peggio
+ * che assente: prometteva un comportamento preciso senza darne alcuno.
+ */
+{
+  function tieniChiuso(dwell, tieniMs, extra = {}) {
+    const ev = [];
+    const c = deepClone(DEFAULT_CONFIG);
+    c.gestures.LONG_CLOSE = { enabled: true, action: 'TOGGLE_PAUSE',
+                              dwellMs: dwell, maxMs: 8000, ...extra };
+    c.gestures.BLINK.enabled = false;
+    const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const o = (ap) => ({ x: 0, y: 0, openness: ap, confidence: 0.95 });
+    for (let i = 0; i < 150; i++) { t += 33; g.process(t, { left: o(0.30), right: o(0.30) }); }
+    for (let i = 0; i < Math.round(tieniMs / 33); i++) { t += 33; g.process(t, { left: o(0.02), right: o(0.02) }); }
+    for (let i = 0; i < 60; i++) { t += 33; g.process(t, { left: o(0.30), right: o(0.30) }); }
+    return ev.filter(e => e.channel === 'LONG_CLOSE');
+  }
+
+  ok(tieniChiuso(2500, 1000).length === 0, '65a. una chiusura breve non è un comando');
+  ok(tieniChiuso(2500, 2000).length === 0, '65b. nemmeno una appena sotto soglia');
+  ok(tieniChiuso(2500, 3000).length === 1, '65c. sopra soglia il comando parte');
+
+  /* ⚠️ UNA volta sola. Emettendo a ogni fotogramma sopra soglia,
+   * tenere gli occhi chiusi cinque secondi manderebbe centocinquanta
+   * comandi. */
+  const lunga = tieniChiuso(2500, 6000);
+  ok(lunga.length === 1,
+     `65d. tenendo chiuso sei secondi parte UN comando solo (${lunga.length})`);
+  ok(lunga[0] && lunga[0].durMs >= 2500 && lunga[0].durMs < 3200,
+     `65e. e scatta alla soglia, non alla fine (${lunga[0] ? Math.round(lunga[0].durMs) : '—'} ms)`);
+
+  /* Sopra `maxMs` non è più un comando: è una persona che riposa, o
+   * una telecamera che ha perso il volto. */
+  ok(tieniChiuso(1000, 9000, { maxMs: 3000 }).length === 0 ||
+     tieniChiuso(1000, 9000, { maxMs: 3000 })[0].durMs <= 3000,
+     '65f. oltre il limite massimo non si emette');
+
+  /* ⚠️ E il canale resta SPENTO di default: chi non lo usa non cambia
+   * comportamento. */
+  ok(DEFAULT_CONFIG.gestures.LONG_CLOSE.enabled === false,
+     '65g. spento di default: nessuna regressione per chi non lo usa');
+
+  const spento = (() => {
+    const ev = [];
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const o = (ap) => ({ x: 0, y: 0, openness: ap, confidence: 0.95 });
+    for (let i = 0; i < 150; i++) { t += 33; g.process(t, { left: o(0.30), right: o(0.30) }); }
+    for (let i = 0; i < 200; i++) { t += 33; g.process(t, { left: o(0.02), right: o(0.02) }); }
+    return ev.filter(e => e.channel === 'LONG_CLOSE');
+  })();
+  ok(spento.length === 0, '65h. e a canale spento non emette nulla');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

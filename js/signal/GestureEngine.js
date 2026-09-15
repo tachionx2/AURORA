@@ -1110,6 +1110,11 @@ export class GestureEngine {
       // tenuto tre secondi è un evento solo, non centocinquanta.
       this._emettiBlink(t, raffiche);
     }
+    /* ⚠️ La chiusura prolungata si valuta SEMPRE, anche quando il
+     * conteggio degli ammiccamenti è sospeso: sono due canali distinti,
+     * e tenere gli occhi chiusi deve funzionare anche quando ammiccare
+     * no. */
+    this._chiusuraLunga(t, chiuso);
     return out;
   }
 
@@ -1431,6 +1436,76 @@ export class GestureEngine {
         this._emit(t, E.key, cfgCanale.action, { durMs, espressione: E.id });
       }
     }
+  }
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * CHIUSURA PROLUNGATA
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ⚠️ Il canale era dichiarato ma non emetteva NULLA.
+   *
+   * `LONG_CLOSE` compariva solo per accendere la misura dell'apertura
+   * palpebrale — ed è per questo che in diagnostica la chiusura si
+   * vedeva benissimo, con il tempo che scorreva oltre la soglia, ma
+   * non diventava mai un comando. Le impostazioni mostravano perfino i
+   * cursori per la durata, che nessuno leggeva: peggio che assente,
+   * perché prometteva un comportamento preciso senza darne alcuno.
+   *
+   * Qui la misura diventa un evento. Tre cose contano:
+   *
+   * · UNA volta sola per chiusura. Emettendo a ogni fotogramma sopra
+   *   soglia, tenere gli occhi chiusi cinque secondi manderebbe
+   *   centocinquanta comandi.
+   *
+   * · Sopra `maxMs` non si emette più: quella non è una persona che
+   *   comanda, è una che riposa o una telecamera che ha perso il volto.
+   *
+   * · L'ammiccamento va SOPPRESSO quando la chiusura diventa lunga.
+   *   Ogni chiusura prolungata comincia come un ammiccamento, e senza
+   *   questo i due canali si contenderebbero lo stesso gesto.
+   */
+  _chiusuraLunga(t, chiuso) {
+    const c = this.cfg.gestures?.LONG_CLOSE;
+    this._cl = this._cl || { da: null, emesso: false };
+    if (!c?.enabled) { this._cl.da = null; this._cl.emesso = false; return; }
+
+    /* Chi deve essere chiuso: si rispetta la scelta "un occhio" o
+     * "entrambi" come per ogni altro canale di palpebra. */
+    const inGioco = this._eyesInPlay();
+    const richiedeEntrambi = (this.cfg.gestures.eye || 'any') === 'both';
+    const stati = inGioco.map(e => chiuso[e]);
+    const tuttiChiusi = stati.length > 0 && stati.every(v => v === true);
+    const almenoUno = stati.some(v => v === true);
+    const ora = richiedeEntrambi ? tuttiChiusi : almenoUno;
+
+    if (!ora) { this._cl.da = null; this._cl.emesso = false; return; }
+
+    if (this._cl.da == null) { this._cl.da = t; this._cl.emesso = false; }
+    const durMs = t - this._cl.da;
+    this.counters.chiusuraMs = durMs;
+
+    if (this._cl.emesso) return;
+    const dwell = c.dwellMs ?? 1500;
+    const max = c.maxMs ?? 99000;
+    if (durMs < dwell) return;
+    if (durMs > max) {
+      this.counters.rejected++;
+      this.counters.lastRejectReason = 'chiusura troppo lunga';
+      this._cl.emesso = true;               // non riprovare su questa chiusura
+      return;
+    }
+
+    /* ⚠️ In pausa passano solo i comandi che servono a USCIRNE.
+     * È la stessa regola degli altri canali: durante una pausa il
+     * programma non deve fare altro che aspettare di essere svegliato. */
+    const soloRisveglio = this.paused;
+    if (soloRisveglio && c.action !== 'WAKE' && c.action !== 'TOGGLE_PAUSE') return;
+
+    this._cl.emesso = true;
+    /* L'ammiccamento non deve scattare per la stessa chiusura. */
+    for (const e of ['left', 'right']) this.burst[e]?.annulla?.();
+    this._emit(t, 'LONG_CLOSE', c.action, { durMs });
   }
 
   /** Emette l'evento corrispondente, se un canale lo prevede. */
