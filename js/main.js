@@ -622,6 +622,28 @@ class App {
     this.toast(`"${text}"`);
   }
 
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * DUE PAUSE DIVERSE CHE USAVANO LA STESSA VARIABILE
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ⚠️ «La persona vuole riposare» e «la voce guida qui non serve» non
+   * sono la stessa cosa, ma condividevano `scan.paused`.
+   *
+   * La conseguenza: entrando nella scheda Punta la scansione veniva
+   * sospesa — giusto — e con essa veniva messo a riposo il MOTORE DEI
+   * GESTI, che a quel punto smette di emettere tutto tranne i comandi
+   * di risveglio. Le bande a scorrimento non ricevevano più né la
+   * selezione né altro: il gesto moriva alla sorgente, molto prima di
+   * arrivare a chi doveva usarlo.
+   *
+   * I gesti sono l'unico canale d'ingresso della persona, in OGNI
+   * scheda. Solo una pausa CHIESTA da lei deve fermarli.
+   */
+  _pausaVoluta() {
+    return !!this.scan.paused && !this._pausaAutomatica;
+  }
+
   onGesture(e) {
     try {
       this.sessione?.gesto(e);
@@ -665,7 +687,13 @@ class App {
        * Le bande sono il cursore di chi ha un solo gesto: deve poterle
        * fermare per guardare un video o riposare, e RIACCENDERLE da
        * sé. Senza, fermarle equivarrebbe a spegnere il programma. */
-      if (e.action === 'PAUSE' || e.action === 'WAKE') {
+      /* ⚠️ Tutti e TRE i nomi dell'azione di pausa.
+       *
+       * Mancava `TOGGLE_PAUSE`, che è proprio quello che si imposta
+       * dalle impostazioni: il gesto cadeva fuori di qui, finiva alla
+       * scansione e metteva in pausa quella — che in questa scheda non
+       * sta girando. Da fuori sembrava che non succedesse nulla. */
+      if (e.action === 'TOGGLE_PAUSE' || e.action === 'PAUSE' || e.action === 'WAKE') {
         if (this.stripe.active) {
           this.stripe.cancel();
           this._bandeSospese = true;
@@ -692,7 +720,7 @@ class App {
     if (this._pausaAutomatica && document.body.dataset.tab !== 'parla') return;
 
     this.scan.handleAction(e.action, performance.now());
-    this.gestures.setPaused(this.scan.paused);
+    this.gestures.setPaused(this._pausaVoluta());
   }
 
   /**
@@ -3465,7 +3493,7 @@ class App {
       // separazione fra pausa e risveglio serve ai GESTI, dove una
       // tenuta un po' lunga non deve poter mettere in pausa.
       this.scan.handleAction('TOGGLE_PAUSE', performance.now());
-      this.gestures.setPaused(this.scan.paused);
+      this.gestures.setPaused(this._pausaVoluta());
     };
     document.getElementById('btnSelect').onclick = () => this.gestures.injectKey('SELECT');
     document.getElementById('btnUndo').onclick = () => this.gestures.injectKey('UNDO');

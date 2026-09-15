@@ -567,5 +567,64 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '71. e le bande non ripartono da sole: restano al loro pulsante');
 }
 
+/* ══════ I gesti devono arrivare alle bande ══════
+ *
+ * ⚠️ Nella scheda Punta nessun gesto funzionava: né selezionare per
+ * fermare la banda, né mettere in pausa, né riprendere.
+ *
+ * Due cause diverse con lo stesso sintomo — ed è il motivo per cui
+ * correggerne una sola avrebbe risolto metà problema.               */
+{
+  const fsG = await import('node:fs');
+  const pathG = await import('node:path');
+  const quiG = pathG.dirname(import.meta.filename || process.argv[1]);
+  const main = fsG.readFileSync(pathG.join(quiG, '..', 'js/main.js'), 'utf8');
+
+  /* ⚠️ CAUSA 1: due pause diverse che usavano la stessa variabile.
+   *
+   * «La persona vuole riposare» e «la voce guida qui non serve»
+   * condividevano `scan.paused`. Entrando in Punta la scansione veniva
+   * sospesa — giusto — e con essa il MOTORE DEI GESTI, che smette di
+   * emettere tutto tranne i comandi di risveglio. La selezione moriva
+   * alla sorgente, molto prima di arrivare alle bande.
+   *
+   * I gesti sono l'unico canale d'ingresso della persona, in OGNI
+   * scheda: solo una pausa CHIESTA da lei deve fermarli. */
+  ok(/_pausaVoluta\(\) \{[\s\S]{0,120}!this\._pausaAutomatica/.test(main),
+     '72. la pausa voluta è distinta dalla sospensione automatica');
+  ok(!/setPaused\(this\.scan\.paused\)/.test(main),
+     '73. il motore dei gesti non segue più la sospensione automatica');
+  ok((main.match(/setPaused\(this\._pausaVoluta\(\)\)/g) || []).length >= 2,
+     '74. e la distinzione è applicata in tutti i punti che lo mettono in pausa');
+
+  // La logica, verificata sui quattro stati possibili.
+  const pausaVoluta = (paused, auto) => !!paused && !auto;
+  ok(pausaVoluta(true, false) === true,
+     '75. una pausa chiesta dalla persona ferma i gesti, come prima');
+  ok(pausaVoluta(true, true) === false,
+     '76. una sospensione automatica NON li ferma: servono nelle altre schede');
+  ok(pausaVoluta(false, false) === false, '77. a scansione attiva i gesti passano');
+
+  /* ⚠️ CAUSA 2: il blocco delle bande riconosceva due nomi su tre.
+   *
+   * Mancava `TOGGLE_PAUSE`, che è proprio quello impostato dalle
+   * impostazioni: il gesto cadeva fuori, finiva alla scansione e
+   * metteva in pausa quella — che in questa scheda non sta girando. */
+  const iB = main.indexOf('if (bandeInUso) {');
+  const blocco = main.slice(iB, iB + 1600);
+  for (const nome of ['TOGGLE_PAUSE', 'PAUSE', 'WAKE']) {
+    ok(blocco.includes(`'${nome}'`),
+       `78. le bande riconoscono l azione "${nome}"`);
+  }
+  ok(/e\.action === 'SELECT'/.test(blocco), '79. e la selezione');
+  ok(/e\.action === 'UNDO'/.test(blocco), '80. e l annullamento');
+
+  /* ⚠️ E lo smistamento alle bande deve restare PRIMA della guardia
+   * sulla sospensione: altrimenti quella le intercetterebbe tutte. */
+  const iGuardia = main.indexOf("this._pausaAutomatica && document.body.dataset.tab !== 'parla'");
+  ok(iB > 0 && iGuardia > iB,
+     '81. le bande ricevono il gesto prima che la guardia sulla scansione intervenga');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);
