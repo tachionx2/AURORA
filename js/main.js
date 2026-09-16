@@ -35,7 +35,7 @@ import { GazePointer } from './pointer/GazePointer.js';
 import { StripeCursor } from './pointer/StripeCursor.js';
 import { PointerOverlay } from './pointer/PointerOverlay.js';
 import { DeviceLink } from './device/DeviceLink.js';
-import { MediaPlayer, youtubeId } from './media/MediaPlayer.js';
+import { MediaPlayer, youtubeId, COMMANDS_BY_KIND } from './media/MediaPlayer.js';
 
 const COLORS = {
   bg: '#0A0F14', text: '#EEF4F7', muted: '#7C93A4',
@@ -111,7 +111,13 @@ class App {
       onOutput: (kind, text) => this.onOutput(kind, text),
       onBuffer: (b) => this.onBuffer(b),
       wakeHint: () => this.wakeHint(),
-      onMedia: (cmd) => this.media.command(cmd),
+      /* ⚠️ Il comando va a CHI sta suonando.
+       *
+       * La radio non passa dal riproduttore dei file: mandandole i
+       * comandi di quello, non succedeva nulla. */
+      onMedia: (cmd) => (this.media.active
+        ? this.media.command(cmd)
+        : this.comandoRadio(cmd)),
       onMediaOpen: (sel) => this.apriDallaLibreria(sel),
       onDraft: (op, arg) => this.onDraft(op, arg),
       onAsk: (testo) => this.chiediAssistente(testo),
@@ -348,9 +354,14 @@ class App {
     this.scan.setContext({
       suggestions: sugg,
       phrases: this.predictor.topPhrases(this.cfg.scan.phraseCount || 12),
-      mediaCommands: this.media.active ? this.media.commands() : null,
-      mediaLabel: this.media.active ? this.mediaLabel() : null,
-      mediaSpoken: this.media.active ? 'comandi' : null,
+      /* ⚠️ Anche la RADIO ha i suoi comandi.
+       *
+       * Non passa dal riproduttore dei file — è un flusso continuo
+       * gestito a parte — e per questo restava senza: chi la faceva
+       * partire non poteva più fermarla, cambiarla o chiuderla. */
+      mediaCommands: this._comandiCorrenti(),
+      mediaLabel: this._comandiCorrenti() ? this.mediaLabel() : null,
+      mediaSpoken: this._comandiCorrenti() ? 'comandi' : null,
       drafts: this.drafts.list.map(d => ({ id: d.id, title: d.title })),
       hasText: !!(b.words.length || b.letters.trim()),
       library: this.libreriaPerScansione(),
@@ -2553,7 +2564,57 @@ class App {
    * Un nome unico e neutro: cambia il tipo di file ma non il posto nel
    * menu, e chi lo usa non deve reimparare nulla ogni volta.
    */
-  mediaLabel() { return 'COMANDI FILE'; }
+  /**
+   * Esegue un comando sulla radio.
+   *
+   * ⚠️ Niente avanti e indietro di quindici secondi: su una diretta
+   * non significano nulla, e infatti non compaiono fra i comandi.
+   */
+  comandoRadio(cmd) {
+    const el = this.radioEl;
+    if (!el) return;
+    const st = this.cfg.radio?.stazioni || [];
+    const i = Math.max(0, st.findIndex(x => x.nome === this.radioNome));
+    switch (cmd) {
+      case 'playPause':
+        if (el.paused) el.play().catch(() => {}); else el.pause();
+        break;
+      case 'volUp':
+        el.volume = Math.min(1, (el.volume || 0) + 0.1);
+        break;
+      case 'volDown':
+        el.volume = Math.max(0, (el.volume || 0) - 0.1);
+        break;
+      case 'next':
+        if (st.length > 1) this.apriRadio(st[(i + 1) % st.length]);
+        break;
+      case 'prev':
+        if (st.length > 1) this.apriRadio(st[(i - 1 + st.length) % st.length]);
+        break;
+      case 'exit':
+        try { el.pause(); el.src = ''; } catch {}
+        this.radioNome = null;
+        document.body.classList.remove('has-radio');
+        /* La voce guida torna da sé: era stata messa in pausa solo
+         * perché ci si sovrapponeva. */
+        if (this._pausaPerMedia) { this._pausaPerMedia = false; this.scan.paused = false; }
+        this.refreshContext();
+        break;
+      default: break;
+    }
+    this.refreshContext();
+  }
+
+  /** I comandi da mostrare: del riproduttore, o della radio. */
+  _comandiCorrenti() {
+    if (this.media.active) return this.media.commands();
+    if (this.radioEl && !this.radioEl.paused) return COMMANDS_BY_KIND.radio;
+    return null;
+  }
+
+  // Solo "COMANDI": più corto, e vale anche per la radio, che un file
+  // non è.
+  mediaLabel() { return 'COMANDI'; }
 
   onMediaEvent(e) {
     // Il titolo serve a ricordare a che punto si era arrivati in

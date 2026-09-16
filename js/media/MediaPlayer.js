@@ -94,7 +94,14 @@ export const COMMANDS_BY_KIND = {
     { id: MediaCommand.BACK,       label: '⏪ 15 s',      spoken: 'indietro quindici secondi' },
     { id: MediaCommand.VOL_UP,     label: '🔊 +VOL',      spoken: 'più volume' },
     { id: MediaCommand.VOL_DOWN,   label: '🔉 −VOL',      spoken: 'meno volume' },
+    /* ⚠️ Avanti e indietro scorrono i video che l'assistente ha
+     * caricato in MEDIA, non i suggerimenti di YouTube.
+     *
+     * Il comando "precedente" esisteva già nel riproduttore ma non
+     * compariva nel menu: chi superava per sbaglio un video non aveva
+     * modo di tornarci, e doveva uscire e rientrare dall'elenco. */
     { id: MediaCommand.NEXT,       label: '⏭',           spoken: 'video successivo' },
+    { id: MediaCommand.PREV,       label: '⏮',           spoken: 'video precedente' },
   ],
   pdf: [
     { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
@@ -114,6 +121,22 @@ export const COMMANDS_BY_KIND = {
     { id: MediaCommand.READ_RESTART, label: '⏮ inizio', spoken: 'ricomincia dall inizio' },
     { id: MediaCommand.ZOOM_IN,    label: '🔍+',         spoken: 'ingrandisci' },
     { id: MediaCommand.ZOOM_OUT,   label: '🔍−',         spoken: 'rimpicciolisci' },
+  ],
+  /* ⚠️ La radio ha i suoi comandi.
+   *
+   * Non passa dal riproduttore dei file — è un flusso continuo gestito
+   * a parte — e per questo restava SENZA alcun comando: chi la faceva
+   * partire non poteva più fermarla, né cambiarla, né chiuderla.
+   *
+   * Niente avanti e indietro di quindici secondi: su una diretta non
+   * significano nulla. */
+  radio: [
+    { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
+    { id: MediaCommand.PLAY_PAUSE, label: '⏯',           spoken: 'pausa o riprendi' },
+    { id: MediaCommand.VOL_UP,     label: '🔊 +VOL',      spoken: 'più volume' },
+    { id: MediaCommand.VOL_DOWN,   label: '🔉 −VOL',      spoken: 'meno volume' },
+    { id: MediaCommand.NEXT,       label: '⏭',           spoken: 'radio successiva' },
+    { id: MediaCommand.PREV,       label: '⏮',           spoken: 'radio precedente' },
   ],
   image: [
     { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
@@ -179,16 +202,46 @@ export class MediaPlayer {
    */
   abbassaVolume(quota) {
     if (this.el) {
-      if (this._volPieno == null) this._volPieno = this.el.volume;
-      this.el.volume = Math.max(0, Math.min(1, this._volPieno * quota));
-      if (quota >= 1) this._volPieno = null;
+      // Stessa regola per i file: si ripristina il valore ricordato.
+      if (quota >= 1) {
+        const pieno = this._volPieno;
+        this._volPieno = null;
+        if (Number.isFinite(pieno) && pieno > 0) this.el.volume = Math.min(1, pieno);
+        return;
+      }
+      if (this._volPieno == null) {
+        const v = this.el.volume;
+        this._volPieno = (Number.isFinite(v) && v > 0.2) ? v : 1;
+      }
+      this.el.volume = Math.max(0.01, Math.min(1, this._volPieno * quota));
     }
     if (this.yt?.setVolume) {
-      if (this._volYt == null) {
-        try { this._volYt = this.yt.getVolume?.() ?? 100; } catch { this._volYt = 100; }
+      /* ⚠️ Il volume pieno si ricorda alla PRIMA riduzione e si
+       * ripristina per intero, invece di rimoltiplicarlo.
+       *
+       * Qui il video restava muto: una seconda riduzione catturava il
+       * volume GIÀ ridotto come se fosse quello pieno, e da lì ogni
+       * ripristino riportava a quel valore — sempre più basso, fino a
+       * zero. E l'audio non tornava nemmeno mettendo in pausa e
+       * riprendendo, perché il valore "pieno" ormai memorizzato era
+       * sbagliato. */
+      if (quota >= 1) {
+        // Ripristino: si torna al valore ricordato, non a un prodotto.
+        const pieno = this._volYt;
+        this._volYt = null;
+        if (Number.isFinite(pieno) && pieno > 0) {
+          try { this.yt.setVolume(Math.max(1, Math.min(100, pieno))); } catch {}
+        }
+        return;
       }
-      try { this.yt.setVolume(Math.max(0, Math.min(100, this._volYt * quota))); } catch {}
-      if (quota >= 1) this._volYt = null;
+      if (this._volYt == null) {
+        let v = 100;
+        try { v = this.yt.getVolume?.(); } catch { v = 100; }
+        // ⚠️ Un valore già basso non è il volume pieno: è una riduzione
+        // ancora in corso. Meglio tornare al massimo che restare muti.
+        this._volYt = (Number.isFinite(v) && v > 20) ? v : 100;
+      }
+      try { this.yt.setVolume(Math.max(1, Math.min(100, this._volYt * quota))); } catch {}
     }
   }
 

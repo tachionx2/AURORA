@@ -2315,5 +2315,85 @@ app.goto('parla');
      'e riprova se il flusso è lento, invece di chiedere di toccare lo schermo a chi non può');
 }
 
+/* ══════ La radio deve avere i suoi comandi ══════
+ *
+ * ⚠️ La radio non passa dal riproduttore dei file — è un flusso
+ * continuo gestito a parte — e per questo restava SENZA alcun comando:
+ * chi la faceva partire non poteva più fermarla, cambiarla o
+ * chiuderla. Per chi comanda con un gesto solo, un contenuto che non
+ * si può spegnere è una trappola.                                    */
+{
+  const { COMMANDS_BY_KIND: CR, MediaCommand: MCR } = await import('../js/media/MediaPlayer.js');
+  const fsRr = await import('node:fs');
+  const pathRr = await import('node:path');
+  const quiRr = pathRr.dirname(import.meta.filename || process.argv[1]);
+  const mainRr = fsRr.readFileSync(pathRr.join(quiRr, '..', 'js/main.js'), 'utf8');
+
+  ok(Array.isArray(CR.radio) && CR.radio.length >= 4,
+     `la radio ha i suoi comandi (${CR.radio?.length || 0})`);
+  ok(CR.radio[0].id === MCR.EXIT, 'con "chiudi" per primo, come gli altri');
+  const idsR = CR.radio.map(c => c.id);
+  for (const [id, nome] of [[MCR.PLAY_PAUSE, 'pausa e ripresa'], [MCR.VOL_UP, 'più volume'],
+                            [MCR.NEXT, 'stazione successiva'], [MCR.PREV, 'stazione precedente']]) {
+    ok(idsR.includes(id), `e ${nome}`);
+  }
+  /* ⚠️ Niente avanti e indietro di quindici secondi: su una diretta
+   * non significano nulla, e sarebbero due voci in più da attendere a
+   * ogni giro della scansione. */
+  ok(!idsR.includes(MCR.FORWARD) && !idsR.includes(MCR.BACK),
+     'ma non avanti e indietro, che su una diretta non vogliono dire nulla');
+
+  ok(/comandoRadio\(cmd\)/.test(mainRr),
+     'e i comandi vengono eseguiti sulla radio, non mandati al riproduttore dei file');
+  ok(/this\.media\.active\s*\?\s*this\.media\.command/.test(mainRr),
+     'il comando va a chi sta davvero suonando');
+
+  /* ⚠️ Avanti E INDIETRO fra i video caricati dall'assistente.
+   *
+   * Il comando "precedente" esisteva già nel riproduttore ma non
+   * compariva nel menu: chi superava per sbaglio un video non aveva
+   * modo di tornarci, e doveva uscire e rientrare dall'elenco.
+   *
+   * Scorrono i video messi in MEDIA, non i suggerimenti di YouTube. */
+  const idsY = CR.youtube.map(c => c.id);
+  ok(idsY.includes(MCR.NEXT) && idsY.includes(MCR.PREV),
+     'i video si scorrono in avanti e indietro');
+  ok(CR.youtube.find(c => c.id === MCR.PREV)?.spoken === 'video precedente',
+     'e la voce guida lo dice per intero');
+
+  // "COMANDI", non "COMANDI FILE": vale anche per la radio, che file non è.
+  ok(/mediaLabel\(\) \{ return 'COMANDI'; \}/.test(mainRr),
+     'il menu si chiama solo COMANDI: più corto, e la radio non è un file');
+}
+
+/* ══════ Il volume non deve degradarsi ══════
+ *
+ * ⚠️ Il video restava muto: una seconda riduzione catturava il volume
+ * GIÀ ridotto come se fosse quello pieno, e da lì ogni ripristino
+ * riportava a quel valore — sempre più basso, fino a zero. E l'audio
+ * non tornava nemmeno mettendo in pausa e riprendendo, perché il
+ * valore "pieno" ormai memorizzato era sbagliato.                    */
+{
+  const fsV2 = await import('node:fs');
+  const pathV2 = await import('node:path');
+  const quiV2 = pathV2.dirname(import.meta.filename || process.argv[1]);
+  const mp2 = fsV2.readFileSync(pathV2.join(quiV2, '..', 'js/media/MediaPlayer.js'), 'utf8');
+
+  ok(/const pieno = this\._volYt;/.test(mp2),
+     'ripristinando si torna al valore RICORDATO, non a un prodotto');
+  ok(/v > 20\) \? v : 100/.test(mp2),
+     'e un valore già basso non viene scambiato per il volume pieno');
+
+  // La logica, provata su più annunci di seguito.
+  let vol = 100, mem = null;
+  const duck = (q) => {
+    if (q >= 1) { const p = mem; mem = null; if (p > 0) vol = Math.max(1, Math.min(100, p)); return; }
+    if (mem == null) mem = (vol > 20) ? vol : 100;
+    vol = Math.max(1, Math.min(100, mem * q));
+  };
+  for (let i = 0; i < 8; i++) { duck(0.15); duck(1); }
+  ok(vol === 100, `dopo otto annunci il volume è ancora pieno (${vol})`);
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);
