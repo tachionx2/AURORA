@@ -1,0 +1,8 @@
+{
+  "name": "aurora-funzioni",
+  "private": true,
+  "description": "Dipendenze del servizio di invio posta. Netlify le installa da solo al primo caricamento; senza questo file nodemailer non sarebbe disponibile e la funzione fallirebbe con 'modulo non trovato'.",
+  "dependencies": {
+    "nodemailer": "^6.9.14"
+  }
+}

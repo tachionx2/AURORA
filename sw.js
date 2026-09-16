@@ -15,7 +15,7 @@
  * inviati altrove.
  */
 
-const VERSION = 'aurora-20260916-0738';
+const VERSION = 'aurora-20260916-1424';
 const APP_CACHE = `${VERSION}-app`;
 const CDN_CACHE = `${VERSION}-cdn`;
 

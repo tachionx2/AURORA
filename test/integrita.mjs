@@ -327,6 +327,53 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
   }
 }
 
+/* ── Il servizio di invio posta è incluso e pronto ──
+ *
+ * ⚠️ Chi installa non deve creare né copiare file: doveva scriversi a
+ * mano la funzione copiandola dalle impostazioni, e un solo carattere
+ * sbagliato produceva un errore incomprensibile a chi non programma.
+ *
+ * Il file è inerte finché non viene configurato: senza le variabili
+ * d'ambiente risponde con un errore chiaro e si ferma. Chi non usa la
+ * posta può ignorarlo del tutto. */
+{
+  const fnPath = 'netlify/functions/invia-email.js';
+  const fn = read(fnPath);
+  ok(!!fn, 'il servizio di invio posta è incluso nel programma');
+  ok(read('netlify/functions/package.json'),
+     'con le sue dipendenze, che Netlify installa da solo');
+
+  /* ⚠️ Deve funzionare con QUALUNQUE provider, non solo Gmail: con
+   * Libero, Aruba, Outlook bastano indirizzo e password normali,
+   * mentre Gmail richiede una password per le applicazioni. */
+  ok(/MAIL_HOST/.test(fn) && /MAIL_PORT/.test(fn),
+     'si configura con server e porta espliciti, per qualunque provider');
+  ok(/MAIL_SERVICE/.test(fn),
+     'oppure con il nome abbreviato, per chi usa Gmail');
+  ok(/porta === 465/.test(fn),
+     'e distingue la porta cifrata dall inizio da quella che si cifra dopo');
+
+  /* Aperto nel browser deve dire se è pronto: è il modo più rapido di
+   * sapere se è stato caricato e configurato, senza spedire nulla. */
+  ok(/httpMethod === 'GET'/.test(fn) && /mancano/.test(fn),
+     'aperto nel browser dice se è pronto e quali variabili mancano');
+
+  /* ⚠️ E deve poter limitare i destinatari: senza, chi scopre
+   * l indirizzo del servizio può spedire a chiunque a nome della
+   * casella configurata. */
+  ok(/MAIL_ALLOWED/.test(fn),
+     'si possono limitare i destinatari ammessi');
+
+  /* Le credenziali NON devono comparire nelle impostazioni di Aurora:
+   * lì sarebbero leggibili da chiunque apra gli strumenti di sviluppo. */
+  const cfgSrc = read('js/core/config.js');
+  ok(!/mailPass|smtpPass|MAIL_PASS/.test(cfgSrc),
+     'nessuna password di posta è salvata nella configurazione del programma');
+
+  ok(/errore: String\(e && e\.message/.test(fn),
+     'un guasto riporta il motivo del provider, non un generico "non riuscito"');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 if (problems.length) { console.log('\nDA CORREGGERE:'); problems.forEach(p => console.log('  · ' + p)); }
 process.exit(fail ? 1 : 0);

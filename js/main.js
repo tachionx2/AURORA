@@ -491,6 +491,14 @@ class App {
 
   /** Un gesto durante la lettura la interrompe. */
   stopSpeaking() {
+    /* ⚠️ Fermare il parlato annulla SEMPRE anche la lettura della
+     * risposta dell'assistente, chiunque abbia chiesto di fermarsi:
+     * un gesto, la voce guida, il cambio di scheda.
+     *
+     * Senza, la lettura riprendeva da dove era rimasta appena la voce
+     * guida finiva — spezzata e ricucita a caso. Si fa qui, in un
+     * punto solo, perché ogni interruzione passa di qui. */
+    this._letturaAI = (this._letturaAI || 0) + 1;
     if (!this._speaking) return false;
     this._speaking.stop = true;
     this.audio.stop();
@@ -689,6 +697,9 @@ class App {
       if (e.action === 'SELECT') this.sessione?.selezione();
     } catch {}
     // Durante una lettura lunga, il primo gesto la ferma e basta.
+    /* ⚠️ Un gesto che zittisce il parlato annulla anche la lettura
+     * della risposta: altrimenti riprenderebbe da sola più tardi. */
+    this._letturaAI = (this._letturaAI || 0) + 1;
     if (this.cfg.drafts.stopSpeechOnGesture && this.stopSpeaking()) {
       this.audio.earcon('undo');
       this.debugView.logEvent(`${e.channel} → lettura interrotta`);
@@ -1127,7 +1138,21 @@ class App {
        * attiva lo si dice, invece di aprire una pagina rotta.
        */
       const chiedeVideo = /\s+(v|video|vid)\s*$/i.test(testo);
-      if (chiedeVideo && this.cfg.assistente?.ricercaWeb) {
+      if (chiedeVideo) {
+        /* ⚠️ Senza ricerca sul web lo si DICE, invece di far finta di
+         * niente.
+         *
+         * Prima, con la ricerca spenta, il testo diventava una domanda
+         * normale: chi aveva scritto «doc africa v» si sentiva
+         * rispondere a parole sull'Africa e non capiva perché il video
+         * non partisse. Un'opzione che non funziona va dichiarata, non
+         * nascosta. */
+        if (!this.cfg.assistente?.ricercaWeb) {
+          await this.audio.say(this.cfg.ui.language === 'en'
+            ? 'To find videos, turn on web search in settings'
+            : 'Per cercare video serve attivare la ricerca sul web nelle impostazioni', 'menu');
+          return;
+        }
         const argomento = testo.replace(/\s+(v|video|vid)\s*$/i, '').trim();
         if (argomento) return this.cercaEApriVideo(argomento);
       }
@@ -1155,14 +1180,31 @@ class App {
        * trappola per chi non può parlare. */
       const pezzi = this.cfg.assistente?.frasiSeparate === false
         ? [r.testo] : inFrasi(r.testo);
-      /* La risposta va sul canale della VOCE, non su quello dei menu:
-       * è un contenuto, non un annuncio, e deve poter avere volume e
-       * uscita audio propri. */
+      /* ══════════════════════════════════════════════════════════════
+       * ⚠️ UNA LETTURA INTERROTTA DEVE RESTARE INTERROTTA
+       * ══════════════════════════════════════════════════════════════
+       *
+       * La risposta si legge una frase per volta. Ma se nel frattempo
+       * la voce guida diceva la sua, la lettura riprendeva da dove era
+       * rimasta appena la guida finiva — come se nulla fosse successo.
+       * Chi ascolta sentiva la risposta spezzata e ricucita a caso, e
+       * non capiva più di che cosa stesse parlando.
+       *
+       * Il motivo: ogni frase era una chiamata a sé, e interrompere
+       * quella in corso non diceva nulla alle successive.
+       *
+       * Ora ogni lettura ha un contrassegno. Se ne comincia un'altra,
+       * o se qualcosa interrompe, il contrassegno cambia e le frasi
+       * rimaste si accorgono di appartenere a una lettura che non c'è
+       * più. */
+      const mio = (this._letturaAI = (this._letturaAI || 0) + 1);
       for (const f of pezzi) {
-        if (this._assistenteInterrotto) break;
+        if (this._letturaAI !== mio) break;
         await this.audio.say(f, 'speech', false);
+        /* Controllato anche DOPO: la frase può essere stata zittita
+         * mentre la si pronunciava, ed è proprio il caso frequente. */
+        if (this._letturaAI !== mio) break;
       }
-      this._assistenteInterrotto = false;
     } catch (e) {
       this._safe('assistente', () => { throw e; });
     }

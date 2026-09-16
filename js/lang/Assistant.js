@@ -98,16 +98,30 @@ export const PROVIDER_AI = {
  * ascolta non può dire "basta" con la stessa facilità con cui si
  * distoglie lo sguardo.
  */
-export function istruzione(maxParole) {
+export function istruzione(maxParole, lingua = 'it') {
   const n = Math.max(10, Math.round(maxParole || 100));
+  /* ⚠️ La lingua va ripetuta, e in modo perentorio.
+   *
+   * I modelli gratuiti sono piccoli e con un testo di partenza corto e
+   * troncato — «DOC AFRICA» — perdono facilmente la lingua: rispondono
+   * in un misto di spagnolo, rumeno e inglese. Per chi ascolta e non
+   * può rileggere, una risposta in una lingua che non conosce è una
+   * risposta persa del tutto.
+   *
+   * Dirlo una volta sola all'inizio non basta: va detto all'inizio e
+   * ribadito alla fine, che è il punto che il modello ha più fresco. */
+  const L = lingua === 'en' ? 'ENGLISH' : 'ITALIANO';
   return [
-    `Rispondi in italiano usando AL MASSIMO ${n} parole.`,
+    `Rispondi SEMPRE e SOLTANTO in ${L}, qualunque sia la lingua della domanda.`,
+    `Rispondi in ${L} usando AL MASSIMO ${n} parole.`,
     'La risposta verrà LETTA AD ALTA VOCE a una persona che non può interromperti,',
     'quindi vai al punto senza premesse, elenchi o formattazione.',
     'Se la domanda è ambigua, scegli l\'interpretazione più probabile e rispondi:',
     'chiedere chiarimenti costa a chi ascolta molto più che a te.',
     `Preferisci una risposta completa e più corta di ${n} parole a una risposta`,
     'che si interrompe a metà.',
+    `Anche se la domanda è breve, incompleta o abbreviata, interpretala e rispondi in ${L}.`,
+    `RICORDA: massimo ${n} parole, lingua ${L}.`,
   ].join(' ');
 }
 
@@ -170,8 +184,9 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
    * sicurezza contro una risposta interminabile, non come strumento
    * di misura. */
   const nParole = opzioni.maxParole || A.maxParole || 100;
+  const lingua = opzioni.lingua || cfg?.ui?.language || 'it';
   const testoIstruzione = opzioni.istruzione
-    || ((A.istruzione && A.istruzione.trim()) ? A.istruzione : istruzione(nParole));
+    || ((A.istruzione && A.istruzione.trim()) ? A.istruzione : istruzione(nParole, lingua));
   /* ⚠️ Il tetto tecnico segue il limite chiesto, invece di essere
    * fisso: con un tetto a quattromila token una richiesta da duemila
    * parole sarebbe stata tagliata a metà — e il taglio è proprio ciò
@@ -260,7 +275,8 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
  * Con la ricerca attiva l'assistente guarda davvero, e l'indirizzo che
  * restituisce è un indirizzo che ha visto.
  */
-export const ISTRUZIONE_VIDEO = [
+export const ISTRUZIONE_VIDEO = (lingua = 'it') => [
+  `Cerca video in ${lingua === 'en' ? 'inglese' : 'italiano'} se esistono.`,
   'Cerca su internet e restituisci UN SOLO video di YouTube, il più pertinente',
   'e in lingua italiana se esiste.',
   'Rispondi ESATTAMENTE in questa forma, senza aggiungere altro:',
@@ -287,7 +303,7 @@ export async function cercaVideo(cfg, argomento) {
   if (!A?.enabled) return { ok: false, errore: 'assistente non attivo' };
   if (!A.ricercaWeb) return { ok: false, errore: 'la ricerca sul web non è attiva' };
   const r = await chiedi(cfg, `Trova un video su: ${argomento}`, {
-    istruzione: ISTRUZIONE_VIDEO, ricerca: true, maxParole: 40,
+    istruzione: ISTRUZIONE_VIDEO(cfg?.ui?.language || 'it'), ricerca: true, maxParole: 40,
   });
   if (!r.ok) return { ok: false, errore: r.errore };
   if (/^\s*NIENTE/i.test(r.testo)) return { ok: false, errore: 'nessun video trovato' };

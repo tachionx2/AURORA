@@ -1790,6 +1790,62 @@ app.goto('parla');
    * gratuiti disponibili, e non costa nulla — né il router né le
    * richieste che instrada. `openrouter/auto` invece sceglie fra
    * TUTTI, anche a pagamento. */
+  /* ══════ Quattro difetti trovati provando l'assistente ══════ */
+
+  /* ⚠️ 1. LA LINGUA. I modelli gratuiti sono piccoli, e con un testo
+   * di partenza corto e troncato — «DOC AFRICA» — perdono la lingua:
+   * rispondono in un misto di spagnolo, rumeno e inglese. Per chi
+   * ascolta e non può rileggere, una risposta in una lingua che non
+   * conosce è una risposta persa del tutto.
+   *
+   * Dirlo una volta all'inizio non basta: va ribadito alla fine, che
+   * è il punto che il modello ha più fresco. */
+  const istrIt = istruzione(60, 'it');
+  ok((istrIt.match(/ITALIANO/g) || []).length >= 3,
+     `la lingua è ripetuta più volte nell istruzione (${(istrIt.match(/ITALIANO/g) || []).length})`);
+  ok(/RICORDA/.test(istrIt),
+     'e ribadita alla fine, dove il modello la ha più fresca');
+  ok(/qualunque sia la lingua della domanda/.test(istrIt),
+     'anche quando la domanda è scritta in un altro modo');
+  ok(/ENGLISH/.test(istruzione(60, 'en')),
+     'e segue la lingua scelta nelle impostazioni');
+
+  /* ⚠️ 2. IL LIMITE DI PAROLE, ribadito insieme alla lingua. */
+  ok((istrIt.match(/60/g) || []).length >= 2,
+     'il limite di parole è ripetuto, non detto una volta sola');
+
+  /* ⚠️ 3. UNA LETTURA INTERROTTA DEVE RESTARE INTERROTTA.
+   *
+   * La risposta si legge una frase per volta, e se nel frattempo la
+   * voce guida diceva la sua, la lettura riprendeva da dove era
+   * rimasta appena la guida finiva — spezzata e ricucita a caso. */
+  const fsA2 = await import('node:fs');
+  const pathA2 = await import('node:path');
+  const quiA2 = pathA2.dirname(import.meta.filename || process.argv[1]);
+  const mainA = fsA2.readFileSync(pathA2.join(quiA2, '..', 'js/main.js'), 'utf8');
+  ok(/const mio = \(this\._letturaAI/.test(mainA),
+     'ogni lettura della risposta ha un contrassegno');
+  ok(/if \(this\._letturaAI !== mio\) break;/.test(mainA),
+     'e le frasi rimaste si fermano se la lettura non è più quella');
+  const iS = mainA.indexOf('stopSpeaking() {');
+  ok(/_letturaAI = \(this\._letturaAI \|\| 0\) \+ 1/.test(mainA.slice(iS, iS + 700)),
+     'fermare il parlato annulla la lettura in UN punto solo, dove ogni interruzione passa');
+
+  /* ⚠️ 4. IL VIDEO SENZA RICERCA WEB.
+   *
+   * Con la ricerca spenta il testo diventava una domanda normale: chi
+   * scriveva «doc africa v» si sentiva rispondere a parole e non
+   * capiva perché il video non partisse. */
+  ok(/serve attivare la ricerca sul web/.test(mainA),
+     'senza ricerca sul web lo si dice, invece di far finta di niente');
+  const reV = /\s+(v|video|vid)\s*$/i;
+  for (const t of ['DOC AFRIC V', 'doc africa v', 'africa video', 'africa vid']) {
+    ok(reV.test(t), `"${t}" viene riconosciuta come richiesta di video`);
+  }
+  for (const t of ['ciao come stai', 'vivo bene']) {
+    ok(!reV.test(t), `"${t}" resta una domanda normale`);
+  }
+
   ok(PA.openrouter.modelli[0] === 'openrouter/free',
      'il router gratuito è il primo, quindi il predefinito');
 
