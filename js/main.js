@@ -2565,6 +2565,25 @@ class App {
    * menu, e chi lo usa non deve reimparare nulla ogni volta.
    */
   /**
+   * Mette in pausa la voce guida perché un contenuto sta suonando.
+   *
+   * ⚠️ In PAUSA, non spenta: il gesto di ripresa la riaccende, e da lì
+   * si comanda il riproduttore. Spegnerla lascerebbe la persona senza
+   * modo di fermare ciò che ha avviato.
+   *
+   * E si ricorda che la pausa è stata decisa dal PROGRAMMA: quando il
+   * contenuto finisce, la voce torna da sé — cosa che non va fatta se
+   * a fermarla era stata la persona, perché riprendere ciò che
+   * qualcuno ha fermato fa perdere fiducia nel comando di pausa.
+   */
+  _zittisciPerMedia() {
+    if (this.scan.paused) return;
+    this.scan.paused = true;
+    this._pausaPerMedia = true;
+    try { this.audio?.stop?.(); } catch {}
+  }
+
+  /**
    * Esegue un comando sulla radio.
    *
    * ⚠️ Niente avanti e indietro di quindici secondi: su una diretta
@@ -2577,7 +2596,9 @@ class App {
     const i = Math.max(0, st.findIndex(x => x.nome === this.radioNome));
     switch (cmd) {
       case 'playPause':
-        if (el.paused) el.play().catch(() => {}); else el.pause();
+        if (el.paused) {
+          el.play().then(() => this._zittisciPerMedia()).catch(() => {});
+        } else el.pause();
         break;
       case 'volUp':
         el.volume = Math.min(1, (el.volume || 0) + 0.1);
@@ -2634,11 +2655,7 @@ class App {
        * dopo. Spegnerla lascerebbe la persona senza modo di fermare
        * ciò che ha appena avviato. */
       const suona = ['audio', 'video', 'youtube', 'radio'].includes(e.kind);
-      if (suona && !this.scan.paused) {
-        this.scan.paused = true;
-        this._pausaPerMedia = true;
-        try { this.audio?.stop?.(); } catch {}
-      }
+      if (suona) this._zittisciPerMedia();
       /* ⚠️ Le bande si fermano solo per ciò che si GUARDA.
        *
        * Video, immagini e testi hanno bisogno dello schermo libero:
@@ -2694,6 +2711,15 @@ class App {
     }
     if (e.type === 'page') this.setMediaInfo(`${e.title || ''} ${e.page}/${e.pages}`.trim());
     if (e.type === 'error') this.toast(e.message, true);
+    /* ⚠️ La voce guida si zittisce a OGNI avvio, non solo al primo.
+     *
+     * Prima accadeva solo aprendo il contenuto: rimettendolo in moto
+     * dopo averlo fermato, la voce guida continuava ad annunciare
+     * sopra la musica. La stessa situazione deve dare lo stesso
+     * comportamento, sempre — altrimenti chi usa il programma non può
+     * prevederlo, e ogni volta deve scoprire come si comporterà. */
+    if (e.type === 'state' && e.playing) this._zittisciPerMedia();
+
     if (e.type === 'readAloud') {
       /* ══════════════════════════════════════════════════════════════
        * LETTURA DI UN TESTO LUNGO

@@ -1670,5 +1670,26 @@ function buildTreeFor(b){ return b.eng.tree; }
   }
 }
 
+/* ── Un comando che rimette in moto il contenuto non riannuncia ──
+ *
+ * ⚠️ Dando "riprendi" a un video fermato poco prima, il contenuto
+ * riparte e la voce guida si mette in pausa — ma la scansione
+ * annunciava lo stesso la voce successiva, riaccendendosi di fatto e
+ * tornando a parlare sopra la musica.
+ *
+ * È la stessa azione che dovrebbe farla tacere. */
+{
+  const fsQ2 = await import('node:fs');
+  const pathQ2 = await import('node:path');
+  const quiQ2 = pathQ2.dirname(import.meta.filename || process.argv[1]);
+  const se = fsQ2.readFileSync(pathQ2.join(quiQ2, '..', 'js/scan/ScanEngine.js'), 'utf8');
+  const iM = se.indexOf("case 'MEDIA': {");
+  const corpo = se.slice(iM, iM + 900);
+  ok(/if \(this\.paused\) return;/.test(corpo),
+     'dopo un comando del riproduttore non si annuncia, se nel frattempo si è messa in pausa');
+  ok(corpo.indexOf('if (this.paused) return;') < corpo.indexOf('_announceNow'),
+     'e il controllo viene PRIMA dell annuncio, non dopo');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

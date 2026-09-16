@@ -1086,6 +1086,12 @@ export class ScanEngine {
         // senza rientrare nel menu ogni volta.
         const p = this.h.onMedia?.(node.payload);
         this.lastStepAt = now;
+        /* ⚠️ Se il comando ha rimesso in moto il contenuto, la voce
+         * guida si è appena messa in pausa: annunciare lo stesso la
+         * riaccenderebbe di fatto, e si tornerebbe a parlare sopra la
+         * musica. È il caso di "riprendi" su un video fermato poco
+         * prima — la stessa azione che dovrebbe farla tacere. */
+        if (this.paused) return;
         if (!this._hold(p, now)) this._announceNow(now);
         return;
       }

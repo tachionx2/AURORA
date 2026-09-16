@@ -460,7 +460,21 @@ export class MediaPlayer {
         if (this.kind === 'youtube' && this.ytReady) {
           const st = this.yt.getPlayerState();
           if (st === 1) this.yt.pauseVideo(); else this.yt.playVideo();
-        } else if (this.el) { this.el.paused ? this.el.play().catch(()=>{}) : this.el.pause(); }
+        } else if (this.el) {
+          /* ⚠️ Anche i file devono segnalare quando ripartono.
+           *
+           * Solo il video incorporato lo faceva, e per questo la voce
+           * guida si metteva in pausa da sola la PRIMA volta ma non
+           * quando la persona rimetteva in moto il contenuto dopo
+           * averlo fermato. La stessa situazione deve dare lo stesso
+           * comportamento, sempre. */
+          if (this.el.paused) {
+            this.el.play().then(() => this._emit('state', { playing: true })).catch(() => {});
+          } else {
+            this.el.pause();
+            this._emit('state', { playing: false });
+          }
+        }
         break;
       case MediaCommand.FORWARD:
         if (this.kind === 'youtube' && this.ytReady) this.yt.seekTo(this.yt.getCurrentTime() + step, true);

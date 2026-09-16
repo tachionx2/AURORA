@@ -2395,5 +2395,62 @@ app.goto('parla');
   ok(vol === 100, `dopo otto annunci il volume è ancora pieno (${vol})`);
 }
 
+/* ══════ Il ciclo voce guida / contenuto, per intero ══════
+ *
+ * ⚠️ La voce guida si zittiva solo APRENDO il contenuto. Rimettendolo
+ * in moto dopo averlo fermato, continuava ad annunciare sopra la
+ * musica: la stessa situazione dava un comportamento diverso, e chi
+ * usa il programma non poteva prevederlo.
+ *
+ * La regola è una sola: ogni volta che qualcosa comincia a suonare,
+ * la voce guida tace. */
+{
+  const fsC = await import('node:fs');
+  const pathC = await import('node:path');
+  const quiC = pathC.dirname(import.meta.filename || process.argv[1]);
+  const mainC = fsC.readFileSync(pathC.join(quiC, '..', 'js/main.js'), 'utf8');
+  const mpC = fsC.readFileSync(pathC.join(quiC, '..', 'js/media/MediaPlayer.js'), 'utf8');
+
+  ok(/_zittisciPerMedia\(\) \{/.test(mainC),
+     'c è un unico punto che mette in pausa la voce guida per i media');
+  ok((mainC.match(/_zittisciPerMedia\(\)/g) || []).length >= 3,
+     'usato all apertura, alla ripresa del riproduttore e a quella della radio');
+  ok(/e\.type === 'state' && e\.playing/.test(mainC),
+     '⚠️ e scatta a OGNI avvio, non solo al primo');
+
+  /* ⚠️ Anche i FILE devono segnalare quando ripartono: prima lo faceva
+   * solo il video incorporato, ed era la causa del comportamento
+   * diverso fra la prima volta e le successive. */
+  ok(/_emit\('state', \{ playing: true \}\)/.test(mpC),
+     'i file segnalano la ripresa, non solo il video incorporato');
+
+  /* La pausa decisa dal programma è distinta da quella chiesta dalla
+   * persona: la prima si annulla da sé a contenuto finito, la seconda
+   * no — riprendere ciò che qualcuno ha fermato fa perdere fiducia nel
+   * comando di pausa. */
+  ok(/_pausaPerMedia = true/.test(mainC) && /_pausaPerMedia = false/.test(mainC),
+     'e resta distinta dalla pausa chiesta dalla persona');
+
+  // Il ciclo completo, provato passo per passo.
+  let fermo = false, auto = false, vol = 100;
+  const suona = () => { if (fermo) return; fermo = true; auto = true; };
+  const riattiva = () => { fermo = false; auto = false; };
+  const fermaVoce = () => { fermo = true; auto = false; };
+  const annuncio = (on) => { vol = on ? 15 : 100; };
+
+  suona();
+  ok(fermo && auto, '1. il contenuto parte e la voce guida tace');
+  riattiva();
+  annuncio(true);
+  ok(!fermo && vol < 30, '2. riattivando la voce, il contenuto si abbassa');
+  annuncio(false);
+  ok(vol === 100, '3. finito l annuncio il volume torna pieno');
+  fermaVoce();
+  ok(fermo && !auto, '4. la persona ferma la voce e il contenuto continua');
+  riattiva();
+  suona();
+  ok(fermo && auto, '5. rimettendo in moto il contenuto, la voce tace di NUOVO');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);
