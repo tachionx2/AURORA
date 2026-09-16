@@ -1154,7 +1154,7 @@ export class SettingsView {
       const testo = h('div');
       testo.innerHTML = P([
         `<p class="note">Un browser <b>non può spedire posta da solo</b>: non è un limite di Aurora ma una regola di sicurezza del web, e non cambierà. Serve un piccolo servizio esterno che riceva il messaggio e lo spedisca.</p>
-         <p class="sub"><b>✅ Il servizio è GIÀ INCLUSO in Aurora</b>, nella cartella <code>netlify/functions/</code>. Non devi creare né copiare nulla: restano tre cose da fare.</p>
+         <p class="sub"><b>✅ Il servizio è GIÀ INCLUSO in Aurora</b>, nella cartella <code>netlify/functions/</code>, insieme a <code>package.json</code> e <code>netlify.toml</code> alla radice che servono a installarlo. Non devi creare né copiare nulla: restano tre cose da fare.</p>
          <p class="sub"><b>1.</b> Su Netlify, <i>Site configuration → Environment variables</i>: aggiungi <code>MAIL_USER</code> (l'indirizzo) e <code>MAIL_PASS</code> (la password), più <code>MAIL_SERVICE=gmail</code> se usi Gmail, oppure <code>MAIL_HOST</code> e <code>MAIL_PORT</code> per qualunque altro provider.</p>
          <p class="sub"><b>2.</b> <i>Deploys → Trigger deploy</i>: le variabili valgono dal caricamento successivo.</p>
          <p class="sub"><b>3.</b> Scrivi qui sotto <code>https://iltuosito.netlify.app/.netlify/functions/invia-email</code>.</p>

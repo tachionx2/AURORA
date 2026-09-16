@@ -340,8 +340,24 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
   const fnPath = 'netlify/functions/invia-email.js';
   const fn = read(fnPath);
   ok(!!fn, 'il servizio di invio posta è incluso nel programma');
-  ok(read('netlify/functions/package.json'),
-     'con le sue dipendenze, che Netlify installa da solo');
+  /* ⚠️ Le dipendenze vanno dichiarate ALLA RADICE, non dentro
+   * netlify/functions/.
+   *
+   * Netlify non installa quelle dichiarate nella cartella della
+   * funzione: il caricamento fallisce con «Cannot find module
+   * nodemailer» e si ferma l'INTERO sito, non solo la posta. Chi
+   * aggiorna il programma si ritrova Aurora irraggiungibile per un
+   * servizio che magari non usa nemmeno. */
+  const pkg = fs.existsSync(path.join(root, 'package.json')) ? read('package.json') : '';
+  ok(!!pkg && /nodemailer/.test(pkg),
+     'le dipendenze del servizio sono dichiarate alla radice del progetto');
+  ok(!fs.existsSync(path.join(root, 'netlify/functions/package.json')),
+     'e NON dentro netlify/functions/, dove Netlify non le installerebbe');
+  const toml = fs.existsSync(path.join(root, 'netlify.toml')) ? read('netlify.toml') : '';
+  ok(!!toml && /npm install/.test(toml),
+     'la configurazione di Netlify le fa installare');
+  ok(/publish = "\."/.test(toml || ''),
+     'e pubblica la radice: il sito è statico, non c è nulla da compilare');
 
   /* ⚠️ Deve funzionare con QUALUNQUE provider, non solo Gmail: con
    * Libero, Aruba, Outlook bastano indirizzo e password normali,

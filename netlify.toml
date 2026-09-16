@@ -1,0 +1,29 @@
+# Configurazione di Netlify.
+#
+# ⚠️ Il sito è statico: non c'è nulla da compilare. Il comando di
+# costruzione serve solo a installare la dipendenza del servizio di
+# invio posta, e "--omit=dev" evita di scaricare quanto non serve.
+#
+# Senza questo file Netlify indovina, e con un package.json alla radice
+# potrebbe provare a eseguire un "build" che non esiste.
+
+[build]
+  publish = "."
+  command = "npm install --omit=dev"
+
+[functions]
+  directory = "netlify/functions"
+  node_bundler = "esbuild"
+
+# Il service worker non va messo in cache: altrimenti gli aggiornamenti
+# del programma non arrivano mai a chi lo ha già aperto una volta.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "no-cache"
+    Service-Worker-Allowed = "/"
+
+[[headers]]
+  for = "/manifest.json"
+  [headers.values]
+    Cache-Control = "no-cache"

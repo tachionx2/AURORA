@@ -1,0 +1,10 @@
+{
+  "name": "aurora",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Aurora — comunicazione con i movimenti degli occhi. Il programma è statico e non richiede alcuna compilazione: questo file serve SOLO al servizio di invio posta in netlify/functions/.",
+  "//": "⚠️ Netlify NON installa le dipendenze dichiarate dentro netlify/functions/: vanno qui, alla radice. Mettendole là il caricamento fallisce con «Cannot find module nodemailer», ed è un errore che blocca l'intero sito, non solo la posta.",
+  "dependencies": {
+    "nodemailer": "^6.9.14"
+  }
+}
