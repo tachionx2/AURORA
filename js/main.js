@@ -655,6 +655,21 @@ class App {
      * Dove le bande sono in uso, la pausa appartiene a loro: hanno il
      * proprio gesto per nascondersi e riapparire. Il motore deve
      * restare acceso perché quel gesto possa arrivare. */
+    /* ⚠️ Nella scheda Punta la pausa della scansione non vale MAI.
+     *
+     * Prima si guardava se le bande fossero in comando. Ma quello
+     * stato vive nella configurazione — `pointer.enabled`,
+     * `pointer.mode` — e caricando un profilo salvato la
+     * configurazione viene sostituita per intero: il puntatore
+     * risultava spento, la pausa tornava a valere, e i gesti si
+     * spegnevano di nuovo. Bastava passare dalle impostazioni e
+     * tornare indietro perché Daniela perdesse il controllo.
+     *
+     * La scheda in cui ci si trova non dipende da nessun profilo. E la
+     * regola è semplice: in Punta comanda il puntatore, e la pausa
+     * della voce guida non ha voce in capitolo — né per le bande, né
+     * per il mirino, né dopo aver caricato qualunque cosa. */
+    if (document.body.dataset.tab === 'punta') return false;
     if (this._bandeInComando()) return false;
     return !!this.scan.paused && !this._pausaAutomatica;
   }

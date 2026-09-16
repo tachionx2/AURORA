@@ -590,7 +590,7 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
    *
    * I gesti sono l'unico canale d'ingresso della persona, in OGNI
    * scheda: solo una pausa CHIESTA da lei deve fermarli. */
-  ok(/_pausaVoluta\(\) \{[\s\S]{0,1400}!this\._pausaAutomatica/.test(main),
+  ok(/_pausaVoluta\(\) \{[\s\S]{0,2600}!this\._pausaAutomatica/.test(main),
      '72. la pausa voluta è distinta dalla sospensione automatica');
 
   /* ⚠️ E una pausa vale per la SCHEDA in cui è stata chiesta.
@@ -603,6 +603,24 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
    * un'altra scheda e per un'altra cosa. */
   ok(/if \(this\._bandeInComando\(\)\) return false;/.test(main),
      '72b. dove comandano le bande, la pausa della scansione non le spegne');
+
+  /* ⚠️ E soprattutto: nella scheda Punta la pausa non vale MAI.
+   *
+   * Guardare se le bande fossero in comando non bastava, perché quello
+   * stato vive nella configurazione — e caricando un profilo salvato
+   * la configurazione viene sostituita per intero: il puntatore
+   * risultava spento, la pausa tornava a valere, e i gesti si
+   * spegnevano di nuovo. Bastava passare dalle impostazioni e tornare
+   * indietro perché la persona perdesse il controllo.
+   *
+   * La scheda in cui ci si trova non dipende da nessun profilo. */
+  ok(/dataset\.tab === 'punta'\) return false;/.test(main),
+     '72b2. in Punta la pausa della scansione non ferma i gesti, qualunque profilo sia caricato');
+  const volutaT = (paused, auto, tab) => (tab === 'punta' ? false : (!!paused && !auto));
+  ok(volutaT(true, false, 'punta') === false,
+     '72b3. una pausa chiesta prima non sopravvive al cambio di scheda');
+  ok(volutaT(true, false, 'parla') === true,
+     '72b4. ma in Parla continua a valere, come deve');
   ok(/const bandeInUso = this\._bandeInComando\(\);/.test(main),
      '72c. e lo smistamento usa lo STESSO criterio: due condizioni separate col tempo divergono');
 
