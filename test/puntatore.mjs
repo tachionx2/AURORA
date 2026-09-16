@@ -590,8 +590,29 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
    *
    * I gesti sono l'unico canale d'ingresso della persona, in OGNI
    * scheda: solo una pausa CHIESTA da lei deve fermarli. */
-  ok(/_pausaVoluta\(\) \{[\s\S]{0,120}!this\._pausaAutomatica/.test(main),
+  ok(/_pausaVoluta\(\) \{[\s\S]{0,1400}!this\._pausaAutomatica/.test(main),
      '72. la pausa voluta è distinta dalla sospensione automatica');
+
+  /* ⚠️ E una pausa vale per la SCHEDA in cui è stata chiesta.
+   *
+   * Mettendo in pausa la scansione e passando poi a Punta, quella
+   * pausa continuava a fermare il motore dei gesti — dove però non
+   * significa più nulla: lì non c'è voce guida da zittire, e a
+   * comandare sono le bande. L'assistente accendeva le bande e la
+   * persona non poteva farci niente, per una decisione presa in
+   * un'altra scheda e per un'altra cosa. */
+  ok(/if \(this\._bandeInComando\(\)\) return false;/.test(main),
+     '72b. dove comandano le bande, la pausa della scansione non le spegne');
+  ok(/const bandeInUso = this\._bandeInComando\(\);/.test(main),
+     '72c. e lo smistamento usa lo STESSO criterio: due condizioni separate col tempo divergono');
+
+  // La logica completa, sui casi che contano davvero.
+  const bandeCmd = (en, mode, tab, act) => !!(en && mode === 'scanStripe' && (tab === 'punta' || act));
+  const voluta = (paused, auto, b) => (b ? false : (!!paused && !auto));
+  ok(voluta(true, false, bandeCmd(true, 'scanStripe', 'punta', true)) === false,
+     '72d. una pausa chiesta in Parla non blocca i gesti in Punta');
+  ok(voluta(true, false, bandeCmd(true, 'gaze', 'parla', false)) === true,
+     '72e. ma in Parla continua a fermarli, come deve');
   ok(!/setPaused\(this\.scan\.paused\)/.test(main),
      '73. il motore dei gesti non segue più la sospensione automatica');
   ok((main.match(/setPaused\(this\._pausaVoluta\(\)\)/g) || []).length >= 2,

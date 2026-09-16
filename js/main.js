@@ -641,7 +641,29 @@ class App {
    * scheda. Solo una pausa CHIESTA da lei deve fermarli.
    */
   _pausaVoluta() {
+    /* ⚠️ Una pausa vale per la scheda in cui è stata chiesta.
+     *
+     * Mettendo in pausa la scansione e passando poi a Punta, quella
+     * pausa continuava a fermare il motore dei gesti — dove però non
+     * significa più nulla: lì non c'è nessuna voce guida da zittire, e
+     * a comandare sono le bande.
+     *
+     * Il risultato era che l'assistente accendeva le bande e la
+     * persona non poteva farci niente: i gesti erano spenti da una
+     * decisione presa in un'altra scheda, per un'altra cosa.
+     *
+     * Dove le bande sono in uso, la pausa appartiene a loro: hanno il
+     * proprio gesto per nascondersi e riapparire. Il motore deve
+     * restare acceso perché quel gesto possa arrivare. */
+    if (this._bandeInComando()) return false;
     return !!this.scan.paused && !this._pausaAutomatica;
+  }
+
+  /** Vero quando a comandare sono le bande, non la scansione. */
+  _bandeInComando() {
+    return !!(this.cfg.pointer?.enabled
+      && this.cfg.pointer.mode === 'scanStripe'
+      && (document.body.dataset.tab === 'punta' || this.stripe?.active));
   }
 
   onGesture(e) {
@@ -676,9 +698,9 @@ class App {
     // Ma SOLO nella scheda Punta, o mentre una scansione a bande è già
     // in corso. Altrimenti attivare le bande spegnerebbe di fatto la
     // pagina Parla, e il gesto non farebbe più comunicare.
-    const bandeInUso = this.cfg.pointer.enabled
-      && this.cfg.pointer.mode === 'scanStripe'
-      && (document.body.dataset.tab === 'punta' || this.stripe.active);
+    // Stesso criterio di _pausaVoluta: due condizioni separate col
+    // tempo divergono, e basterebbe una virgola per riaprire il difetto.
+    const bandeInUso = this._bandeInComando();
     if (bandeInUso) {
       if (e.action === 'SELECT') { this.stripe.select(performance.now()); return; }
       if (e.action === 'UNDO') { this.stripe.cancel(); return; }
