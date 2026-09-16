@@ -2174,5 +2174,146 @@ app.goto('parla');
      'così il programma torna al menu invece di restare sul contenuto');
 }
 
+/* ══════ Comandi dei media: ordine, etichette, voce ══════ */
+{
+  const { COMMANDS_BY_KIND: CK, MediaCommand: MC } = await import('../js/media/MediaPlayer.js');
+
+  /* ⚠️ CHIUDI per primo in OGNI tipo. È ciò che serve più spesso e più
+   * in fretta: in fondo all'elenco si aspetterebbe tutta la scansione
+   * per uscire da un brano sbagliato. */
+  for (const [tipo, elenco] of Object.entries(CK)) {
+    ok(elenco[0]?.id === MC.EXIT,
+       `"${tipo}": chiudere è il primo comando`);
+    const ids = elenco.map(c => c.id);
+    ok(ids.length === new Set(ids).size, `"${tipo}": nessun comando in doppio`);
+  }
+
+  /* ⚠️ Etichette corte, voce per intera: sono due cose diverse.
+   *
+   * L'etichetta va guardata, quindi corta perché i comandi ci stiano
+   * tutti a schermo; la voce va capita, quindi completa. "15 s" si
+   * legge a colpo d'occhio accanto a due frecce, ma ad alta voce non
+   * vuol dire niente. */
+  for (const elenco of Object.values(CK)) {
+    for (const c of elenco) {
+      ok(c.label.length <= 22, `etichetta compatta: "${c.label}"`);
+      ok(c.spoken && c.spoken.length >= 5,
+         `e voce comprensibile: "${c.spoken}"`);
+    }
+  }
+  const yt = CK.youtube.find(c => c.id === MC.BACK);
+  ok(/quindici secondi/.test(yt.spoken),
+     'la voce dice "indietro quindici secondi" anche se l etichetta dice solo "15 s"');
+}
+
+/* ══════ La voce guida tace quando parte un contenuto che suona ══════
+ *
+ * ⚠️ Prima continuava ad annunciare sopra la musica o il video: due
+ * voci insieme, nessuna comprensibile.
+ *
+ * Ma la scansione viene messa in PAUSA, non spenta: il gesto di
+ * ripresa la riaccende, e da lì si comanda il riproduttore. Spegnerla
+ * lascerebbe la persona senza modo di fermare ciò che ha avviato.    */
+{
+  const fsM = await import('node:fs');
+  const pathM = await import('node:path');
+  const quiM = pathM.dirname(import.meta.filename || process.argv[1]);
+  const mainM = fsM.readFileSync(pathM.join(quiM, '..', 'js/main.js'), 'utf8');
+  const mpM = fsM.readFileSync(pathM.join(quiM, '..', 'js/media/MediaPlayer.js'), 'utf8');
+  const seM = fsM.readFileSync(pathM.join(quiM, '..', 'js/scan/ScanEngine.js'), 'utf8');
+
+  ok(/'audio', 'video', 'youtube', 'radio'/.test(mainM),
+     'la voce guida si ferma per i contenuti che suonano');
+  ok(/_pausaPerMedia = true/.test(mainM) && /_pausaPerMedia = false/.test(mainM),
+     'e riprende da sola a contenuto chiuso');
+
+  /* ⚠️ Il volume si ABBASSA, non si ferma: riattivando la voce guida
+   * sopra un audiolibro le due voci si sovrapponevano. */
+  ok(/abbassaVolume\(quota\)/.test(mpM),
+     'il riproduttore sa abbassare il volume senza fermarsi');
+  ok(/this\.media\?\.abbassaVolume/.test(mainM),
+     'e la voce guida lo usa, non solo per la radio');
+  ok(/_volPieno == null/.test(mpM),
+     'il volume di partenza si ricorda una volta sola, o resterebbe basso per sempre');
+
+  // Il video parte da solo, come i file audio.
+  ok(/autoplay: 1/.test(mpM), 'il video parte da solo');
+  ok(/this\.yt\?\.playVideo\?\.\(\)/.test(mpM),
+     'e lo si richiede anche a riproduttore pronto, per i browser che ignorano il parametro');
+
+  // MEDIA, non GUARDA: un file audio non si guarda.
+  ok(/label: 'MEDIA', spoken: 'media'/.test(seM),
+     'il menu si chiama MEDIA: un file audio non si guarda, si ascolta');
+}
+
+/* ══════ Il passo scritto a mano deve avere l'ultima parola ══════
+ *
+ * ⚠️ Difetto grave: il passo appreso continuava a valere anche dopo
+ * che l'assistente lo aveva cambiato. Navigando fra i media i gesti
+ * arrivano tardi, il programma imparava tempi lunghi, e il cursore
+ * nelle impostazioni non aveva più alcun effetto: 2 secondi scritti,
+ * 3 secondi reali, nessun modo di correggere.                        */
+{
+  const { AdaptiveTiming: AT } = await import('../js/scan/ScanEngine.js');
+  const { DEFAULT_CONFIG: DA, deepClone: da } = await import('../js/core/config.js');
+  const c = da(DA);
+  c.scan.stepMs = 2000;
+  const a = new AT(c);
+  for (let i = 0; i < 20; i++) a.record(2400);
+  ok(a.current > 2000, `il passo si adatta ai tempi osservati (${Math.round(a.current)} ms)`);
+  const c2 = da(c);
+  c2.scan.stepMs = 1800;
+  a.updateConfig(c2);
+  ok(a.current === 1800,
+     `ma un valore scritto a mano azzera quanto appreso (${Math.round(a.current)} ms)`);
+}
+
+/* ══════ Radio: stazioni pronte e avvio automatico ══════
+ *
+ * ⚠️ Trovare l'indirizzo di uno stream è più difficile di quanto
+ * sembri: i siti delle radio danno il link della PAGINA, che richiede
+ * di accettare i cookie e premere un pulsante — cose che chi comanda
+ * con un gesto solo non può fare. Chi installa ci si perdeva.        */
+{
+  const { DEFAULT_CONFIG: DR, migrateConfig: mig, CONFIG_VERSION: CV } =
+    await import('../js/core/config.js');
+  const st = DR.radio.stazioni;
+
+  ok(DR.radio.enabled === false, 'la radio resta spenta di default');
+  ok(st.length >= 5, `ci sono ${st.length} stazioni già pronte`);
+  ok(st.every(x => x.nome && x.url), 'ognuna ha nome e indirizzo');
+
+  /* ⚠️ Flussi DIRETTI in mp3: sono gli unici che partono da soli. Un
+   * indirizzo .m3u8 il browser non lo sa leggere, e darebbe un
+   * silenzio senza spiegazione. */
+  ok(st.every(x => /\.mp3$/.test(x.url)),
+     'tutti flussi diretti in mp3, non pagine né formati che il browser non legge');
+  ok(st.every(x => x.url.startsWith('https://')),
+     'tutti in https: un sito sicuro rifiuterebbe indirizzi non sicuri');
+
+  /* ⚠️ Nomi CORTI: li legge la voce guida a ogni giro della scansione,
+   * e un nome lungo costa secondi ogni volta. */
+  ok(Math.max(...st.map(x => x.nome.length)) <= 14,
+     `nomi brevi, li legge la voce guida ogni giro (max ${Math.max(...st.map(x => x.nome.length))} caratteri)`);
+
+  /* Chi ha già messo le proprie stazioni non deve ritrovarsele
+   * sostituite. */
+  const proprie = mig({ version: 40, radio: { enabled: true, stazioni: [{ nome: 'Mia', url: 'https://x/y.mp3' }] } });
+  ok(proprie.radio.stazioni.length === 1 && proprie.radio.stazioni[0].nome === 'Mia',
+     'un profilo con stazioni proprie le conserva');
+  const vuote = mig({ version: 40, radio: { enabled: true, stazioni: [] } });
+  ok(vuote.radio.stazioni.length >= 5,
+     'un profilo senza stazioni riceve quelle pronte');
+
+  // Parte da sola: chi comanda con un gesto solo non ha un "riproduci".
+  const fsR = await import('node:fs');
+  const pathR = await import('node:path');
+  const quiR = pathR.dirname(import.meta.filename || process.argv[1]);
+  const mainR = fsR.readFileSync(pathR.join(quiR, '..', 'js/main.js'), 'utf8');
+  ok(/setAttribute\('autoplay', ''\)/.test(mainR), 'la radio parte da sola');
+  ok(/tentativo < 2/.test(mainR),
+     'e riprova se il flusso è lento, invece di chiedere di toccare lo schermo a chi non può');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

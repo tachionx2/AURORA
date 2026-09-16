@@ -935,9 +935,25 @@ class App {
       this.radioEl.src = stazione.url;
       this.radioEl.volume = this.cfg.audio.speechVolume ?? 1;
       this.radioNome = stazione.nome;
-      this.radioEl.play().catch(() => {
-        this.toast('Riproduzione non avviata: tocca lo schermo una volta', true);
-      });
+      /* ⚠️ Partire da SOLA, senza che nessuno prema nulla.
+       *
+       * Chi comanda con un gesto solo non ha un "riproduci" da
+       * premere: selezionare la stazione deve bastare.
+       *
+       * I browser consentono l'avvio automatico solo se deriva da un
+       * gesto dell'utente — e qui lo è, perché la selezione parte da
+       * un comando. Ma il primo caricamento può fallire lo stesso se
+       * il flusso è lento: allora si riprova una volta, invece di
+       * chiedere a chi non può toccare lo schermo di toccarlo. */
+      this.radioEl.setAttribute('autoplay', '');
+      const avvia = (tentativo = 0) => {
+        this.radioEl.play().catch(() => {
+          if (tentativo < 2) { setTimeout(() => avvia(tentativo + 1), 600); return; }
+          this.toast(`Radio non avviata: ${stazione.nome}`, true);
+          this.debugView?.logEvent('radio: avvio rifiutato dal browser', true);
+        });
+      };
+      avvia();
       this.toast(`Radio: ${stazione.nome}`);
       this.debugView?.logEvent('radio: ' + stazione.nome);
       document.body.classList.add('has-radio');
@@ -961,9 +977,20 @@ class App {
    * quindi non poter più cambiare stazione.
    */
   abbassaPerAnnuncio(attivo) {
-    if (!this.radioEl || this.radioEl.paused) return;
+    /* ⚠️ Si abbassa TUTTO ciò che suona, non solo la radio.
+     *
+     * Riattivando la voce guida sopra un audiolibro o un video, le due
+     * voci si sovrapponevano e non si capiva nessuna delle due: chi
+     * ascolta non riusciva a seguire il menu proprio nel momento in cui
+     * gli serviva, per esempio per chiudere.
+     *
+     * ⚠️ Si abbassa, NON si ferma. Il contenuto continua: si ferma solo
+     * se la persona lo chiede, con "pausa" o "chiudi". Alla fine
+     * dell'annuncio il volume torna com'era. */
     const pieno = this.cfg.audio.speechVolume ?? 1;
-    this.radioEl.volume = attivo ? pieno * 0.15 : pieno;
+    const quota = attivo ? 0.15 : 1;
+    if (this.radioEl && !this.radioEl.paused) this.radioEl.volume = pieno * quota;
+    try { this.media?.abbassaVolume?.(quota); } catch {}
   }
 
   /* ------------------------------ Posta ------------------------------ */
@@ -2533,6 +2560,24 @@ class App {
     // QUEL testo: riaprendolo si riprende da lì, non dall'inizio.
     if (e.type === 'opened') {
       this._titoloMediaCorrente = e.title || null;
+      /* ⚠️ La voce guida tace quando parte un contenuto che SUONA.
+       *
+       * Prima continuava ad annunciare sopra la musica o il video:
+       * due voci insieme, nessuna comprensibile. Chi ascolta un
+       * audiolibro non vuole sentire "vocali, erre-cu, elle-bi" ogni
+       * due secondi.
+       *
+       * ⚠️ Ma la scansione NON viene spenta: viene messa in pausa. Il
+       * gesto di ripresa la riaccende, e da lì si comanda il
+       * riproduttore — chiudere, alzare il volume, passare al brano
+       * dopo. Spegnerla lascerebbe la persona senza modo di fermare
+       * ciò che ha appena avviato. */
+      const suona = ['audio', 'video', 'youtube', 'radio'].includes(e.kind);
+      if (suona && !this.scan.paused) {
+        this.scan.paused = true;
+        this._pausaPerMedia = true;
+        try { this.audio?.stop?.(); } catch {}
+      }
       /* ⚠️ Le bande si fermano solo per ciò che si GUARDA.
        *
        * Video, immagini e testi hanno bisogno dello schermo libero:
@@ -2566,6 +2611,12 @@ class App {
        * Erano state sospese per non scorrere sopra un video o un testo;
        * finito quello, chi ha un solo gesto deve ritrovare il proprio
        * cursore senza doverlo riaccendere — non potrebbe. */
+      /* Finito il contenuto, la voce guida torna da sé: era stata
+       * messa in pausa solo perché ci si sovrapponeva. */
+      if (this._pausaPerMedia) {
+        this._pausaPerMedia = false;
+        this.scan.paused = false;
+      }
       if (this._bandeSospeseDaMedia) {
         this._bandeSospeseDaMedia = false;
         if (this.cfg.pointer.enabled && this.cfg.pointer.mode === 'scanStripe'

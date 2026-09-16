@@ -67,49 +67,60 @@ export const MediaCommand = {
 export const COMMANDS_BY_KIND = {
   // File audio e video locali: stessi comandi, stesso elemento HTML.
   audio: [
-    { id: MediaCommand.PLAY_PAUSE, label: 'PAUSA / RIPRENDI', spoken: 'pausa o riprendi' },
-    { id: MediaCommand.FORWARD,    label: '⏩ avanti 15 s',    spoken: 'avanti' },
-    { id: MediaCommand.BACK,       label: '⏪ indietro 15 s',  spoken: 'indietro quindici' },
-    { id: MediaCommand.VOL_UP,     label: '🔊 più volume',     spoken: 'più volume' },
-    { id: MediaCommand.VOL_DOWN,   label: '🔉 meno volume',    spoken: 'meno volume' },
-    { id: MediaCommand.NEXT,       label: 'SUCCESSIVO',        spoken: 'successivo' },
-    { id: MediaCommand.PREV,       label: 'PRECEDENTE',        spoken: 'precedente' },
-    { id: MediaCommand.EXIT,       label: 'CHIUDI',            spoken: 'chiudi' },
+    /* ⚠️ CHIUDI per primo, etichette corte, voce per intera.
+     *
+     * Chiudere è ciò che serve più spesso e più in fretta: metterlo in
+     * fondo significa aspettare tutta la scansione per uscire da un
+     * brano sbagliato.
+     *
+     * E le due cose non coincidono: l'etichetta va guardata, quindi
+     * corta perché ci stiano tutti i comandi a schermo; la voce va
+     * capita, quindi per intera. "15 s" accanto a due frecce indietro
+     * si legge a colpo d'occhio, ma ad alta voce non vuol dire niente:
+     * lì serve "indietro quindici secondi". */
+    { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
+    { id: MediaCommand.PLAY_PAUSE, label: '⏯',           spoken: 'pausa o riprendi' },
+    { id: MediaCommand.FORWARD,    label: '⏩ 15 s',      spoken: 'avanti quindici secondi' },
+    { id: MediaCommand.BACK,       label: '⏪ 15 s',      spoken: 'indietro quindici secondi' },
+    { id: MediaCommand.VOL_UP,     label: '🔊 +VOL',      spoken: 'più volume' },
+    { id: MediaCommand.VOL_DOWN,   label: '🔉 −VOL',      spoken: 'meno volume' },
+    { id: MediaCommand.NEXT,       label: '⏭',           spoken: 'successivo' },
+    { id: MediaCommand.PREV,       label: '⏮',           spoken: 'precedente' },
   ],
   youtube: [
-    { id: MediaCommand.PLAY_PAUSE, label: 'PAUSA / RIPRENDI', spoken: 'pausa o riprendi' },
-    { id: MediaCommand.FORWARD,    label: '⏩ avanti 15 s',    spoken: 'avanti quindici secondi' },
-    { id: MediaCommand.BACK,       label: '⏪ indietro 15 s',  spoken: 'indietro quindici secondi' },
-    { id: MediaCommand.VOL_UP,     label: '🔊 più volume',     spoken: 'più volume' },
-    { id: MediaCommand.VOL_DOWN,   label: '🔉 meno volume',    spoken: 'meno volume' },
-    { id: MediaCommand.NEXT,       label: 'VIDEO SUCCESSIVO',  spoken: 'video successivo' },
-    { id: MediaCommand.EXIT,       label: 'CHIUDI',            spoken: 'chiudi' },
+    { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
+    { id: MediaCommand.PLAY_PAUSE, label: '⏯',           spoken: 'pausa o riprendi' },
+    { id: MediaCommand.FORWARD,    label: '⏩ 15 s',      spoken: 'avanti quindici secondi' },
+    { id: MediaCommand.BACK,       label: '⏪ 15 s',      spoken: 'indietro quindici secondi' },
+    { id: MediaCommand.VOL_UP,     label: '🔊 +VOL',      spoken: 'più volume' },
+    { id: MediaCommand.VOL_DOWN,   label: '🔉 −VOL',      spoken: 'meno volume' },
+    { id: MediaCommand.NEXT,       label: '⏭',           spoken: 'video successivo' },
   ],
   pdf: [
-    { id: MediaCommand.NEXT,       label: 'PAGINA AVANTI',  spoken: 'pagina avanti' },
-    { id: MediaCommand.PREV,       label: 'PAGINA INDIETRO',spoken: 'pagina indietro' },
-    { id: MediaCommand.SCROLL_DOWN,label: '↓ scorri giù',   spoken: 'scorri giù' },
-    { id: MediaCommand.SCROLL_UP,  label: '↑ scorri su',    spoken: 'scorri su' },
-    { id: MediaCommand.ZOOM_IN,    label: '➕ ingrandisci', spoken: 'ingrandisci' },
-    { id: MediaCommand.ZOOM_OUT,   label: '➖ rimpicciolisci', spoken: 'rimpicciolisci' },
-    { id: MediaCommand.EXIT,       label: 'CHIUDI',         spoken: 'chiudi' },
+    { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
+    { id: MediaCommand.NEXT,       label: '⏭ pag.',      spoken: 'pagina avanti' },
+    { id: MediaCommand.PREV,       label: '⏮ pag.',      spoken: 'pagina indietro' },
+    { id: MediaCommand.SCROLL_DOWN,label: '↓',           spoken: 'scorri giù' },
+    { id: MediaCommand.SCROLL_UP,  label: '↑',           spoken: 'scorri su' },
+    { id: MediaCommand.ZOOM_IN,    label: '🔍+',         spoken: 'ingrandisci' },
+    { id: MediaCommand.ZOOM_OUT,   label: '🔍−',         spoken: 'rimpicciolisci' },
   ],
   text: [
-    { id: MediaCommand.SCROLL_DOWN,label: '↓ avanti',       spoken: 'avanti' },
-    { id: MediaCommand.SCROLL_UP,  label: '↑ indietro',     spoken: 'indietro' },
-    { id: MediaCommand.READ_ALOUD, label: '🔊 LEGGI / CONTINUA', spoken: 'leggi' },
-    { id: MediaCommand.READ_BACK,  label: '⏪ rileggi il tratto prima', spoken: 'rileggi' },
-    { id: MediaCommand.READ_RESTART, label: '⏮ dall\'inizio', spoken: 'dall inizio' },
-    { id: MediaCommand.ZOOM_IN,    label: '➕ ingrandisci', spoken: 'ingrandisci' },
-    { id: MediaCommand.ZOOM_OUT,   label: '➖ rimpicciolisci', spoken: 'rimpicciolisci' },
-    { id: MediaCommand.EXIT,       label: 'CHIUDI',         spoken: 'chiudi' },
+    { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
+    { id: MediaCommand.SCROLL_DOWN,label: '↓',           spoken: 'avanti' },
+    { id: MediaCommand.SCROLL_UP,  label: '↑',           spoken: 'indietro' },
+    { id: MediaCommand.READ_ALOUD, label: '🔊 LEGGI',   spoken: 'leggi o continua' },
+    { id: MediaCommand.READ_BACK,  label: '⏪ rileggi', spoken: 'rileggi il tratto prima' },
+    { id: MediaCommand.READ_RESTART, label: '⏮ inizio', spoken: 'ricomincia dall inizio' },
+    { id: MediaCommand.ZOOM_IN,    label: '🔍+',         spoken: 'ingrandisci' },
+    { id: MediaCommand.ZOOM_OUT,   label: '🔍−',         spoken: 'rimpicciolisci' },
   ],
   image: [
-    { id: MediaCommand.NEXT,       label: 'IMMAGINE SUCCESSIVA', spoken: 'immagine successiva' },
-    { id: MediaCommand.PREV,       label: 'IMMAGINE PRECEDENTE', spoken: 'immagine precedente' },
-    { id: MediaCommand.ZOOM_IN,    label: '➕ ingrandisci', spoken: 'ingrandisci' },
-    { id: MediaCommand.ZOOM_OUT,   label: '➖ rimpicciolisci', spoken: 'rimpicciolisci' },
-    { id: MediaCommand.EXIT,       label: 'CHIUDI',         spoken: 'chiudi' },
+    { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
+    { id: MediaCommand.NEXT,       label: '⏭',           spoken: 'successiva' },
+    { id: MediaCommand.PREV,       label: '⏮',           spoken: 'precedente' },
+    { id: MediaCommand.ZOOM_IN,    label: '🔍+',         spoken: 'ingrandisci' },
+    { id: MediaCommand.ZOOM_OUT,   label: '🔍−',         spoken: 'rimpicciolisci' },
   ],
 };
 
@@ -155,6 +166,32 @@ export class MediaPlayer {
     return COMMANDS_BY_KIND[this.kind] || [];
   }
 
+  /**
+   * Abbassa temporaneamente il volume, senza fermare nulla.
+   *
+   * ⚠️ Serve quando la voce guida deve farsi sentire sopra un
+   * contenuto in riproduzione: due voci insieme non si capiscono, e
+   * chi ascolta ha bisogno del menu proprio per poter chiudere.
+   *
+   * Il volume di partenza si ricorda una volta sola: rileggerlo ogni
+   * volta finirebbe per memorizzare quello già abbassato, e il
+   * contenuto resterebbe basso per sempre.
+   */
+  abbassaVolume(quota) {
+    if (this.el) {
+      if (this._volPieno == null) this._volPieno = this.el.volume;
+      this.el.volume = Math.max(0, Math.min(1, this._volPieno * quota));
+      if (quota >= 1) this._volPieno = null;
+    }
+    if (this.yt?.setVolume) {
+      if (this._volYt == null) {
+        try { this._volYt = this.yt.getVolume?.() ?? 100; } catch { this._volYt = 100; }
+      }
+      try { this.yt.setVolume(Math.max(0, Math.min(100, this._volYt * quota))); } catch {}
+      if (quota >= 1) this._volYt = null;
+    }
+  }
+
   _emit(type, data = {}) { this.onEvent?.({ type, kind: this.kind, ...data }); }
 
   /* ------------------------------ YouTube ------------------------------ */
@@ -173,12 +210,28 @@ export class MediaPlayer {
       videoId: id,
       playerVars: {
         rel: 0, modestbranding: 1, playsinline: 1,
+        /* ⚠️ Parte da solo, come i file audio.
+         *
+         * Prima restava fermo sul primo fotogramma in attesa che
+         * qualcuno premesse "riproduci" — e chi comanda con un gesto
+         * solo non ha un "riproduci" da premere: doveva attendere la
+         * scansione fino al comando giusto, per un video che aveva
+         * appena scelto. */
+        autoplay: 1,
         // I comandi nativi restano disponibili per chi assiste, ma la
         // guida vera passa dai comandi in scansione.
         controls: 1, iv_load_policy: 3,
       },
       events: {
-        onReady: () => { this.ytReady = true; this._emit('ready'); },
+        onReady: () => {
+          this.ytReady = true;
+          /* ⚠️ Alcuni browser ignorano l'avvio automatico dichiarato
+           * fra i parametri: lo si chiede anche qui, dove il
+           * riproduttore è pronto e la richiesta arriva da un gesto
+           * dell'utente, che è la condizione che i browser accettano. */
+          try { this.yt?.playVideo?.(); } catch {}
+          this._emit('ready');
+        },
         onStateChange: (e) => {
           this._emit('state', { playing: e.data === 1 });
           // Fine video: passa al successivo, così una lista si guarda

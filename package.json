@@ -6,5 +6,7 @@
   "//": "⚠️ Netlify NON installa le dipendenze dichiarate dentro netlify/functions/: vanno qui, alla radice. Mettendole là il caricamento fallisce con «Cannot find module nodemailer», ed è un errore che blocca l'intero sito, non solo la posta.",
   "dependencies": {
     "nodemailer": "^6.9.14"
-  }
+  },
+  "//2": "Il programma è a moduli ES: dichiararlo evita che Node li rilegga due volte e toglie un avviso a ogni prova.",
+  "type": "module"
 }

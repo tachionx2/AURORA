@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 41;
+export const CONFIG_VERSION = 42;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -1053,7 +1053,28 @@ export const DEFAULT_CONFIG = {
    * L'elenco lo compila l'assistente, come già fa con i video. */
   radio: {
     enabled: false,
-    stazioni: [],   // { nome, url }
+    /* ⚠️ Stazioni già pronte: chi installa non deve cercarle.
+     *
+     * Trovare l'indirizzo di uno stream è più difficile di quanto
+     * sembri: i siti delle radio danno il link della PAGINA, che
+     * richiede di accettare i cookie e premere un pulsante — cose che
+     * chi comanda con un gesto solo non può fare.
+     *
+     * Questi sono flussi diretti in mp3, gli unici che partono da soli
+     * senza pagine intermedie. Provati uno per uno.
+     *
+     * ⚠️ Nomi CORTI: li legge la voce guida a ogni giro della
+     * scansione, e "Rai Radio 3 Classica e Cultura" costerebbe due
+     * secondi ogni volta. */
+    stazioni: [
+      { nome: 'Radio 1',      url: 'https://icestreaming.rai.it/1.mp3' },
+      { nome: 'Radio 2',      url: 'https://icestreaming.rai.it/2.mp3' },
+      { nome: 'Radio 3',      url: 'https://icestreaming.rai.it/3.mp3' },
+      { nome: 'Radio 4',      url: 'https://icestreaming.rai.it/4.mp3' },
+      { nome: 'Classica',     url: 'https://icestreaming.rai.it/5.mp3' },
+      { nome: 'Isoradio',     url: 'https://icestreaming.rai.it/6.mp3' },
+      { nome: 'Parlamento',   url: 'https://icestreaming.rai.it/7.mp3' },
+    ],
   },
 
   /* ── Invio di messaggi di posta ──
@@ -1281,6 +1302,11 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 42 && c.radio && (!Array.isArray(c.radio.stazioni) || !c.radio.stazioni.length)) {
+    /* ⚠️ Solo se l'elenco è VUOTO: chi ha già messo le proprie
+     * stazioni non deve ritrovarsele sostituite. */
+    c.radio.stazioni = DEFAULT_CONFIG.radio.stazioni.map(x => ({ ...x }));
+  }
   if (v < 41) {
     if (!c.telegram) {
       c.telegram = { enabled: false, token: '', contatti: [], firma: '',

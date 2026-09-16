@@ -198,7 +198,17 @@ function banco(opts = {}) {
   b.eng.setContext({ mediaCommands: COMMANDS_BY_KIND.youtube, mediaLabel: 'VIDEO', hasText: false, drafts: [], phrases: DEFAULT_PHRASES, suggestions: [] });
   ok(b.eng.tree.children[0].id === 'media', '10a. i comandi video sono la prima voce del menu');
   const dentro = b.eng.tree.children[0].children.map(c => c.label);
-  ok(dentro.includes('PAUSA / RIPRENDI'), '10b. può mettere il video in pausa');
+  /* ⚠️ Si cerca la voce PARLATA, non l'etichetta.
+   *
+   * L'etichetta è corta per stare a schermo — "⏯" — e cambia quando si
+   * riordina la barra; la voce è ciò che la persona sente e deve
+   * restare comprensibile. Legare il test all'etichetta lo faceva
+   * cadere per una modifica puramente visiva. */
+  const parlati = COMMANDS_BY_KIND.youtube.map(c => c.spoken);
+  ok(parlati.includes('pausa o riprendi'), '10b. può mettere il video in pausa');
+  ok(parlati.includes('chiudi'), '10b1. e chiuderlo');
+  ok(COMMANDS_BY_KIND.youtube[0].spoken === 'chiudi',
+     '10b2. con "chiudi" per PRIMO: è ciò che serve più in fretta, e in fondo si aspetterebbe tutta la scansione');
   ok(dentro.includes('← ESCI'), '10c. può uscire dai comandi video');
 }
 

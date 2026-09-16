@@ -284,7 +284,7 @@ export function buildTree(cfg, ctx = {}) {
   }
 
   /**
-   * Ramo GUARDA: video, documenti e immagini caricati dall'assistente
+   * Ramo MEDIA: video, documenti e immagini caricati dall'assistente
    * nella scheda Guarda. Compare solo se c'è davvero qualcosa, ed è
    * organizzato per tipo così la persona sceglie prima la categoria e
    * poi il singolo contenuto, senza ascoltare tutto l'elenco.
@@ -371,7 +371,11 @@ export function buildTree(cfg, ctx = {}) {
       ],
     }));
     ramoGuarda.push({
-      kind: NodeKind.GROUP, id: 'library', label: 'GUARDA', spoken: 'guarda',
+      /* ⚠️ MEDIA, non GUARDA: un file audio non si guarda, si ascolta.
+       * E dentro ci sono anche la radio e — quando attivata — la TV,
+       * che con il "guardare" c'entrano ancora meno. Più corto e più
+       * vero. */
+      kind: NodeKind.GROUP, id: 'library', label: 'MEDIA', spoken: 'media',
       // Con una sola categoria si salta un livello: non ha senso far
       // scegliere fra "video" quando c'è solo quello.
       children: categorie.length === 1
@@ -414,7 +418,26 @@ export const DEFAULT_PHRASES = [
  * ------------------------------------------------------------------ */
 export class AdaptiveTiming {
   constructor(cfg) { this.cfg = cfg; this.latencies = []; this.stepMs = cfg.scan.stepMs; }
-  updateConfig(cfg) { this.cfg = cfg; if (!cfg.scan.adaptive) this.stepMs = cfg.scan.stepMs; }
+  /* ⚠️ Cambiando il passo nelle impostazioni si RIPARTE da lì.
+   *
+   * Qui stava un difetto grave: il passo appreso continuava a valere
+   * anche dopo che l'assistente lo aveva cambiato a mano. Navigando fra
+   * i media i gesti arrivano tardi — si guarda, si sceglie — e il
+   * programma imparava tempi lunghi; poi il cursore nelle impostazioni
+   * non aveva più alcun effetto, perché `current` restituisce il valore
+   * APPRESO e non quello scelto.
+   *
+   * Chi assiste vedeva 2 secondi scritti e 3 secondi reali, senza
+   * alcun modo di correggere. Ora un valore scritto a mano azzera ciò
+   * che è stato imparato: chi interviene deve avere l'ultima parola. */
+  updateConfig(cfg) {
+    const cambiatoAMano = cfg.scan.stepMs !== this.cfg?.scan?.stepMs;
+    this.cfg = cfg;
+    if (!cfg.scan.adaptive || cambiatoAMano) {
+      this.stepMs = cfg.scan.stepMs;
+      if (cambiatoAMano) this.latencies.length = 0;
+    }
+  }
   /** Registra quanto tempo è passato dall'annuncio alla selezione. */
   record(latencyMs) {
     if (!this.cfg.scan.adaptive) return;

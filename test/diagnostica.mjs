@@ -10,6 +10,7 @@ let pass=0, fail=0;
 const ok=(c,m)=>{ if(c) pass++; else {fail++; console.log('  ✗ '+m);} };
 
 import { DEFAULT_CONFIG, deepClone } from '../js/core/config.js';
+import { COMMANDS_BY_KIND, MediaCommand } from '../js/media/MediaPlayer.js';
 import { GestureEngine } from '../js/signal/GestureEngine.js';
 import { MedianWindow, LowPass, AdaptiveBaseline, BlinkDetector, BlinkBurst } from '../js/signal/filters.js';
 import { IrTracker } from '../js/vision/IrTracker.js';
@@ -668,7 +669,7 @@ function corri(mod, script) {
   const ordine = t3.children.map(c => c.id).join(',');
   ok(ordine === 'phrases,write,library,pause', '23b. GUARDA sta subito prima di PAUSA: ' + ordine);
   const gr = t3.children.find(c => c.id === 'library');
-  ok(gr.label === 'GUARDA' && gr.spoken === 'guarda', '23c. si chiama GUARDA, non "comandi"');
+  ok(gr.label === 'MEDIA' && gr.spoken === 'media', '23c. si chiama MEDIA, non "comandi"');
   ok(gr.children[0].action === 'BACK', '23d. uscita per prima anche qui');
   ok(gr.children.map(c => c.label).join(',') === '← ESCI,VIDEO,DOCUMENTI',
      '23e. categorie solo se hanno contenuti: ' + gr.children.map(c => c.label).join(','));
@@ -734,7 +735,11 @@ function corri(mod, script) {
      '25f. con un contenuto aperto si tollerano più giri a vuoto');
   const { COMMANDS_BY_KIND: CK } = await import('../js/media/MediaPlayer.js');
   ok(CK.audio && CK.audio.length >= 6, '25g. i file audio hanno i propri comandi');
-  ok(CK.audio[CK.audio.length - 1].id === 'exit', '25h. uscita in fondo anche per l audio');
+  /* ⚠️ Ora l'uscita è in CIMA, non in fondo: chiudere è ciò che serve
+   * più spesso e più in fretta, e in fondo si aspetterebbe tutta la
+   * scansione per uscire da un brano sbagliato. */
+  ok(COMMANDS_BY_KIND.audio[0].id === MediaCommand.EXIT,
+     '25h. uscita in CIMA anche per l audio: chiudere non deve far aspettare');
 }
 
 /* ══════════ 26. Instradamento audio: onesto su cosa può fare ══════════ */
