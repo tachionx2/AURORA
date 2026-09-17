@@ -724,5 +724,43 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '89. e solo se non ci si è già: cambiare scheda a vuoto sposterebbe chi sta scrivendo');
 }
 
+/* ══════ Punta deve poter fare le stesse cose di Parla ══════ */
+{
+  const fsP3 = await import('node:fs');
+  const pathP3 = await import('node:path');
+  const quiP3 = pathP3.dirname(import.meta.filename || process.argv[1]);
+  const pv = fsP3.readFileSync(pathP3.join(quiP3, '..', 'js/ui/PointerView.js'), 'utf8');
+  const main = fsP3.readFileSync(pathP3.join(quiP3, '..', 'js/main.js'), 'utf8');
+
+  /* ⚠️ La radio mancava del tutto: era raggiungibile solo dalla
+   * scansione, e chi usa il puntatore vedeva le stazioni configurate
+   * senza poterle ascoltare. */
+  for (const g of ['video', 'audio', 'doc', 'img', 'radio']) {
+    ok(new RegExp(`id: '${g}'`).test(pv), `90. la scheda Media di Punta ha il gruppo "${g}"`);
+  }
+  ok(/g\.id === 'radio'/.test(pv),
+     '91. e la radio si apre dal suo percorso, non da quello della libreria');
+
+  /* ⚠️ La barra dei comandi deve usare gli STESSI comandi della
+   * scansione.
+   *
+   * Usava quelli grezzi del riproduttore, che non conoscono i
+   * risultati di una ricerca: in Punta mancava "altro video" e chi
+   * cercava ne vedeva uno solo, mentre in Parla funzionava. Due strade
+   * per la stessa cosa divergono sempre. */
+  ok(/for \(const c of \(this\._comandiCorrenti\(\) \|\| \[\]\)\)/.test(main),
+     '92. la barra usa gli stessi comandi della scansione, non due liste diverse');
+
+  /* ⚠️ E i risultati di una ricerca non sopravvivono a un contenuto
+   * scelto a mano: "altro video" non deve portare ai risultati di una
+   * ricerca fatta mezz ora prima. */
+  ok(/_scordaRicercaVideo\(\) \{/.test(main),
+     '93. i risultati di una ricerca si dimenticano');
+  ok((main.match(/_scordaRicercaVideo\(\)/g) || []).length >= 3,
+     '94. aprendo qualunque contenuto scelto a mano');
+  ok(!/localStorage[^\n]*candidatiVideo/.test(main),
+     '95. e vivono solo nella sessione: nulla viene salvato su disco');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

@@ -122,6 +122,15 @@ export class PointerView {
       { id: 'audio', nome: 'AUDIO', ic: '🎵', items: lib.audios },
       { id: 'doc',   nome: 'DOCUMENTI', ic: '📄', items: lib.docs },
       { id: 'img',   nome: 'IMMAGINI', ic: '🖼', items: lib.images },
+      /* ⚠️ Anche la RADIO, che qui mancava del tutto.
+       *
+       * Era raggiungibile solo dalla scansione: chi usa il puntatore
+       * vedeva le stazioni configurate in impostazioni e non poteva
+       * ascoltarle. Le due sezioni devono poter fare le stesse cose. */
+      { id: 'radio', nome: 'RADIO', ic: '📻',
+        items: (this.app.cfg.radio?.enabled
+          ? (this.app.cfg.radio.stazioni || []).filter(x => x?.url)
+          : []) },
     ].filter(g => g.items.length);
 
     wrap.innerHTML = '';
@@ -141,8 +150,13 @@ export class PointerView {
         const b = h('button', 'pt-tile ptr-target');
         b.innerHTML = `<span class="tt">${esc(it.title)}</span>` +
           (it.folder ? `<small>${it.folder.length} file</small>` : '');
-        b.onclick = () => this.app.apriDallaLibreria(
-          it.folder ? { kind: g.id, index: i, sub: 0 } : { kind: g.id, index: i });
+        b.onclick = () => {
+          /* La radio non passa dalla libreria: è un flusso continuo
+           * gestito a parte, con i suoi comandi. */
+          if (g.id === 'radio') return this.app.apriRadio(it);
+          return this.app.apriDallaLibreria(
+            it.folder ? { kind: g.id, index: i, sub: 0 } : { kind: g.id, index: i });
+        };
         riga.append(b);
       });
       sez.append(riga);

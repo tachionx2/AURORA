@@ -122,7 +122,13 @@ class App {
         if (cmd === 'altroVideo') return this.altroVideo();
         return this.media.active ? this.media.command(cmd) : this.comandoRadio(cmd);
       },
-      onMediaOpen: (sel) => this.apriDallaLibreria(sel),
+      onMediaOpen: (sel) => {
+        /* Qualunque contenuto scelto a mano chiude il capitolo della
+         * ricerca precedente: "altro video" non deve portare ai
+         * risultati di una ricerca fatta mezz'ora prima. */
+        this._scordaRicercaVideo();
+        return this.apriDallaLibreria(sel);
+      },
       onDraft: (op, arg) => this.onDraft(op, arg),
       onAsk: (testo) => this.chiediAssistente(testo),
       onCorrect: (testo, prec, modo) => this.correggi(testo, prec, modo),
@@ -2682,6 +2688,26 @@ class App {
   }
 
   /** Sposta il visualizzatore nel riquadro della scheda corrente. */
+  /**
+   * Dimentica i risultati di una ricerca precedente.
+   *
+   * ⚠️ Restavano in memoria: aprendo poi un video della libreria, fra
+   * i suoi comandi compariva ancora "altro video" e portava ai
+   * risultati di una ricerca fatta mezz'ora prima. Un comando che
+   * porta altrove rispetto a ciò che dice è peggio di un comando
+   * assente.
+   *
+   * ⚠️ E vivono SOLO nella sessione: chiudendo il programma spariscono.
+   * Non si salva nulla su disco — una cronologia delle ricerche non
+   * serve a nessuno qui, e sarebbe un dato in più da proteggere.
+   */
+  _scordaRicercaVideo() {
+    this._candidatiVideo = null;
+    this._tentativoVideo = 0;
+    this._titoliVideo = null;
+    this._titoloVideoAI = null;
+  }
+
   agganciaMedia(staPerAprire = false) {
     const tab = document.body.dataset.tab;
     /* ⚠️ In Punta il contenuto si apre LÌ, qualunque scheda interna
@@ -3022,7 +3048,15 @@ class App {
       const bar = document.getElementById(idB);
       if (!bar) continue;
       bar.innerHTML = '';
-      for (const c of this.media.commands()) {
+      /* ⚠️ Gli STESSI comandi della scansione, non quelli grezzi del
+       * riproduttore.
+       *
+       * Qui si usava `media.commands()`, che non conosce i risultati
+       * di una ricerca: in Punta mancava "altro video" e chi cercava
+       * un video ne vedeva uno solo, senza modo di provarne altri —
+       * mentre in Parla funzionava. Due strade per la stessa cosa
+       * divergono sempre, e questa era già divergente. */
+      for (const c of (this._comandiCorrenti() || [])) {
         const b = document.createElement('button');
         b.className = 'btn btn-sm ptr-target';
         b.textContent = c.label;
@@ -3082,6 +3116,7 @@ class App {
     try {
       this.agganciaMedia();
       const urls = (this.cfg.media.favorites || []).map(x => x.url);
+      this._scordaRicercaVideo();
       await this.media.openYouTube(f.url, urls);
     } catch (e) { this.toast(e.message, true); }
   }
