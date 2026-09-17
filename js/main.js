@@ -126,7 +126,12 @@ class App {
         /* ⚠️ Il segnalibro si prende PRIMA di chiudere: dopo, il
          * riproduttore è già stato smontato e la posizione è persa. */
         if (cmd === 'exit') this.salvaSegnalibro();
-        return this.media.active ? this.media.command(cmd) : this.comandoRadio(cmd);
+        /* ⚠️ Lo STESSO criterio dei comandi mostrati: se si vedono
+         * quelli della radio, devono agire sulla radio. Due decisioni
+         * separate divergono, ed è esattamente ciò che era successo. */
+        return this._destinatarioComandi() === 'radio'
+          ? this.comandoRadio(cmd)
+          : this.media.command(cmd);
       },
       onMediaOpen: (sel) => {
         /* Qualunque contenuto scelto a mano chiude il capitolo della
@@ -2967,7 +2972,34 @@ class App {
   }
 
   /** I comandi da mostrare: del riproduttore, o della radio. */
+  /**
+   * Chi deve ricevere i comandi: il riproduttore o la radio.
+   *
+   * ⚠️ Con un video E una radio in funzione insieme, il riproduttore
+   * vinceva sempre: dalla sotto-scheda RADIO i comandi agivano sul
+   * video, e non c'era modo di fermare la stazione.
+   *
+   * In Punta decide la sotto-scheda aperta: chi sta guardando i
+   * comandi della radio si aspetta che comandino la radio. È l'unica
+   * informazione che dice davvero a cosa la persona sta pensando.
+   *
+   * ⚠️ In Parla resta la regola di prima — il contenuto aperto vince —
+   * perché lì non c'è una scheda che dichiari l'intenzione, e quella
+   * regola funziona bene.
+   */
+  _destinatarioComandi() {
+    const radioViva = !!(this.radioEl && this.radioNome);
+    const inPunta = document.body.dataset.tab === 'punta';
+    if (inPunta && this.pointerView?.mode === 'media'
+        && this.pointerView?._tipoMedia === 'radio' && radioViva) {
+      return 'radio';
+    }
+    if (this.media.active) return 'media';
+    return radioViva ? 'radio' : null;
+  }
+
   _comandiCorrenti() {
+    if (this._destinatarioComandi() === 'radio') return COMMANDS_BY_KIND.radio;
     if (this.media.active) {
       const base = this.media.commands();
       /* ⚠️ "Altro video" compare SOLO se ce n'è davvero un altro.
@@ -3040,7 +3072,6 @@ class App {
      *
      * Finché una stazione è caricata i comandi ci sono, esattamente
      * come per un file audio in pausa. */
-    if (this.radioEl && this.radioNome) return COMMANDS_BY_KIND.radio;
     return null;
   }
 

@@ -2588,8 +2588,18 @@ app.goto('parla');
 
   ok(/comandoRadio\(cmd\)/.test(mainRr),
      'e i comandi vengono eseguiti sulla radio, non mandati al riproduttore dei file');
-  ok(/this\.media\.active\s*\?\s*this\.media\.command/.test(mainRr),
-     'il comando va a chi sta davvero suonando');
+  /* ⚠️ Con un video E una radio in funzione insieme, il riproduttore
+   * vinceva sempre: dalla sotto-scheda RADIO i comandi agivano sul
+   * video, e non c era modo di fermare la stazione.
+   *
+   * In Punta decide la sotto-scheda aperta: chi sta guardando i
+   * comandi della radio si aspetta che comandino la radio. */
+  ok(/_destinatarioComandi\(\) \{/.test(mainRr),
+     'c è un unico punto che decide chi riceve i comandi');
+  ok(/_tipoMedia === 'radio' && radioViva/.test(mainRr),
+     'e in Punta lo decide la sotto-scheda aperta');
+  ok((mainRr.match(/_destinatarioComandi\(\)/g) || []).length >= 3,
+     '⚠️ usato sia per MOSTRARE i comandi sia per ESEGUIRLI: due decisioni separate divergono');
 
   /* ⚠️ Avanti E INDIETRO fra i video caricati dall'assistente.
    *
