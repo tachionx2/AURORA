@@ -1674,6 +1674,11 @@ export class SettingsView {
          guardare i grafici. Una scansione che continua ad annunciare è
          nel migliore dei casi rumore di fondo, nel peggiore un gesto
          involontario che pronuncia qualcosa che nessuno voleva. */
+      this._range('scan.screenSaverMin',
+        P(['Schermo scuro dopo (0 = mai)', 'Dim the screen after (0 = never)']),
+        P(['Passati questi minuti senza gesti, lo schermo si vela di nero. ⚠️ È SOLO grafica: la telecamera continua a guardare, il rilevamento continua, e il primo gesto la toglie riportando tutto com\'era. Serve a chi mette in pausa per riposare e si ritrova davanti uno schermo acceso pieno di scritte, che a letto e di notte dà fastidio. Non si attiva mentre un contenuto sta suonando: un film dura più dei minuti impostati, e oscurarlo a metà sarebbe il contrario di ciò che serve.',
+           'After these minutes without gestures the screen dims. ⚠️ Graphics only: the camera keeps watching and the first gesture restores everything.']),
+        0, 120, 5, ' min'),
       this._toggle('scan.soloInParla',
         P(['Ferma la scansione fuori dalla scheda Parla', 'Pause scanning outside the Speak tab']),
         P(['ACCESO (predefinito): uscendo da Parla la voce guida tace e la scansione si ferma. ⚠️ Da SPEGNERE quando si vogliono provare i gesti dalla scheda Diagnostica sentendo la voce guida mentre si guardano i grafici. Se la persona aveva messo in pausa da sé, tornando in Parla la pausa resta com\'era.',

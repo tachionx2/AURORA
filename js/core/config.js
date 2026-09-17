@@ -728,6 +728,27 @@ export const DEFAULT_CONFIG = {
      * scheda Diagnostica sentendo la voce guida mentre si guardano i
      * grafici, occorre che la scansione continui a girare. */
     soloInParla: true,
+
+    /* ══════════════════════════════════════════════════════════════
+     * SCHERMO SCURO DOPO UN PERIODO DI QUIETE
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Chi mette in pausa per riposare si ritrova davanti uno schermo
+     * acceso pieno di scritte, che a letto e di notte dà fastidio.
+     *
+     * ⚠️ È SOLO una velatura sopra la pagina: la telecamera continua a
+     * guardare, il rilevamento continua, e il primo gesto la toglie
+     * riportando tutto esattamente com'era. Nulla del funzionamento
+     * cambia — se cambiasse qualcosa, chi riposa rischierebbe di
+     * svegliarsi senza più il proprio modo di comunicare.
+     *
+     * 0 = mai, ed è il valore predefinito: chi non lo imposta non
+     * vede alcuna differenza. */
+    screenSaverMin: 0,
+    // Quanto scurire: 1 = nero pieno. Sotto 1 resta un'ombra di ciò
+    // che c'è sotto, utile a chi assiste per capire a colpo d'occhio
+    // che il programma è vivo e non bloccato.
+    screenSaverOpacita: 0.97,
     enterDelayMs: 700,
     maxCycles: 3,                // dopo N giri a vuoto → pausa automatica
     // Giri a vuoto consentiti mentre si sta guardando un contenuto:

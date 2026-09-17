@@ -2343,6 +2343,38 @@ app.goto('parla');
   ok(!idsR.includes(MCR.FORWARD) && !idsR.includes(MCR.BACK),
      'ma non avanti e indietro, che su una diretta non vogliono dire nulla');
 
+  /* ⚠️ E il menu va AGGIORNATO quando la radio parte.
+   *
+   * I comandi esistevano, ma il menu della scansione si costruisce da
+   * un contesto che va rinfrescato: la radio partiva e il menu restava
+   * quello di prima. Chi la faceva partire non aveva più modo di
+   * fermarla — né pausa, né cambio stazione, né chiusura — e l unica
+   * via d uscita era riavviare il programma. */
+  const iAp = mainRr.indexOf('apriRadio(stazione)');
+  const corpoAp = mainRr.slice(iAp, iAp + 3500);
+  ok(/this\.refreshContext\(\);/.test(corpoAp),
+     'facendo partire la radio il menu si aggiorna, o i comandi non comparirebbero mai');
+
+  /* ⚠️ La voce guida NON si mette in pausa per la radio, di proposito:
+   * è un sottofondo, non un contenuto da seguire, e serve poter
+   * cambiare stazione mentre suona. */
+  ok(!/_zittisciPerMedia/.test(corpoAp),
+     'e la voce guida resta attiva: la radio è un sottofondo, non un contenuto da seguire');
+
+  /* ⚠️ E il gesto di PAUSA non deve fermare la radio.
+   *
+   * Sono due cose distinte: il gesto mette in pausa la voce guida e la
+   * scansione, la radio si ferma solo dal suo comando "pausa" nei
+   * CONTROLLI — come per i file audio e i video. Confonderle
+   * significherebbe che chi vuole solo far tacere la guida perde anche
+   * la musica. */
+  const iG2 = mainRr.indexOf('onGesture(e)');
+  const corpoG2 = mainRr.slice(iG2, iG2 + 3000);
+  ok(!/radioEl/.test(corpoG2),
+     'il percorso dei gesti non tocca la radio: il gesto di pausa ferma la voce guida, non la musica');
+  ok(/case 'playPause'/.test(mainRr) && /case 'exit'/.test(mainRr),
+     'la radio si ferma solo dai suoi comandi: pausa e chiudi');
+
   ok(/comandoRadio\(cmd\)/.test(mainRr),
      'e i comandi vengono eseguiti sulla radio, non mandati al riproduttore dei file');
   ok(/this\.media\.active\s*\?\s*this\.media\.command/.test(mainRr),
@@ -2450,6 +2482,75 @@ app.goto('parla');
   riattiva();
   suona();
   ok(fermo && auto, '5. rimettendo in moto il contenuto, la voce tace di NUOVO');
+}
+
+/* ══════ Schermo scuro dopo la quiete ══════
+ *
+ * Chi mette in pausa per riposare si ritrova davanti uno schermo
+ * acceso pieno di scritte, che a letto e di notte dà fastidio.
+ *
+ * ⚠️ È SOLO una velatura: se spegnesse davvero qualcosa, chi riposa
+ * rischierebbe di svegliarsi senza più il proprio modo di comunicare. */
+{
+  const fsS2 = await import('node:fs');
+  const pathS2 = await import('node:path');
+  const quiS2 = pathS2.dirname(import.meta.filename || process.argv[1]);
+  const mainS = fsS2.readFileSync(pathS2.join(quiS2, '..', 'js/main.js'), 'utf8');
+  const htmlS = fsS2.readFileSync(pathS2.join(quiS2, '..', 'index.html'), 'utf8');
+  const cssS = fsS2.readFileSync(pathS2.join(quiS2, '..', 'css/app.css'), 'utf8');
+  const { DEFAULT_CONFIG: DS2 } = await import('../js/core/config.js');
+
+  ok(DS2.scan.screenSaverMin === 0,
+     'spento di default: chi non lo imposta non vede differenza');
+  ok(/id="schermoScuro"/.test(htmlS), 'la velatura esiste nella pagina');
+  ok(/id="schermoScuro"[^>]*hidden/.test(htmlS), 'e parte nascosta');
+
+  /* ⚠️ Non deve intercettare i tocchi: chi assiste deve poter premere
+   * ciò che c è sotto senza doverla togliere prima. */
+  ok(/\.schermo-scuro\{[^}]*pointer-events:none/.test(cssS.replace(/\s+/g, '')),
+     'non intercetta i tocchi: si può premere ciò che sta sotto');
+
+  /* ⚠️ Niente velatura mentre qualcosa suona: un film dura più dei
+   * minuti impostati, e oscurarlo a metà sarebbe il contrario di ciò
+   * che serve. */
+  ok(/const suona = this\.media\?\.active/.test(mainS),
+     'non si attiva mentre un contenuto sta suonando');
+  ok(/if \(suona\) \{ this\._quieteDa = now; \}/.test(mainS),
+     'e finito il contenuto il tempo riparte da capo');
+
+  /* Qualunque gesto la toglie, PRIMA di qualunque altra cosa: chi si
+   * risveglia deve rivedere il programma, non trovarsi al buio con il
+   * gesto già consumato. */
+  ok(/svegliaSchermo\(\) \{/.test(mainS), 'esiste il risveglio');
+  const iG3 = mainS.indexOf('  onGesture(e) {');
+  const corpoG3 = mainS.slice(iG3, iG3 + 2400);
+  ok(corpoG3.includes('this.svegliaSchermo();'),
+     'e ogni gesto la toglie');
+  ok(corpoG3.indexOf('this.svegliaSchermo();') < corpoG3.indexOf('stopSpeaking'),
+     'prima di consumare il gesto per altro');
+
+  /* ⚠️ E NON deve fermare la telecamera né il rilevamento: è il punto
+   * su cui tutto il resto si regge. */
+  const iSS = mainS.indexOf('_schermoScuro(now)');
+  const corpoSS = mainS.slice(iSS, iSS + 1800);
+  ok(!/stopVision|setPaused|gestures\./.test(corpoSS),
+     'la velatura non tocca telecamera né rilevamento: solo grafica');
+
+  /* ⚠️ E si toglie anche col mouse, come in qualunque salvaschermo.
+   *
+   * Chi assiste si aspetta che muovendo il mouse lo schermo torni, e
+   * se non succede pensa che il programma sia bloccato — proprio
+   * mentre sta cercando di intervenire. */
+  ok(/_ascoltaRisveglio\(\) \{/.test(mainS), 'si ascolta anche il movimento del mouse');
+  const iAR = mainS.indexOf('_ascoltaRisveglio() {');
+  const corpoAR = mainS.slice(iAR, iAR + 900);
+  for (const ev of ['pointermove', 'pointerdown', 'keydown', 'touchstart']) {
+    ok(corpoAR.includes(`'${ev}'`), `e l evento "${ev}" la toglie`);
+  }
+  ok(/passive: true/.test(corpoAR),
+     'in modo passivo: ascoltare il movimento del mouse non deve rallentare nulla');
+  ok(/capture: true/.test(corpoAR),
+     'e in cattura, così arriva comunque anche a ciò che sta sotto');
 }
 
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);

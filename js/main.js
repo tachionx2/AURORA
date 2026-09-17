@@ -97,6 +97,7 @@ class App {
     // disponibile o è vuoto, tutto continua a funzionare con la sintesi.
     // Radio e media si abbassano mentre il programma parla.
     this.audio.setAbbassamento((on) => this.abbassaPerAnnuncio(on));
+    this._safe('risveglio schermo', () => this._ascoltaRisveglio());
     this.voci = new VoiceBank();
     this.registratore = new Registratore();
     this.voci.apri().then(ok => {
@@ -710,6 +711,11 @@ class App {
     // Durante una lettura lunga, il primo gesto la ferma e basta.
     /* ⚠️ Un gesto che zittisce il parlato annulla anche la lettura
      * della risposta: altrimenti riprenderebbe da sola più tardi. */
+    /* ⚠️ Qualunque gesto riporta lo schermo com'era, PRIMA di
+     * qualunque altra cosa: chi si risveglia deve rivedere il
+     * programma, non trovarsi al buio con il gesto già consumato. */
+    this.svegliaSchermo();
+
     this._letturaAI = (this._letturaAI || 0) + 1;
     if (this.cfg.drafts.stopSpeechOnGesture && this.stopSpeaking()) {
       this.audio.earcon('undo');
@@ -968,6 +974,19 @@ class App {
       this.toast(`Radio: ${stazione.nome}`);
       this.debugView?.logEvent('radio: ' + stazione.nome);
       document.body.classList.add('has-radio');
+      /* ⚠️ Senza questo i comandi della radio non comparivano MAI.
+       *
+       * Il menu della scansione si costruisce da un contesto che va
+       * aggiornato quando qualcosa cambia: la radio partiva, ma il
+       * menu restava quello di prima. Chi la faceva partire non aveva
+       * più modo di fermarla — né pausa, né cambio stazione, né
+       * chiusura — e l'unica via d'uscita era riavviare il programma.
+       *
+       * ⚠️ E la voce guida NON si mette in pausa per la radio, di
+       * proposito: è un sottofondo, non un contenuto da seguire, e
+       * serve poter cambiare stazione mentre suona. */
+      this.refreshContext();
+      this.renderMediaBar?.();
     } catch (e) {
       this.toast('Radio non avviata: ' + e.message, true);
     }
@@ -3381,7 +3400,72 @@ class App {
     catch (e) { this._frameError(e); }
   }
 
+  /**
+   * Scurisce lo schermo dopo un periodo di quiete.
+   *
+   * ⚠️ È SOLO una velatura: la telecamera continua a guardare, il
+   * rilevamento continua, e il primo gesto la toglie riportando tutto
+   * com'era. Se spegnesse davvero qualcosa, chi riposa rischierebbe di
+   * svegliarsi senza più il proprio modo di comunicare.
+   *
+   * ⚠️ E non si attiva mentre qualcosa sta suonando: un film o un
+   * audiolibro durano più dei minuti impostati, e oscurarli a metà
+   * sarebbe esattamente il contrario di ciò che serve.
+   */
+  _schermoScuro(now) {
+    const el = this._elScuro || (this._elScuro = document.getElementById('schermoScuro'));
+    if (!el) return;
+    const min = this.cfg.scan?.screenSaverMin || 0;
+    if (!min) { if (!el.hidden) { el.hidden = true; el.classList.remove('on'); } return; }
+
+    /* Qualcosa sta suonando? Allora niente velatura, e il tempo
+     * riparte da adesso: finito il contenuto si ricomincia a contare. */
+    const suona = this.media?.active || (this.radioEl && !this.radioEl.paused);
+    if (suona) { this._quieteDa = now; }
+
+    if (this._quieteDa == null) this._quieteDa = now;
+    const scuro = (now - this._quieteDa) > min * 60000;
+
+    if (scuro && el.hidden) {
+      el.hidden = false;
+      el.style.setProperty('--scuro-op', String(this.cfg.scan.screenSaverOpacita ?? 0.97));
+      // Un fotogramma di scarto, o la transizione non si vede.
+      requestAnimationFrame(() => el.classList.add('on'));
+      this.debugView?.logEvent('schermo scurito dopo la quiete');
+    } else if (!scuro && !el.hidden) {
+      el.classList.remove('on');
+      el.hidden = true;
+    }
+  }
+
+  /**
+   * Il movimento del mouse, un tocco o un tasto tolgono la velatura.
+   *
+   * ⚠️ Come in qualunque salvaschermo: chi assiste si aspetta che
+   * muovendo il mouse lo schermo torni, e se non succede pensa che il
+   * programma sia bloccato — proprio mentre sta cercando di
+   * intervenire.
+   *
+   * Si ascolta in cattura e in modo passivo: la velatura non
+   * intercetta i tocchi, quindi gli eventi arrivano comunque a ciò che
+   * sta sotto, e questo non li rallenta.
+   */
+  _ascoltaRisveglio() {
+    const sveglia = () => this.svegliaSchermo();
+    for (const ev of ['pointermove', 'pointerdown', 'keydown', 'wheel', 'touchstart']) {
+      window.addEventListener(ev, sveglia, { capture: true, passive: true });
+    }
+  }
+
+  /** Un gesto o un comando riportano lo schermo com'era. */
+  svegliaSchermo() {
+    this._quieteDa = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const el = this._elScuro || (this._elScuro = document.getElementById('schermoScuro'));
+    if (el && !el.hidden) { el.classList.remove('on'); el.hidden = true; }
+  }
+
   _frameUi(now) {
+    this._safe('schermo scuro', () => this._schermoScuro(now));
     {
       const fill = document.getElementById('scanbarFill');
       if (fill) fill.style.width = `${(this.scan.snapshot().progress * 100).toFixed(1)}%`;

@@ -1160,3 +1160,16 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
   padding:.6rem .7rem;margin:.5rem 0;overflow:auto;max-height:20rem;
   font:400 .74rem/1.5 var(--mono);color:var(--text);white-space:pre-wrap;
 }
+
+/* ── Schermo scuro dopo un periodo di quiete ──
+ *
+ * ⚠️ Copre la pagina ma NON la spegne: sotto continua tutto, e il
+ * primo gesto la toglie. Non intercetta i tocchi, così chi assiste può
+ * comunque premere ciò che c'è sotto senza doverla togliere prima.
+ */
+.schermo-scuro{
+  position:fixed;inset:0;z-index:9000;background:#000;
+  pointer-events:none;opacity:0;transition:opacity .8s ease;
+}
+.schermo-scuro[hidden]{display:none}
+.schermo-scuro.on{opacity:var(--scuro-op,.97)}
