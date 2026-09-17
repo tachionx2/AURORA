@@ -390,6 +390,31 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
      'un guasto riporta il motivo del provider, non un generico "non riuscito"');
 }
 
+/* ── Nessuna vista di Punta visibile fuori dalla sua scheda ──
+ *
+ * ⚠️ Errore già commesso: una regola con `display:flex` scritta senza
+ * `.is-active` rendeva la vista Frasi visibile SEMPRE, anche sotto le
+ * altre. Rubava spazio in verticale e comprimeva la tastiera a metà
+ * pagina, rendendola difficile da colpire con lo sguardo — che è il
+ * modo in cui va usata.
+ *
+ * La regola generale è `display:none` finché non si entra nella
+ * scheda: chi aggiunge stili a una vista deve rispettarla. */
+{
+  const css = read('css/app.css');
+  const cattive = [];
+  const re = /#ptView-([a-z]+)([^{,]*)\{([^}]*)\}/g;
+  let m;
+  while ((m = re.exec(css))) {
+    const sel = `#ptView-${m[1]}${m[2]}`;
+    if (/display\s*:\s*(flex|block|grid)/.test(m[3]) && !/is-active/.test(sel)) {
+      cattive.push(sel.trim());
+    }
+  }
+  ok(cattive.length === 0,
+     `nessuna vista di Punta è visibile fuori dalla sua scheda (${cattive.join(', ') || 'confermato'})`);
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 if (problems.length) { console.log('\nDA CORREGGERE:'); problems.forEach(p => console.log('  · ' + p)); }
 process.exit(fail ? 1 : 0);

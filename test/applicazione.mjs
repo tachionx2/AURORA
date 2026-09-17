@@ -1900,8 +1900,24 @@ app.goto('parla');
    * video — quindi si insiste sulla lingua, e solo dopo si cede. */
   ok(/const tentativi = \[/.test(srcA),
      'si prova con più formulazioni prima di arrendersi');
-  ok(/ripiego: 0[\s\S]{0,400}ripiego: 1[\s\S]{0,400}ripiego: 2/.test(srcA),
-     'prima nella lingua della persona, poi in inglese, poi in qualunque lingua');
+  /* ⚠️ L'indirizzo NON viene più dal modello.
+   *
+   * I registri di una prova reale: tre richieste, tre identificativi
+   * inventati, tutti inesistenti. I titoli erano plausibili e la forma
+   * corretta, ma nessuno dei tre video esisteva — e lo stesso difetto
+   * spiegava "film giallo" che diventava un trailer di Avengers.
+   *
+   * I modelli gratuiti non sanno navigare: il suffisso che chiede la
+   * ricerca viene accettato senza che la ricerca avvenga, e a quel
+   * punto il modello compone undici caratteri plausibili. */
+  ok(/export async function cercaSuYouTube/.test(srcA),
+     'esiste una ricerca VERA su YouTube, indipendente dal modello');
+  ok(/const CERCATORI = \[/.test(srcA),
+     'con più servizi di riserva: sono gestiti da volontari e capita che vadano giù');
+  ok(/viaRicerca: true/.test(srcA),
+     'e l indirizzo viene da chi ha davvero cercato, non da chi se lo ricorda');
+  ok(/durata >= 180/.test(srcA),
+     'scartando gli spezzoni: chi chiede un documentario vuole guardarlo');
   ok(/PARLATO IN/.test(IV('it', 0)) && /in qualunque lingua/.test(IV('it', 2)),
      'e l istruzione cambia di conseguenza a ogni passaggio');
 
@@ -1961,12 +1977,12 @@ app.goto('parla');
    * modello ha inventato l indirizzo, o l ha trovato e YouTube lo
    * rifiuta? Senza vedere cosa ha risposto davvero non si può dire, e
    * si finisce per correggere a tentoni la cosa sbagliata. */
-  ok(/\[aurora\/video\] risposta:/.test(srcA),
-     'la risposta grezza dell assistente finisce nel registro');
-  ok(/\[aurora\/video\] candidati:/.test(srcA),
-     'con l elenco dei candidati estratti');
-  ok(/NON esiste o non incorporabile/.test(srcA),
-     'e l esito della verifica di ciascuno');
+  ok(/\[aurora\/video\] ricerca/.test(srcA),
+     'la ricerca e i suoi esiti finiscono nel registro');
+  ok(/ripiego, risposta del modello/.test(srcA),
+     'e la risposta del modello quando si ricade sul ripiego');
+  ok(/non incorporabile/.test(srcA),
+     'con l esito della verifica di ciascun candidato');
   ok(/\[aurora\/video\] APRO/.test(mainV2),
      'e l indirizzo che si sta per aprire');
 

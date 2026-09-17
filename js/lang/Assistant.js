@@ -333,6 +333,70 @@ export function espandiArgomento(testo) {
 }
 
 /**
+ * ══════════════════════════════════════════════════════════════════
+ * CERCARE DAVVERO SU YOUTUBE
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * ⚠️ Il modello NON deve fornire l'indirizzo. Mai.
+ *
+ * I registri di una prova reale lo mostrano senza appello: tre
+ * richieste, tre identificativi inventati, tutti inesistenti. I titoli
+ * erano plausibili — "AFRICA SELVAGGIA, documentario completo" — e la
+ * forma dell'indirizzo corretta, ma nessuno dei tre video esisteva.
+ *
+ * Un modello che cerca davvero non sbaglia tre volte su tre: copia
+ * l'indirizzo dalla pagina che ha letto. Questi li COMPONEVA, undici
+ * caratteri alla volta. E lo stesso difetto spiega "film giallo" che
+ * diventa un trailer di Avengers: senza cercare, associa a memoria.
+ *
+ * La causa: i modelli gratuiti non sanno navigare, e il suffisso che
+ * chiede la ricerca viene accettato senza che la ricerca avvenga.
+ *
+ * Il rimedio è cambiare chi fa cosa. Al modello si chiede solo ciò che
+ * sa fare bene — trasformare "doc africa" in una buona frase di
+ * ricerca — e l'indirizzo lo si prende da un motore di ricerca VERO,
+ * che restituisce solo video esistenti perché li ha appena trovati.
+ *
+ * Si usano i servizi pubblici di Piped, che non richiedono alcuna
+ * chiave. Se uno non risponde si passa al successivo: sono gestiti da
+ * volontari e capita che vadano giù.
+ */
+const CERCATORI = [
+  'https://pipedapi.kavin.rocks',
+  'https://api.piped.yt',
+  'https://pipedapi.adminforge.de',
+  'https://pipedapi.reallyaweso.me',
+];
+
+export async function cercaSuYouTube(query, quanti = 6) {
+  for (const base of CERCATORI) {
+    try {
+      const u = `${base}/search?q=${encodeURIComponent(query)}&filter=videos`;
+      const r = await fetch(u, { signal: AbortSignal.timeout?.(8000) });
+      if (!r.ok) continue;
+      const d = await r.json();
+      const items = Array.isArray(d?.items) ? d.items : [];
+      const fuori = [];
+      for (const it of items) {
+        /* L'identificativo sta in fondo all'indirizzo relativo:
+         * "/watch?v=XXXXXXXXXXX". */
+        const id = String(it?.url || '').match(/[?&]v=([A-Za-z0-9_-]{11})/)?.[1];
+        if (!id || fuori.some(x => x.id === id)) continue;
+        fuori.push({
+          id,
+          titolo: String(it?.title || '').slice(0, 140),
+          durata: Number(it?.duration) || 0,
+          viste: Number(it?.views) || 0,
+        });
+        if (fuori.length >= quanti) break;
+      }
+      if (fuori.length) return { ok: true, video: fuori, fonte: base };
+    } catch { /* servizio giù: si prova il successivo */ }
+  }
+  return { ok: false, errore: 'nessun motore di ricerca raggiungibile' };
+}
+
+/**
  * Verifica che un video ESISTA e si lasci incorporare.
  *
  * ⚠️ È la differenza fra proporre e garantire.
@@ -418,92 +482,89 @@ export function idYouTube(testo) {
 export async function cercaVideo(cfg, argomento) {
   const A = cfg?.assistente;
   if (!A?.enabled) return { ok: false, errore: 'assistente non attivo' };
-  if (!A.ricercaWeb) return { ok: false, errore: 'la ricerca sul web non è attiva' };
 
   const lingua = cfg?.ui?.language || 'it';
   const tema = espandiArgomento(argomento);
 
-  /* ⚠️ La domanda si formula come la formulerebbe una persona.
+  /* ══════════════════════════════════════════════════════════════════
+   * PRIMO: una ricerca VERA
+   * ══════════════════════════════════════════════════════════════════
    *
-   * Prima si mandava «Trova un video su: DOC AFRICA» — telegrafico, e
-   * proprio la forma che i modelli non trattano come una ricerca.
-   * Scritta per esteso, la stessa richiesta funziona. */
-  const nome = lingua === 'en' ? 'inglese' : 'italiano';
-  /* ⚠️ Prima nella lingua della persona, poi in inglese, poi
-   * qualunque: si insiste dove conta e si cede solo all'ultimo. */
+   * ⚠️ L'indirizzo viene da chi ha davvero cercato, non da chi se lo
+   * ricorda. I video restituiti esistono per costruzione: sono stati
+   * appena trovati.
+   *
+   * Si cerca con il testo della persona più la lingua: chi scrive
+   * "documentario africa" in italiano vuole quasi sempre un video in
+   * italiano, e metterlo nella ricerca è il modo più efficace di
+   * ottenerlo.
+   */
+  const nome = lingua === 'en' ? 'english' : 'italiano';
+  const query = [`${tema} ${nome}`, tema];
+
+  for (const q of query) {
+    const ric = await cercaSuYouTube(q, 8);
+    try {
+      console.warn(`[aurora/video] ricerca "${q}" →`,
+        ric.ok ? `${ric.video.length} risultati da ${ric.fonte}` : ric.errore);
+    } catch {}
+    if (!ric.ok || !ric.video.length) continue;
+
+    /* ⚠️ Si scartano i video troppo corti: i primi risultati sono
+     * spesso spezzoni, e chi chiede un documentario vuole guardarlo,
+     * non vederne dieci secondi. */
+    const buoni = ric.video.filter(v => !v.durata || v.durata >= 180);
+    const ordinati = buoni.length ? buoni : ric.video;
+
+    for (const v of ordinati) {
+      const ok = await videoUtilizzabile(v.id);
+      try {
+        console.warn(`[aurora/video] https://www.youtube.com/watch?v=${v.id} → `
+          + (ok.ok ? `ok — ${v.titolo}` : 'non incorporabile'));
+      } catch {}
+      if (!ok.ok) continue;
+      return {
+        ok: true, id: v.id,
+        alternativi: ordinati.filter(x => x.id !== v.id).slice(0, 3).map(x => x.id),
+        titolo: v.titolo || tema, verificato: true, viaRicerca: true,
+      };
+    }
+  }
+
+  /* ⚠️ Solo se la ricerca non è raggiungibile si chiede al modello.
+   *
+   * È un ripiego, non la strada principale: vale quando i servizi di
+   * ricerca sono giù. Ogni candidato resta comunque verificato prima
+   * di essere aperto. */
+  if (!A.ricercaWeb) return { ok: false, errore: 'ricerca non raggiungibile' };
+
   const tentativi = [
     { ripiego: 0, domanda: `Cerca su YouTube e dammi il link del video in ${nome} più visto e pertinente su: ${tema}` },
-    { ripiego: 0, domanda: `Qual è il miglior video YouTube in ${nome} su "${tema}"? Dammi il link diretto.` },
-    { ripiego: 1, domanda: `Cerca su YouTube e dammi il link del miglior video in inglese su: ${tema}` },
     { ripiego: 2, domanda: `Cerca su YouTube e dammi il link del miglior video su: ${tema}, in qualunque lingua` },
   ];
 
-  /* ⚠️ Due tentativi, con formulazioni diverse.
-   *
-   * I modelli gratuiti sono incostanti: la stessa domanda riesce una
-   * volta e fallisce la successiva. Un secondo tentativo costa un
-   * istante e trasforma gran parte dei fallimenti in successi — e per
-   * chi non può cercare da sé, la differenza fra un video e un
-   * "non l'ho trovato" è tutta. */
   let ultimo = 'nessun video trovato';
   for (const { ripiego, domanda } of tentativi) {
     const r = await chiedi(cfg, domanda, {
       istruzione: ISTRUZIONE_VIDEO(lingua, ripiego), ricerca: true, maxParole: 60,
     });
     if (!r.ok) { ultimo = r.errore; continue; }
-    if (/^\s*NIENTE\s*$/i.test(r.testo)) { ultimo = 'nessun video trovato'; continue; }
+    if (/^\s*NIENTE\s*$/i.test(r.testo)) continue;
+    try { console.warn('[aurora/video] ripiego, risposta del modello:', r.testo); } catch {}
 
-    /* Se propone più indirizzi si prende il PRIMO: nelle risposte di
-     * chi ha cercato davvero, l'ordine riflette la pertinenza. */
-    const id = idYouTube(r.testo);
-    if (!id) { ultimo = 'risposta non riconosciuta'; continue; }
-
-    // Il titolo è ciò che resta dopo l'indirizzo, ripulito.
-    const titolo = r.testo
-      .replace(/https?:\/\/\S+/g, ' ')
-      .replace(/[|\-–—]+/g, ' ')
-      .replace(/\s{2,}/g, ' ')
-      .trim()
-      .slice(0, 120);
-    /* ⚠️ Si VERIFICA che esista, prima di proporlo.
-     *
-     * Ogni candidato viene controllato: il primo che esiste davvero e
-     * si lascia incorporare è quello che si apre. Gli altri restano di
-     * riserva. Così chi guarda non si trova più davanti a un riquadro
-     * nero senza spiegazione. */
     const candidati = idsYouTube(r.testo).slice(0, 4);
-    /* ⚠️ Nel registro finisce la risposta GREZZA e ogni candidato con
-     * il suo esito.
-     *
-     * Quando un video non si apre, la domanda è sempre la stessa: il
-     * modello ha inventato l'indirizzo, o l'ha trovato e YouTube lo
-     * rifiuta? Senza vedere cosa ha risposto davvero non si può dire,
-     * e si finisce per correggere a tentoni la cosa sbagliata. */
-    try {
-      console.warn('[aurora/video] domanda:', domanda);
-      console.warn('[aurora/video] risposta:', r.testo);
-      console.warn('[aurora/video] candidati:', candidati.join(', ') || 'nessuno');
-    } catch {}
-
     for (const c of candidati) {
       const v = await videoUtilizzabile(c);
-      try {
-        console.warn(`[aurora/video] https://www.youtube.com/watch?v=${c} → `
-          + (v.ok ? (v.incerto ? 'non verificabile, si prova' : `ok — ${v.titolo}`)
-                  : 'NON esiste o non incorporabile'));
-      } catch {}
       if (!v.ok) continue;
-      return {
-        ok: true, id: c,
-        alternativi: candidati.filter(x => x !== c),
-        titolo: v.titolo || titolo || tema,
-        ripiego, verificato: !v.incerto,
-      };
+      return { ok: true, id: c, alternativi: candidati.filter(x => x !== c),
+               titolo: v.titolo || tema, ripiego, verificato: !v.incerto };
     }
-    ultimo = 'i video proposti non esistono o non si possono aprire';
+    ultimo = 'i video proposti non esistono';
   }
   return { ok: false, errore: ultimo };
 }
+
+
 
 /**
  * Toglie ciò che ad alta voce diventa rumore.

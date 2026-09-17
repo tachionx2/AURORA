@@ -1184,7 +1184,13 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
  * I riquadri si restringono da soli quando sono molti: meglio scritte
  * un po' più piccole che frasi irraggiungibili.
  */
-#ptView-frasi{overflow:hidden;display:flex;flex-direction:column}
+/* ⚠️ SOLO quando è attiva.
+ *
+ * Scrivendo `display:flex` senza `.is-active` la vista restava
+ * visibile sempre, anche sotto le altre: rubava spazio in verticale e
+ * comprimeva la tastiera a metà pagina. La regola generale usa
+ * `display:none` finché non si entra nella scheda, e va rispettata. */
+#ptView-frasi.is-active{overflow:hidden;flex-direction:column}
 #ptFrasi{
   flex:1;min-height:0;overflow:hidden;
   display:flex;flex-direction:column;gap:.35rem;
