@@ -1914,6 +1914,31 @@ app.goto('parla');
   ok(/catch \{ \/\* funzione assente/.test(mpL),
      'in silenzio se non è disponibile: è un miglioramento, non un requisito');
 
+  /* ⚠️ Il video dell assistente deve agganciare il riquadro della
+   * sezione in cui ci si trova.
+   *
+   * Mancava: finiva sempre nel riquadro di Parla, quindi chiedendolo
+   * da Punta si apriva in una pagina che la persona non stava
+   * guardando. Tutti gli altri percorsi lo facevano; questo no. */
+  const mainV2 = fsA2.readFileSync(pathA2.join(quiA2, '..', 'js/main.js'), 'utf8');
+  ok(/this\.agganciaMedia\(true\);/.test(mainV2),
+     'il video dell assistente si apre nella sezione da cui è stato chiesto');
+
+  /* ⚠️ E se non si lascia incorporare, si prova il successivo.
+   *
+   * Chi pubblica un video può vietarne l incorporamento, e allora il
+   * riquadro mostra "video non disponibile" anche se il video esiste
+   * ed è quello giusto. Non c è modo di saperlo prima: lo si scopre
+   * solo provando. */
+  const { idsYouTube: idsY } = await import('../js/lang/Assistant.js');
+  const tre = idsY('https://youtu.be/dQw4w9WgXcQ https://www.youtube.com/watch?v=abcdefghijk https://youtu.be/ZZZZZZZZZZZ');
+  ok(tre.length === 3, `si raccolgono tutti i candidati proposti (${tre.length})`);
+  ok(/_apriCandidatoVideo\(\)/.test(mainV2), 'e si prova il successivo se il primo non si apre');
+  ok(/e\.type === 'error' && this\._candidatiVideo/.test(mainV2),
+     'reagendo all errore del riproduttore, che è l unico modo di accorgersene');
+  ok(/non si può aprire qui/.test(mainV2),
+     'e finiti i candidati lo si dice, invece di lasciare un riquadro nero');
+
   ok(PA.openrouter.modelli[0] === 'openrouter/free',
      'il router gratuito è il primo, quindi il predefinito');
 

@@ -332,6 +332,30 @@ export function espandiArgomento(testo) {
     .trim();
 }
 
+/**
+ * Estrae TUTTI gli identificativi YouTube presenti in una risposta.
+ *
+ * ⚠️ Serve perché molti video non si lasciano incorporare: chi li
+ * pubblica può vietarlo, e allora il riquadro mostra "video non
+ * disponibile" anche se il video esiste ed è quello giusto.
+ *
+ * Non c'è modo di saperlo prima: lo si scopre solo provando. Avendone
+ * più d'uno si passa al successivo invece di arrendersi — e chi non
+ * può cercare da sé la differenza la sente tutta.
+ */
+export function idsYouTube(testo) {
+  const t = String(testo || '');
+  const fuori = [];
+  const re = /(?:youtu\.be\/|v=|embed\/|shorts\/)([A-Za-z0-9_-]{11})/g;
+  let m;
+  while ((m = re.exec(t))) if (!fuori.includes(m[1])) fuori.push(m[1]);
+  if (!fuori.length) {
+    const nudo = t.match(/(?:^|[\s|>])([A-Za-z0-9_-]{11})(?:[\s|<]|$)/);
+    if (nudo) fuori.push(nudo[1]);
+  }
+  return fuori;
+}
+
 /** Estrae un identificativo YouTube da una risposta, comunque scritta. */
 export function idYouTube(testo) {
   const t = String(testo || '');
@@ -394,7 +418,10 @@ export async function cercaVideo(cfg, argomento) {
       .replace(/\s{2,}/g, ' ')
       .trim()
       .slice(0, 120);
-    return { ok: true, id, titolo: titolo || tema, ripiego };
+    /* Si restituiscono anche gli altri trovati: se il primo non si
+     * lascia incorporare, si prova il successivo. */
+    return { ok: true, id, alternativi: idsYouTube(r.testo).slice(1, 4),
+             titolo: titolo || tema, ripiego };
   }
   return { ok: false, errore: ultimo };
 }

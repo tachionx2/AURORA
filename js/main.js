@@ -1332,13 +1332,27 @@ class App {
 
       this.debugView?.logEvent(`video trovato: ${r.id} — ${r.titolo}`);
       await this.audio.say(`Apro: ${r.titolo}`, 'menu');
+      /* ⚠️ Agganciare il riquadro PRIMA di aprire.
+       *
+       * Mancava, e il video dell'assistente finiva sempre nel riquadro
+       * di Parla: chiedendolo da Punta si apriva in una pagina che la
+       * persona non stava guardando. Tutti gli altri percorsi lo
+       * facevano; questo no. */
+      this.agganciaMedia(true);
       /* Si apre con lo STESSO percorso dei video di libreria: la
        * scansione si ferma, riprende alla chiusura, e i comandi del
        * riproduttore compaiono come sempre. */
-      await this.media.openYouTube(r.id);
-      document.body.classList.add('has-media');
-      this.refreshContext();
-      this.renderMediaBar();
+      /* ⚠️ Se il video non si lascia incorporare si passa al
+       * successivo.
+       *
+       * Chi pubblica un video può vietarne l'incorporamento, e allora
+       * il riquadro mostra "video non disponibile" anche se il video
+       * esiste ed è quello giusto. Non c'è modo di saperlo prima: lo si
+       * scopre solo provando. */
+      this._candidatiVideo = [r.id, ...(r.alternativi || [])];
+      this._tentativoVideo = 0;
+      this._titoloVideoAI = r.titolo;
+      await this._apriCandidatoVideo();
     } catch (e) {
       this._safe('ricerca video', () => { throw e; });
     }
@@ -1350,6 +1364,30 @@ class App {
    * ⚠️ Come per la posta: il testo NON viene svuotato. Se l'invio
    * fallisce, chi ha impiegato minuti a scriverlo non ricomincia.
    */
+
+  /**
+   * Apre il candidato corrente, passando al successivo se necessario.
+   *
+   * ⚠️ Chi pubblica un video può vietarne l'incorporamento, e allora
+   * il riquadro mostra "video non disponibile" anche se il video
+   * esiste ed è quello giusto. Non c'è modo di saperlo prima: lo si
+   * scopre solo provando, e avendone più d'uno si passa al successivo
+   * invece di lasciare la persona davanti a un riquadro nero.
+   */
+  async _apriCandidatoVideo() {
+    const id = this._candidatiVideo?.[this._tentativoVideo];
+    if (!id) {
+      await this.audio.say(this.cfg.ui.language === 'en'
+        ? 'That video cannot be played here'
+        : 'Quel video non si può aprire qui', 'menu');
+      return;
+    }
+    await this.media.openYouTube(id);
+    document.body.classList.add('has-media');
+    this.refreshContext();
+    this.renderMediaBar();
+  }
+
   async mandaTelegram(destinatario, testo, giaConfermato = false) {
     try {
       const { invia } = await import('./lang/Telegram.js');
@@ -2603,7 +2641,7 @@ class App {
   }
 
   /** Sposta il visualizzatore nel riquadro della scheda corrente. */
-  agganciaMedia() {
+  agganciaMedia(staPerAprire = false) {
     const tab = document.body.dataset.tab;
     /* ⚠️ In Punta il contenuto si apre LÌ, qualunque scheda interna
      * sia attiva.
@@ -2621,7 +2659,8 @@ class App {
      * da mostrare: chiamando questa funzione a vuoto — come fa la
      * preparazione all'avvio — si sposterebbe la persona altrove
      * mentre sta scrivendo. */
-    if (tab === 'punta' && this.media?.active && this.pointerView?.mode !== 'media') {
+    if (tab === 'punta' && (staPerAprire || this.media?.active)
+        && this.pointerView?.mode !== 'media') {
       try { this.pointerView.setMode('media'); } catch {}
     }
     const el = document.getElementById(id);
@@ -2774,6 +2813,16 @@ class App {
     }
     if (e.type === 'opened') {
       document.body.classList.add('has-media');
+      /* ⚠️ La scheda si mostra QUANDO il contenuto c'è, non prima.
+       *
+       * Il passaggio avveniva all'aggancio del riquadro, cioè un
+       * istante prima che il riproduttore esistesse: la scheda cambiava
+       * ma restava vuota, e per vederla bisognava uscire dalla sezione
+       * e rientrare. Ripetendolo ad apertura avvenuta, il contenuto è
+       * già lì e si vede subito. */
+      if (document.body.dataset.tab === 'punta' && this.pointerView?.mode !== 'media') {
+        this._safe('scheda media', () => this.pointerView.setMode('media'));
+      }
       this.scheduleFit();
       this.refreshContext();
       this.renderMediaBar();
@@ -2821,6 +2870,17 @@ class App {
      * sopra la musica. La stessa situazione deve dare lo stesso
      * comportamento, sempre — altrimenti chi usa il programma non può
      * prevederlo, e ogni volta deve scoprire come si comporterà. */
+    /* Video non incorporabile: si passa al candidato successivo invece
+     * di lasciare la persona davanti a un riquadro nero. */
+    if (e.type === 'error' && this._candidatiVideo?.length) {
+      this._tentativoVideo = (this._tentativoVideo || 0) + 1;
+      if (this._tentativoVideo < this._candidatiVideo.length) {
+        this.debugView?.logEvent('video non incorporabile: provo il successivo');
+        this._safe('video successivo', () => this._apriCandidatoVideo());
+        return;
+      }
+    }
+
     if (e.type === 'state' && e.playing) {
       this._zittisciPerMedia();
       /* ⚠️ Anche le bande si fermano a OGNI avvio, non solo alla

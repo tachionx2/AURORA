@@ -700,5 +700,29 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '86. e non si tocca alcun volume: le bande sono silenziose');
 }
 
+/* ══════ La scheda Media si mostra quando il contenuto c'è ══════
+ *
+ * ⚠️ Il passaggio avveniva all aggancio del riquadro, cioè un istante
+ * PRIMA che il riproduttore esistesse: la scheda cambiava ma restava
+ * vuota, e per vedere il video bisognava uscire dalla sezione e
+ * rientrare.
+ *
+ * Ripetendolo ad apertura avvenuta, il contenuto è già lì. */
+{
+  const fsM2 = await import('node:fs');
+  const pathM2 = await import('node:path');
+  const quiM2 = pathM2.dirname(import.meta.filename || process.argv[1]);
+  const main = fsM2.readFileSync(pathM2.join(quiM2, '..', 'js/main.js'), 'utf8');
+
+  const iOp = main.indexOf("La scheda si mostra QUANDO il contenuto c'è");
+  const corpo = main.slice(iOp, iOp + 900);
+  ok(/pointerView\.setMode\('media'\)/.test(corpo),
+     '87. a contenuto aperto si passa alla scheda che lo mostra');
+  ok(/dataset\.tab === 'punta'/.test(corpo),
+     '88. solo in Punta: in Parla il riquadro è già nella pagina');
+  ok(/mode !== 'media'/.test(corpo),
+     '89. e solo se non ci si è già: cambiare scheda a vuoto sposterebbe chi sta scrivendo');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);
