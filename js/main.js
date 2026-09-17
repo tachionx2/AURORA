@@ -3060,7 +3060,15 @@ class App {
         const b = document.createElement('button');
         b.className = 'btn btn-sm ptr-target';
         b.textContent = c.label;
-        b.onclick = () => this.media.command(c.id);
+        /* ⚠️ Lo STESSO percorso della scansione, non quello diretto.
+         *
+         * Qui si chiamava il riproduttore dei file: per la radio — che
+         * è un flusso gestito a parte — i comandi non facevano nulla, e
+         * per "altro video" nemmeno. In Parla funzionavano perché lì
+         * passano dalla scansione, che smista al destinatario giusto.
+         *
+         * Due strade per la stessa cosa divergono sempre: ora è una. */
+        b.onclick = () => this.scan.h.onMedia?.(c.id);
         bar.append(b);
       }
     }

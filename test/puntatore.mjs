@@ -796,6 +796,52 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
    * un elemento diverso, o un errore. */
   ok(/max-width:clamp\(240px,36vw,440px\)/.test(css),
      '99. l ultimo riquadro di una riga spaiata resta della misura degli altri');
+  ok(/#ptTiles \.pt-tile\{flex:0 1/.test(css),
+     '99b. e non cresce oltre la propria misura: un tetto da solo non bastava');
+
+  /* ⚠️ I comandi dei contenuti passano dallo STESSO smistamento della
+   * scansione.
+   *
+   * I pulsanti chiamavano direttamente il riproduttore dei file: per
+   * la radio — che è un flusso gestito a parte — non facevano nulla, e
+   * nemmeno per "altro video". In Parla funzionavano perché lì passano
+   * dalla scansione, che smista al destinatario giusto. */
+  const main2 = fsN.readFileSync(pathN.join(quiN, '..', 'js/main.js'), 'utf8');
+  ok(/b\.onclick = \(\) => this\.scan\.h\?\.onMedia\?\.\(c\.id\)|b\.onclick = \(\) => this\.scan\.h\.onMedia\?\.\(c\.id\)/.test(main2),
+     '99c. i pulsanti dei comandi usano lo stesso smistamento della scansione');
+  ok(!/b\.onclick = \(\) => this\.media\.command\(c\.id\)/.test(main2),
+     '99d. e non chiamano più direttamente il riproduttore, che per la radio non fa nulla');
+
+  /* ⚠️ E occupano tutta la larghezza: qui si colpiscono con lo sguardo
+   * o con le bande, non con un dito preciso. Un comando mancato su
+   * "chiudi" costa un giro intero. */
+  ok(/#ptMediaBar \.btn\{[\s\S]{0,120}flex:1 1 0/.test(css),
+     '99e. i comandi occupano tutta la larghezza, divisi in parti uguali');
+
+  /* ══════ Le cinque schede: i bersagli più usati della pagina ══════
+   *
+   * ⚠️ Stavano sulla riga dei comandi dell assistente, ristrette al
+   * minimo per starci tutte. Ma sono ciò che la PERSONA usa di
+   * continuo — tastiera, frasi, media — mentre quelli li preme chi
+   * assiste una volta a sessione: bersagli grandi per chi ha il mouse
+   * e piccoli per chi ha lo sguardo, il contrario di come dovrebbe
+   * essere. */
+  const html2 = fsN.readFileSync(pathN.join(quiN, '..', 'index.html'), 'utf8');
+  const iTop = html2.indexOf('class="pt-top"');
+  const iModi = html2.indexOf('class="pt-modes"');
+  ok(iModi > iTop && iModi > html2.indexOf('id="ptrStatus"'),
+     '99f. le schede stanno su una riga PROPRIA, fuori da quella dei comandi');
+  ok(/\.pt-mode\{[\s\S]{0,200}flex:1 1 0/.test(css),
+     '99g. occupano tutta la larghezza, divise in parti uguali');
+  ok(/\.pt-mode\{[\s\S]{0,200}border:1px solid/.test(css),
+     '99h. e hanno l aspetto di tasti: un bersaglio che sembra premibile viene mirato meglio');
+
+  /* I tasti in fondo alla tastiera hanno la stessa misura: sono gli
+   * stessi bersagli, colpiti nello stesso modo. */
+  const m1 = css.match(/\.pt-mode\{[\s\S]{0,300}?padding:(clamp\([^)]+\))/);
+  const m2 = css.match(/\.pt-bottom \.btn\{[\s\S]{0,300}?padding:(clamp\([^)]+\))/);
+  ok(m1 && m2 && m1[1] === m2[1],
+     '99i. e i tasti in fondo alla tastiera hanno la stessa altezza delle schede');
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

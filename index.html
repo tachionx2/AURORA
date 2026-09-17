@@ -166,16 +166,6 @@
 
   <!-- Riga comandi compatta: tutto ciò che serve, in una riga sola -->
   <div class="pt-top">
-    <div class="pt-modes" role="tablist">
-      <button class="pt-mode is-active ptr-target" id="ptMode-tastiera" data-ptmode="tastiera" data-i18n="pt.keyboard">Tastiera</button>
-      <!-- Frasi pronte: le voci più usate, senza comporre lettera per
-           lettera. Accanto alla tastiera perché sono l'alternativa
-           diretta a scriverle. -->
-      <button class="pt-mode ptr-target" id="ptMode-frasi" data-ptmode="frasi" data-i18n="pt.phrases">Frasi</button>
-      <button class="pt-mode ptr-target" id="ptMode-testi" data-ptmode="testi" data-i18n="pt.texts">I miei testi</button>
-      <button class="pt-mode ptr-target" id="ptMode-media" data-ptmode="media" data-i18n="pt.media">Media</button>
-      <button class="pt-mode ptr-target" id="ptMode-braccio" data-ptmode="braccio" data-i18n="pt.arm">Braccio</button>
-    </div>
     <div class="pt-actions">
       <button class="btn btn-sm ptr-target" id="btnPtrToggle" data-i18n="btn.ptrStart">Attiva puntatore</button>
       <button class="btn btn-sm ptr-target" id="btnCalibrate" data-i18n="btn.calibrate">Calibra</button>
@@ -189,6 +179,32 @@
       <select class="input cam-select" data-cam-select title="Telecamera in uso"></select>
     </div>
     <div class="pt-status" id="ptrStatus"></div>
+  </div>
+
+  <!-- ══════════════════════════════════════════════════════════════
+       LE CINQUE SCHEDE, SU UNA RIGA PROPRIA
+       ══════════════════════════════════════════════════════════════
+
+       ⚠️ Sono i bersagli più importanti di questa pagina: li usa la
+       persona, di continuo, per passare da tastiera a frasi a media.
+       I pulsanti della riga sopra li preme chi assiste, una volta a
+       sessione.
+
+       Stavano sulla stessa riga e si erano ristretti al minimo per
+       starci tutti: bersagli grandi per chi ha il mouse e piccoli per
+       chi ha lo sguardo, il contrario di come dovrebbe essere.
+
+       Qui hanno l'aspetto e la misura dei tasti della tastiera, e
+       occupano tutta la larghezza. -->
+  <div class="pt-modes" role="tablist">
+    <button class="pt-mode is-active ptr-target" id="ptMode-tastiera" data-ptmode="tastiera" data-i18n="pt.keyboard">Tastiera</button>
+    <!-- Frasi pronte: le voci più usate, senza comporre lettera per
+         lettera. Accanto alla tastiera perché sono l'alternativa
+         diretta a scriverle. -->
+    <button class="pt-mode ptr-target" id="ptMode-frasi" data-ptmode="frasi" data-i18n="pt.phrases">Frasi</button>
+    <button class="pt-mode ptr-target" id="ptMode-testi" data-ptmode="testi" data-i18n="pt.texts">I miei testi</button>
+    <button class="pt-mode ptr-target" id="ptMode-media" data-ptmode="media" data-i18n="pt.media">Media</button>
+    <button class="pt-mode ptr-target" id="ptMode-braccio" data-ptmode="braccio" data-i18n="pt.arm">Braccio</button>
   </div>
 
   <!-- MODALITÀ TASTIERA -->

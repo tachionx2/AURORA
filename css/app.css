@@ -776,11 +776,27 @@ body.in-finestra .mini{height:100vh;justify-content:center}
   overflow:hidden;
 }
 .pt-top{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;flex:0 0 auto}
-.pt-modes{display:flex;gap:.2rem;background:var(--raised);border-radius:10px;padding:2px;flex-wrap:wrap}
+/* ── Le cinque schede: bersagli grandi quanto i tasti ──
+ *
+ * ⚠️ Sono ciò che la persona usa di continuo, e si colpiscono con lo
+ * sguardo o con le bande. Stavano sulla riga dei comandi
+ * dell'assistente, ristrette al minimo per starci tutte.
+ *
+ * Ora occupano tutta la larghezza, divise in parti uguali, con
+ * l'aspetto dei tasti: un bersaglio che sembra premibile viene mirato
+ * meglio di uno che sembra un'etichetta.
+ */
+.pt-modes{
+  display:flex;gap:.4rem;flex-wrap:nowrap;
+  margin:0 0 clamp(.3rem,.9vh,.6rem);
+}
 .pt-mode{
-  border:0;background:transparent;color:var(--muted);cursor:pointer;
-  padding:clamp(.3rem,.9vh,.5rem) clamp(.6rem,1.6vw,1rem);border-radius:8px;
-  font:700 clamp(.75rem,1.6vh,.9rem) var(--font);
+  flex:1 1 0;min-width:0;
+  border:1px solid var(--line);background:var(--surface);color:var(--text);
+  cursor:pointer;border-radius:10px;
+  padding:clamp(.55rem,1.8vh,1rem) .3rem;
+  font:700 clamp(.78rem,1.9vh,1.05rem) var(--font);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .pt-mode.is-active{background:var(--accent);color:var(--ink)}
 .pt-actions{display:flex;gap:.3rem;flex-wrap:wrap}
@@ -800,9 +816,15 @@ body.in-finestra .mini{height:100vh;justify-content:center}
 .pt-view.is-active{display:flex}
 #ptView-braccio.is-active,#ptView-testi.is-active{overflow-y:auto}
 
+/* ⚠️ La banda del testo composto cede un po' d'altezza ai tasti.
+ *
+ * Resta l'elemento che la persona legge, ma leggere è più facile che
+ * colpire: i millimetri tolti qui vanno ai pulsanti in fondo —
+ * "pronuncia", "rileggi", "chiedi" — che si mirano con lo sguardo e
+ * che oggi erano i più stretti della pagina. */
 .pt-compose{
   background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
-  padding:clamp(.5rem,1.4vh,1rem) clamp(.7rem,2vw,1.2rem);flex:0 0 auto;overflow:hidden;
+  padding:clamp(.35rem,1vh,.7rem) clamp(.7rem,2vw,1.2rem);flex:0 0 auto;overflow:hidden;
 }
 .pt-sentence{
   font-size:calc(clamp(1.2rem,min(3.6vw,4vh),2.4rem) * var(--fit,1) * var(--leggi,1));
@@ -819,7 +841,13 @@ body.in-finestra .mini{height:100vh;justify-content:center}
 #panel-punta .kb-row{flex:1 1 0;min-height:0}
 #panel-punta .kb-key{aspect-ratio:auto;height:100%;max-width:none;font-size:calc(clamp(.9rem,min(2.6vw,3.4vh),1.6rem) * var(--fit,1))}
 .pt-bottom{display:flex;gap:clamp(.25rem,.8vh,.5rem);flex:0 0 auto}
-.pt-bottom .btn{flex:1 1 0;min-width:0}
+/* ⚠️ Alti quanto le schede in cima: sono gli stessi bersagli, colpiti
+ * nello stesso modo, e devono costare la stessa fatica. */
+.pt-bottom .btn{
+  flex:1 1 0;min-width:0;
+  padding:clamp(.55rem,1.8vh,1rem) .3rem;
+  font:700 clamp(.78rem,1.9vh,1.05rem) var(--font);
+}
 
 @media(max-height:620px){
   .pt-status{display:none}
@@ -936,6 +964,27 @@ audio.media-el{height:54px;background:transparent}
 .media-text p{margin-bottom:.9rem}
 .media-bar{display:flex;gap:.4rem;flex-wrap:wrap;margin-bottom:.7rem}
 .media-bar .btn{flex:0 0 auto}
+
+/* ── Comandi dei contenuti nella scheda Punta ──
+ *
+ * ⚠️ Qui i pulsanti si colpiscono con lo sguardo o con le bande, non
+ * con un dito preciso: stretti e ravvicinati erano difficili da
+ * prendere, e un comando mancato su "chiudi" costa un giro intero.
+ *
+ * Occupano quindi tutta la larghezza, divisi in parti uguali.
+ */
+#ptMediaBar{gap:.5rem}
+#ptMediaBar .btn{
+  flex:1 1 0;min-width:5.5rem;
+  padding:clamp(.5rem,1.6vh,.9rem) .4rem;
+  font-size:clamp(.78rem,1.9vh,1rem);
+}
+
+/* ⚠️ E i riquadri dei contenuti non si allargano oltre misura: senza
+ * questo, l'ultimo di una riga spaiata occupava tutto lo spazio
+ * rimasto e sembrava un elemento diverso. La regola generale ha un
+ * tetto, ma qui serve anche impedire la crescita. */
+#ptTiles .pt-tile{flex:0 1 clamp(120px,18vw,220px)}
 
 /* Righe con riordino */
 .row .ord{display:flex;flex-direction:column;gap:1px}
