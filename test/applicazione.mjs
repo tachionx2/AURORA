@@ -1912,8 +1912,24 @@ app.goto('parla');
    * punto il modello compone undici caratteri plausibili. */
   ok(/export async function cercaSuYouTube/.test(srcA),
      'esiste una ricerca VERA su YouTube, indipendente dal modello');
-  ok(/const CERCATORI = \[/.test(srcA),
-     'con più servizi di riserva: sono gestiti da volontari e capita che vadano giù');
+  /* ⚠️ La ricerca passa da un servizio NOSTRO, non dal browser.
+   *
+   * Il browser vieta a una pagina di leggere risposte da altri siti se
+   * quel sito non lo consente: YouTube e i servizi pubblici non lo
+   * consentono, e ogni tentativo finiva con «blocked by CORS policy».
+   * Non è una scelta sbagliata di indirizzo: è una regola del browser,
+   * e nessun indirizzo la aggira. */
+  ok(/SERVIZIO_RICERCA = '\/\.netlify\/functions\/cerca-video'/.test(srcA),
+     'la ricerca passa da un servizio nostro, non direttamente dal browser');
+  const fnR = fsA2.readFileSync(pathA2.join(quiA2, '..', 'netlify/functions/cerca-video.js'), 'utf8');
+  ok(/youtube\.com\/results/.test(fnR),
+     'che legge la pagina pubblica dei risultati, senza alcuna chiave');
+  ok(/sp=EgIQAQ/.test(fnR),
+     'chiedendo i soli VIDEO: una playlist non si può aprire nel riquadro');
+  ok(/la pagina di YouTube è cambiata/.test(fnR),
+     'e distingue "nessun risultato" da "non so più leggere la pagina"');
+
+
   ok(/viaRicerca: true/.test(srcA),
      'e l indirizzo viene da chi ha davvero cercato, non da chi se lo ricorda');
   ok(/durata >= 180/.test(srcA),
@@ -1985,6 +2001,27 @@ app.goto('parla');
      'con l esito della verifica di ciascun candidato');
   ok(/\[aurora\/video\] APRO/.test(mainV2),
      'e l indirizzo che si sta per aprire');
+
+  /* ══════ "Altro video": il primo non è sempre quello giusto ══════
+   *
+   * ⚠️ Con la ricerca vera ne abbiamo otto in mano: scartarne sette
+   * sarebbe uno spreco.
+   *
+   * Ma la lista NON si fa ascoltare prima: aprire subito costa zero
+   * gesti nel caso normale — il primo risultato è quasi sempre quello
+   * giusto — mentre scegliere da un elenco costerebbe tre o quattro
+   * gesti SEMPRE. È lo stesso principio delle frasi pronte: il
+   * percorso più frequente dev essere il più corto. */
+  ok(/async altroVideo\(\)/.test(mainV2),
+     'esiste il comando per provare un altro risultato');
+  ok(/altri > 0/.test(mainV2),
+     '⚠️ e compare SOLO se ce n è davvero un altro: un comando che non fa nulla costa un giro di scansione e delude');
+  ok(/Non ci sono altri video/.test(mainV2),
+     'finiti i risultati lo si dice, invece di non fare nulla');
+  ok(/alternativi: ordinati\.filter/.test(srcA) && !/slice\(0, 3\)\.map/.test(srcA),
+     'tutti i risultati restano in serbo, non solo tre');
+  ok(/this\._tentativoVideo > 0/.test(mainV2),
+     'e il titolo si annuncia cambiando video: chi ascolta deve sapere cosa parte');
 
   ok(PA.openrouter.modelli[0] === 'openrouter/free',
      'il router gratuito è il primo, quindi il predefinito');

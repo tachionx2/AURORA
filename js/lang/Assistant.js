@@ -361,39 +361,42 @@ export function espandiArgomento(testo) {
  * chiave. Se uno non risponde si passa al successivo: sono gestiti da
  * volontari e capita che vadano giù.
  */
-const CERCATORI = [
-  'https://pipedapi.kavin.rocks',
-  'https://api.piped.yt',
-  'https://pipedapi.adminforge.de',
-  'https://pipedapi.reallyaweso.me',
-];
+/* ⚠️ La ricerca passa da un servizio NOSTRO, non dal browser.
+ *
+ * Il browser vieta a una pagina di leggere risposte da altri siti se
+ * quel sito non lo consente: YouTube e i servizi pubblici di Piped non
+ * lo consentono, e ogni tentativo finiva con «blocked by CORS policy».
+ * Non è una scelta sbagliata di indirizzo: è una regola del browser, e
+ * nessun indirizzo la aggira.
+ *
+ * Un servizio che gira sul server non è una pagina e non ha quel
+ * limite. Fa la ricerca e la restituisce alla pagina, che può leggerla
+ * perché arriva dal proprio stesso sito.
+ *
+ * ⚠️ Senza alcuna chiave: si legge la pagina pubblica dei risultati,
+ * la stessa che vedrebbe una persona.
+ */
+const SERVIZIO_RICERCA = '/.netlify/functions/cerca-video';
 
-export async function cercaSuYouTube(query, quanti = 6) {
-  for (const base of CERCATORI) {
-    try {
-      const u = `${base}/search?q=${encodeURIComponent(query)}&filter=videos`;
-      const r = await fetch(u, { signal: AbortSignal.timeout?.(8000) });
-      if (!r.ok) continue;
-      const d = await r.json();
-      const items = Array.isArray(d?.items) ? d.items : [];
-      const fuori = [];
-      for (const it of items) {
-        /* L'identificativo sta in fondo all'indirizzo relativo:
-         * "/watch?v=XXXXXXXXXXX". */
-        const id = String(it?.url || '').match(/[?&]v=([A-Za-z0-9_-]{11})/)?.[1];
-        if (!id || fuori.some(x => x.id === id)) continue;
-        fuori.push({
-          id,
-          titolo: String(it?.title || '').slice(0, 140),
-          durata: Number(it?.duration) || 0,
-          viste: Number(it?.views) || 0,
-        });
-        if (fuori.length >= quanti) break;
-      }
-      if (fuori.length) return { ok: true, video: fuori, fonte: base };
-    } catch { /* servizio giù: si prova il successivo */ }
+export async function cercaSuYouTube(query, quanti = 8, lingua = 'it') {
+  try {
+    const u = `${SERVIZIO_RICERCA}?q=${encodeURIComponent(query)}`
+      + `&n=${quanti}&lang=${encodeURIComponent(lingua)}`;
+    const r = await fetch(u, { signal: AbortSignal.timeout?.(12000) });
+    if (!r.ok) {
+      return { ok: false,
+               errore: r.status === 404
+                 ? 'servizio di ricerca non installato su questo sito'
+                 : `il servizio ha risposto ${r.status}` };
+    }
+    const d = await r.json().catch(() => null);
+    if (!d?.ok || !Array.isArray(d.video) || !d.video.length) {
+      return { ok: false, errore: d?.errore || 'nessun risultato' };
+    }
+    return { ok: true, video: d.video, fonte: d.fonte || 'youtube' };
+  } catch (e) {
+    return { ok: false, errore: 'servizio di ricerca non raggiungibile' };
   }
-  return { ok: false, errore: 'nessun motore di ricerca raggiungibile' };
 }
 
 /**
@@ -503,7 +506,7 @@ export async function cercaVideo(cfg, argomento) {
   const query = [`${tema} ${nome}`, tema];
 
   for (const q of query) {
-    const ric = await cercaSuYouTube(q, 8);
+    const ric = await cercaSuYouTube(q, 8, lingua);
     try {
       console.warn(`[aurora/video] ricerca "${q}" →`,
         ric.ok ? `${ric.video.length} risultati da ${ric.fonte}` : ric.errore);
@@ -525,7 +528,11 @@ export async function cercaVideo(cfg, argomento) {
       if (!ok.ok) continue;
       return {
         ok: true, id: v.id,
-        alternativi: ordinati.filter(x => x.id !== v.id).slice(0, 3).map(x => x.id),
+        /* ⚠️ Tutti gli altri restano in serbo, non solo tre: sono già
+         * stati trovati e verificati dalla ricerca, e tenerli costa
+         * nulla. Servono al comando "altro video". */
+        alternativi: ordinati.filter(x => x.id !== v.id).map(x => x.id),
+        titoli: Object.fromEntries(ordinati.map(x => [x.id, x.titolo])),
         titolo: v.titolo || tema, verificato: true, viaRicerca: true,
       };
     }

@@ -116,9 +116,12 @@ class App {
        *
        * La radio non passa dal riproduttore dei file: mandandole i
        * comandi di quello, non succedeva nulla. */
-      onMedia: (cmd) => (this.media.active
-        ? this.media.command(cmd)
-        : this.comandoRadio(cmd)),
+      onMedia: (cmd) => {
+        // Il comando dei risultati alternativi è gestito qui: riguarda
+        // la ricerca, non il riproduttore.
+        if (cmd === 'altroVideo') return this.altroVideo();
+        return this.media.active ? this.media.command(cmd) : this.comandoRadio(cmd);
+      },
       onMediaOpen: (sel) => this.apriDallaLibreria(sel),
       onDraft: (op, arg) => this.onDraft(op, arg),
       onAsk: (testo) => this.chiediAssistente(testo),
@@ -1358,6 +1361,7 @@ class App {
       this._candidatiVideo = [r.id, ...(r.alternativi || [])];
       this._tentativoVideo = 0;
       this._titoloVideoAI = r.titolo;
+      this._titoliVideo = r.titoli || {};
       await this._apriCandidatoVideo();
     } catch (e) {
       this._safe('ricerca video', () => { throw e; });
@@ -1370,6 +1374,31 @@ class App {
    * ⚠️ Come per la posta: il testo NON viene svuotato. Se l'invio
    * fallisce, chi ha impiegato minuti a scriverlo non ricomincia.
    */
+
+  /**
+   * Passa al risultato successivo della stessa ricerca.
+   *
+   * ⚠️ Il video giusto non è sempre il primo, e con la ricerca vera ne
+   * abbiamo otto in mano: scartarne sette sarebbe uno spreco.
+   *
+   * Ma la lista NON si fa ascoltare prima: aprire subito costa zero
+   * gesti nel caso normale — il primo risultato è quasi sempre quello
+   * giusto — mentre scegliere da un elenco costerebbe tre o quattro
+   * gesti SEMPRE, anche quando il primo andava bene. È lo stesso
+   * principio delle frasi pronte: il percorso più frequente dev essere
+   * il più corto.
+   */
+  async altroVideo() {
+    if (!this._candidatiVideo?.length) return;
+    this._tentativoVideo = (this._tentativoVideo || 0) + 1;
+    if (this._tentativoVideo >= this._candidatiVideo.length) {
+      this._tentativoVideo = this._candidatiVideo.length - 1;
+      await this.audio.say(this.cfg.ui.language === 'en'
+        ? 'No other video found' : 'Non ci sono altri video', 'menu');
+      return;
+    }
+    await this._apriCandidatoVideo();
+  }
 
   /**
    * Apre il candidato corrente, passando al successivo se necessario.
@@ -1392,6 +1421,12 @@ class App {
     document.body.classList.add('has-media');
     this.refreshContext();
     this.renderMediaBar();
+    /* Il titolo si annuncia: cambiando video con "altro", chi ascolta
+     * deve sapere cosa sta per partire senza doverlo indovinare. */
+    const t2 = this._titoliVideo?.[id];
+    if (t2 && this._tentativoVideo > 0) {
+      this.audio.say(t2.slice(0, 90), 'menu');
+    }
   }
 
   async mandaTelegram(destinatario, testo, giaConfermato = false) {
@@ -2771,7 +2806,23 @@ class App {
 
   /** I comandi da mostrare: del riproduttore, o della radio. */
   _comandiCorrenti() {
-    if (this.media.active) return this.media.commands();
+    if (this.media.active) {
+      const base = this.media.commands();
+      /* ⚠️ "Altro video" compare SOLO se ce n'è davvero un altro.
+       *
+       * È una ricerca dell'assistente con più risultati in serbo. Un
+       * comando che non fa nulla è peggio di un comando assente: costa
+       * un giro di scansione ogni volta e delude chi lo sceglie. */
+      const altri = (this._candidatiVideo?.length || 0) - (this._tentativoVideo || 0) - 1;
+      if (this.media.kind === 'youtube' && altri > 0) {
+        return [
+          base[0],
+          { id: 'altroVideo', label: '🔀 ALTRO', spoken: 'prova un altro video' },
+          ...base.slice(1),
+        ];
+      }
+      return base;
+    }
     /* ⚠️ I comandi restano anche a radio in PAUSA.
      *
      * Legandoli a "sta suonando", mettere in pausa faceva sparire il

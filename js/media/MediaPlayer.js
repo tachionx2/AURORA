@@ -55,6 +55,14 @@ export const MediaCommand = {
    * arrivata: ore di lettura in un colpo solo non si possono fermare
    * con un solo gesto, e chi ascolta resterebbe prigioniero fino alla
    * fine. Un tratto per volta, e chi ascolta decide se continuare. */
+  /* ⚠️ Solo per i video cercati dall'assistente: passa al risultato
+   * successivo della stessa ricerca.
+   *
+   * Il video giusto non è sempre il primo, e scartare gli altri sette
+   * risultati sarebbe uno spreco. Ma la lista NON si fa ascoltare
+   * prima: aprire subito costa zero gesti nel caso normale, mentre
+   * scegliere da un elenco costerebbe tre o quattro gesti SEMPRE. */
+  ALTRO_VIDEO: 'altroVideo',
   READ_BACK: 'readBack',
   READ_RESTART: 'readRestart',
   EXIT: 'exit',
