@@ -1173,3 +1173,30 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
 }
 .schermo-scuro[hidden]{display:none}
 .schermo-scuro.on{opacity:var(--scuro-op,.97)}
+
+
+/* ── Frasi pronte in Punta: tutte a schermo, senza scorrere ──
+ *
+ * ⚠️ Una barra di scorrimento è un bersaglio che con lo sguardo non si
+ * usa: chi punta può premere un riquadro, non trascinare una barra.
+ * Le frasi fuori dallo schermo erano, di fatto, frasi inesistenti.
+ *
+ * I riquadri si restringono da soli quando sono molti: meglio scritte
+ * un po' più piccole che frasi irraggiungibili.
+ */
+#ptView-frasi{overflow:hidden;display:flex;flex-direction:column}
+#ptFrasi{
+  flex:1;min-height:0;overflow:hidden;
+  display:flex;flex-direction:column;gap:.35rem;
+}
+#ptFrasi .pt-tilegroup{flex:1;min-height:0;display:flex;flex-direction:column}
+#ptFrasi .pt-tilehead{flex:0 0 auto;font-size:.72rem;margin:.1rem 0 .15rem}
+#ptFrasi .pt-tilerow{
+  flex:1;min-height:0;display:grid;gap:.35rem;
+  grid-template-columns:repeat(auto-fit,minmax(7.5rem,1fr));
+  align-content:stretch;
+}
+#ptFrasi .pt-frase{
+  min-height:0;height:100%;padding:.4rem .5rem;
+  font-size:clamp(.7rem,2.2vh,1.05rem);line-height:1.15;
+}

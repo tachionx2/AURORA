@@ -333,6 +333,53 @@ export function espandiArgomento(testo) {
 }
 
 /**
+ * Verifica che un video ESISTA e si lasci incorporare.
+ *
+ * ⚠️ È la differenza fra proporre e garantire.
+ *
+ * Anche cercando sul web, un modello può restituire un indirizzo
+ * plausibile ma inesistente: undici caratteri qualunque sembrano un
+ * identificativo valido, e nulla nella risposta dice che non lo è. Chi
+ * guarda si trova un riquadro nero e non capisce perché.
+ *
+ * YouTube offre un controllo pubblico che non richiede alcuna chiave:
+ * se il video non esiste, o vieta l'incorporamento, risponde con un
+ * errore. Chiederglielo prima costa un istante e trasforma un
+ * "consigliato" in un "funziona".
+ */
+export async function videoUtilizzabile(id) {
+  try {
+    const u = `https://www.youtube.com/oembed?url=${
+      encodeURIComponent(`https://www.youtube.com/watch?v=${id}`)}&format=json`;
+    const r = await fetch(u);
+    /* ⚠️ Solo 401, 403 e 404 sono un NO definitivo.
+     *
+     * Sono le risposte con cui YouTube dice "questo video non esiste"
+     * o "non si lascia incorporare". Qualunque altro esito — una rete
+     * che filtra, un intermediario, un guasto momentaneo — non dice
+     * nulla sul video, e trattarlo come un rifiuto significherebbe
+     * scartare video perfettamente buoni ogni volta che la connessione
+     * è sorvegliata. Nel dubbio si prova ad aprirlo. */
+    /* 404 = il video non esiste. 401 = esiste ma vieta
+     * l'incorporamento. Entrambi sono un NO che viene da YouTube.
+     *
+     * ⚠️ Il 403 NO: è la risposta tipica di una rete che filtra o di un
+     * intermediario aziendale, e scartarci sopra significherebbe
+     * rifiutare video buoni ogni volta che la connessione è
+     * sorvegliata. */
+    if (r.status === 404 || r.status === 401) return { ok: false };
+    if (!r.ok) return { ok: true, titolo: '', incerto: true };
+    const d = await r.json().catch(() => null);
+    return { ok: true, titolo: d?.title || '' };
+  } catch {
+    /* ⚠️ Rete assente o controllo non raggiungibile: si prova comunque
+     * ad aprirlo. Meglio un tentativo che potrebbe riuscire di un
+     * rifiuto certo. */
+    return { ok: true, titolo: '', incerto: true };
+  }
+}
+
+/**
  * Estrae TUTTI gli identificativi YouTube presenti in una risposta.
  *
  * ⚠️ Serve perché molti video non si lasciano incorporare: chi li
@@ -418,10 +465,42 @@ export async function cercaVideo(cfg, argomento) {
       .replace(/\s{2,}/g, ' ')
       .trim()
       .slice(0, 120);
-    /* Si restituiscono anche gli altri trovati: se il primo non si
-     * lascia incorporare, si prova il successivo. */
-    return { ok: true, id, alternativi: idsYouTube(r.testo).slice(1, 4),
-             titolo: titolo || tema, ripiego };
+    /* ⚠️ Si VERIFICA che esista, prima di proporlo.
+     *
+     * Ogni candidato viene controllato: il primo che esiste davvero e
+     * si lascia incorporare è quello che si apre. Gli altri restano di
+     * riserva. Così chi guarda non si trova più davanti a un riquadro
+     * nero senza spiegazione. */
+    const candidati = idsYouTube(r.testo).slice(0, 4);
+    /* ⚠️ Nel registro finisce la risposta GREZZA e ogni candidato con
+     * il suo esito.
+     *
+     * Quando un video non si apre, la domanda è sempre la stessa: il
+     * modello ha inventato l'indirizzo, o l'ha trovato e YouTube lo
+     * rifiuta? Senza vedere cosa ha risposto davvero non si può dire,
+     * e si finisce per correggere a tentoni la cosa sbagliata. */
+    try {
+      console.warn('[aurora/video] domanda:', domanda);
+      console.warn('[aurora/video] risposta:', r.testo);
+      console.warn('[aurora/video] candidati:', candidati.join(', ') || 'nessuno');
+    } catch {}
+
+    for (const c of candidati) {
+      const v = await videoUtilizzabile(c);
+      try {
+        console.warn(`[aurora/video] https://www.youtube.com/watch?v=${c} → `
+          + (v.ok ? (v.incerto ? 'non verificabile, si prova' : `ok — ${v.titolo}`)
+                  : 'NON esiste o non incorporabile'));
+      } catch {}
+      if (!v.ok) continue;
+      return {
+        ok: true, id: c,
+        alternativi: candidati.filter(x => x !== c),
+        titolo: v.titolo || titolo || tema,
+        ripiego, verificato: !v.incerto,
+      };
+    }
+    ultimo = 'i video proposti non esistono o non si possono aprire';
   }
   return { ok: false, errore: ultimo };
 }

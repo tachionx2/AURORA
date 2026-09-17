@@ -1331,6 +1331,12 @@ class App {
       }
 
       this.debugView?.logEvent(`video trovato: ${r.id} — ${r.titolo}`);
+      try {
+        console.warn(`[aurora/video] APRO https://www.youtube.com/watch?v=${r.id}`
+          + ` — ${r.titolo}`
+          + (r.verificato ? ' (verificato)' : ' (non verificato)')
+          + (r.alternativi?.length ? ` · riserve: ${r.alternativi.join(', ')}` : ''));
+      } catch {}
       await this.audio.say(`Apro: ${r.titolo}`, 'menu');
       /* ⚠️ Agganciare il riquadro PRIMA di aprire.
        *
@@ -2876,6 +2882,10 @@ class App {
       this._tentativoVideo = (this._tentativoVideo || 0) + 1;
       if (this._tentativoVideo < this._candidatiVideo.length) {
         this.debugView?.logEvent('video non incorporabile: provo il successivo');
+        try {
+          console.warn('[aurora/video] rifiutato dal riproduttore, passo a: '
+            + (this._candidatiVideo[this._tentativoVideo] || 'nessun altro'));
+        } catch {}
         this._safe('video successivo', () => this._apriCandidatoVideo());
         return;
       }

@@ -1939,6 +1939,37 @@ app.goto('parla');
   ok(/non si può aprire qui/.test(mainV2),
      'e finiti i candidati lo si dice, invece di lasciare un riquadro nero');
 
+  /* ⚠️ E ogni candidato si VERIFICA prima di proporlo.
+   *
+   * Anche cercando sul web, un modello può restituire un indirizzo
+   * plausibile ma inesistente: undici caratteri qualunque sembrano un
+   * identificativo valido, e nulla nella risposta dice che non lo è.
+   * Chi guarda si trova un riquadro nero e non capisce perché. */
+  ok(/videoUtilizzabile\(id\)/.test(srcA),
+     'ogni video viene verificato prima di essere proposto');
+  ok(/oembed/.test(srcA),
+     'con il controllo pubblico di YouTube, che non richiede alcuna chiave');
+  ok(/r\.status === 404 \|\| r\.status === 401/.test(srcA),
+     'solo "non esiste" e "non incorporabile" sono un no definitivo');
+  ok(/incerto: true/.test(srcA),
+     '⚠️ una rete che filtra non conta come rifiuto: nel dubbio si prova ad aprirlo');
+
+  /* ⚠️ E tutto finisce nel registro: risposta grezza, candidati, esito
+   * di ciascuno, indirizzo aperto.
+   *
+   * Quando un video non si apre la domanda è sempre la stessa: il
+   * modello ha inventato l indirizzo, o l ha trovato e YouTube lo
+   * rifiuta? Senza vedere cosa ha risposto davvero non si può dire, e
+   * si finisce per correggere a tentoni la cosa sbagliata. */
+  ok(/\[aurora\/video\] risposta:/.test(srcA),
+     'la risposta grezza dell assistente finisce nel registro');
+  ok(/\[aurora\/video\] candidati:/.test(srcA),
+     'con l elenco dei candidati estratti');
+  ok(/NON esiste o non incorporabile/.test(srcA),
+     'e l esito della verifica di ciascuno');
+  ok(/\[aurora\/video\] APRO/.test(mainV2),
+     'e l indirizzo che si sta per aprire');
+
   ok(PA.openrouter.modelli[0] === 'openrouter/free',
      'il router gratuito è il primo, quindi il predefinito');
 
