@@ -275,13 +275,25 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
  * Con la ricerca attiva l'assistente guarda davvero, e l'indirizzo che
  * restituisce è un indirizzo che ha visto.
  */
-export const ISTRUZIONE_VIDEO = (lingua = 'it') => {
-  const L = lingua === 'en' ? 'inglese' : 'italiano';
+export const ISTRUZIONE_VIDEO = (lingua = 'it', ripiego = 0) => {
+  const NOMI = { it: 'italiano', en: 'inglese' };
+  /* ⚠️ Tre passaggi, in ordine di preferenza.
+   *
+   * Chi ascolta non può capire un video in una lingua che non conosce:
+   * per lui un documentario in rumeno è un documentario che non esiste.
+   * Ma un video nella lingua sbagliata resta meglio di nessun video —
+   * quindi si insiste sulla lingua, e solo dopo si cede.
+   *
+   * 0 = la lingua della persona · 1 = inglese · 2 = qualunque. */
+  const L = ripiego === 0 ? (NOMI[lingua] || 'italiano')
+    : ripiego === 1 ? 'inglese' : null;
   return [
     `Sei un assistente che cerca video su YouTube per una persona che`,
     `può muovere un solo occhio e non può navigare il web da sola.`,
     `Cerca su internet e rispondi con l'INDIRIZZO COMPLETO del video YouTube`,
-    `più pertinente e più visto sull'argomento, preferibilmente in ${L}.`,
+    (L
+      ? `più pertinente e più visto sull'argomento, PARLATO IN ${L.toUpperCase()}.`
+      : `più pertinente e più visto sull'argomento, in qualunque lingua.`),
     `Rispondi con il solo indirizzo, per esempio:`,
     `https://www.youtube.com/watch?v=XXXXXXXXXXX`,
     `Puoi aggiungere dopo l'indirizzo un trattino e il titolo.`,
@@ -345,9 +357,14 @@ export async function cercaVideo(cfg, argomento) {
    * Prima si mandava «Trova un video su: DOC AFRICA» — telegrafico, e
    * proprio la forma che i modelli non trattano come una ricerca.
    * Scritta per esteso, la stessa richiesta funziona. */
-  const domande = [
-    `Cerca su YouTube e dammi il link del video più visto e pertinente su: ${tema}`,
-    `Qual è il miglior video YouTube su "${tema}"? Dammi il link diretto.`,
+  const nome = lingua === 'en' ? 'inglese' : 'italiano';
+  /* ⚠️ Prima nella lingua della persona, poi in inglese, poi
+   * qualunque: si insiste dove conta e si cede solo all'ultimo. */
+  const tentativi = [
+    { ripiego: 0, domanda: `Cerca su YouTube e dammi il link del video in ${nome} più visto e pertinente su: ${tema}` },
+    { ripiego: 0, domanda: `Qual è il miglior video YouTube in ${nome} su "${tema}"? Dammi il link diretto.` },
+    { ripiego: 1, domanda: `Cerca su YouTube e dammi il link del miglior video in inglese su: ${tema}` },
+    { ripiego: 2, domanda: `Cerca su YouTube e dammi il link del miglior video su: ${tema}, in qualunque lingua` },
   ];
 
   /* ⚠️ Due tentativi, con formulazioni diverse.
@@ -358,9 +375,9 @@ export async function cercaVideo(cfg, argomento) {
    * chi non può cercare da sé, la differenza fra un video e un
    * "non l'ho trovato" è tutta. */
   let ultimo = 'nessun video trovato';
-  for (const domanda of domande) {
+  for (const { ripiego, domanda } of tentativi) {
     const r = await chiedi(cfg, domanda, {
-      istruzione: ISTRUZIONE_VIDEO(lingua), ricerca: true, maxParole: 60,
+      istruzione: ISTRUZIONE_VIDEO(lingua, ripiego), ricerca: true, maxParole: 60,
     });
     if (!r.ok) { ultimo = r.errore; continue; }
     if (/^\s*NIENTE\s*$/i.test(r.testo)) { ultimo = 'nessun video trovato'; continue; }
@@ -377,7 +394,7 @@ export async function cercaVideo(cfg, argomento) {
       .replace(/\s{2,}/g, ' ')
       .trim()
       .slice(0, 120);
-    return { ok: true, id, titolo: titolo || tema };
+    return { ok: true, id, titolo: titolo || tema, ripiego };
   }
   return { ok: false, errore: ultimo };
 }

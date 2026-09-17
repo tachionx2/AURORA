@@ -133,10 +133,16 @@ export const COMMANDS_BY_KIND = {
   radio: [
     { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
     { id: MediaCommand.PLAY_PAUSE, label: '⏯',           spoken: 'pausa o riprendi' },
-    { id: MediaCommand.VOL_UP,     label: '🔊 +VOL',      spoken: 'più volume' },
-    { id: MediaCommand.VOL_DOWN,   label: '🔉 −VOL',      spoken: 'meno volume' },
+    /* ⚠️ Cambiare stazione viene PRIMA del volume.
+     *
+     * Su una radio è il comando che si usa più spesso — si cerca cosa
+     * ascoltare — mentre sui file audio e video, dove si è già scelto
+     * cosa si vuole, passare al successivo è raro. Stessi comandi,
+     * ordine diverso, perché l uso è diverso. */
     { id: MediaCommand.NEXT,       label: '⏭',           spoken: 'radio successiva' },
     { id: MediaCommand.PREV,       label: '⏮',           spoken: 'radio precedente' },
+    { id: MediaCommand.VOL_UP,     label: '🔊 +VOL',      spoken: 'più volume' },
+    { id: MediaCommand.VOL_DOWN,   label: '🔉 −VOL',      spoken: 'meno volume' },
   ],
   image: [
     { id: MediaCommand.EXIT,       label: 'CHIUDI',      spoken: 'chiudi' },
@@ -221,6 +227,32 @@ export class MediaPlayer {
    * volume reale è sempre il primo moltiplicato per il secondo, e si
    * ricalcola da capo: nessun valore si accumula, nessuno si perde.
    */
+
+  /**
+   * Sceglie la traccia audio nella lingua della persona, se esiste.
+   *
+   * ⚠️ YouTube doppia sempre più video: per chi ascolta, un
+   * documentario in una lingua che non conosce è un documentario che
+   * non esiste. Quando la traccia c'è, il video diventa comprensibile
+   * senza doverne cercare un altro.
+   *
+   * Tutto dentro try: è una funzione non documentata del riproduttore,
+   * che può sparire o cambiare. Se non funziona il video resta nella
+   * lingua originale — ciò che accadeva comunque prima.
+   */
+  _scegliAudioLingua() {
+    try {
+      const voluta = this.cfg?.ui?.language || 'it';
+      const tracce = this.yt?.getAvailableAudioTracks?.();
+      if (!Array.isArray(tracce) || tracce.length < 2) return;
+      const scelta = tracce.find((t) => {
+        const id = String(t?.id || t?.languageCode || '').toLowerCase();
+        return id.startsWith(voluta);
+      });
+      if (scelta && this.yt.setAudioTrack) this.yt.setAudioTrack(scelta);
+    } catch { /* funzione assente o cambiata: si lascia com'è */ }
+  }
+
   setVolumeVoluto(v) {
     this._volVoluto = Math.max(0, Math.min(1, v));
     this._applicaVolume();
@@ -293,6 +325,17 @@ export class MediaPlayer {
            * riproduttore è pronto e la richiesta arriva da un gesto
            * dell'utente, che è la condizione che i browser accettano. */
           try { this.yt?.playVideo?.(); } catch {}
+          /* ⚠️ Se il video offre una traccia audio nella lingua della
+           * persona, si sceglie quella.
+           *
+           * YouTube doppia sempre più video, e per chi ascolta un
+           * documentario in una lingua che non conosce è un
+           * documentario che non esiste. Quando la traccia c'è, il
+           * video diventa comprensibile senza cercarne un altro.
+           *
+           * Silenzioso se non c'è: è un miglioramento quando è
+           * possibile, non un requisito. */
+          this._scegliAudioLingua();
           this._emit('ready');
         },
         onStateChange: (e) => {

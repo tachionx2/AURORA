@@ -2605,9 +2605,25 @@ class App {
   /** Sposta il visualizzatore nel riquadro della scheda corrente. */
   agganciaMedia() {
     const tab = document.body.dataset.tab;
+    /* ⚠️ In Punta il contenuto si apre LÌ, qualunque scheda interna
+     * sia attiva.
+     *
+     * Prima serviva essere già nella scheda Media: chiedendo un video
+     * dalla tastiera, o all'assistente, il contenuto compariva in
+     * Parla — cioè in una pagina che la persona in quel momento non
+     * stava guardando. Ogni sezione dev'essere indipendente. */
     const id = tab === 'parla' ? 'parlaMediaStage'
-      : (tab === 'punta' && this.pointerView?.mode === 'media') ? 'ptMediaStage'
+      : tab === 'punta' ? 'ptMediaStage'
       : 'mediaStage';
+    /* E si passa alla scheda che lo mostra: aprire un video in una
+     * pagina che non è a schermo equivale a non aprirlo. */
+    /* ⚠️ Si passa alla scheda Media SOLO se c'è davvero un contenuto
+     * da mostrare: chiamando questa funzione a vuoto — come fa la
+     * preparazione all'avvio — si sposterebbe la persona altrove
+     * mentre sta scrivendo. */
+    if (tab === 'punta' && this.media?.active && this.pointerView?.mode !== 'media') {
+      try { this.pointerView.setMode('media'); } catch {}
+    }
     const el = document.getElementById(id);
     if (el && this.media.container !== el) {
       // Se un contenuto era già aperto altrove, si sposta il nodo

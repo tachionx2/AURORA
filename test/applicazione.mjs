@@ -1892,8 +1892,27 @@ app.goto('parla');
   /* ⚠️ Due tentativi: i modelli gratuiti sono incostanti, la stessa
    * domanda riesce una volta e fallisce la successiva. */
   const srcA = fsA2.readFileSync(pathA2.join(quiA2, '..', 'js/lang/Assistant.js'), 'utf8');
-  ok(/const domande = \[/.test(srcA),
-     'si prova con due formulazioni diverse prima di arrendersi');
+  /* ⚠️ Quattro tentativi, in ordine di preferenza linguistica.
+   *
+   * Chi ascolta non può capire un video in una lingua che non conosce:
+   * per lui un documentario in rumeno è un documentario che non
+   * esiste. Ma un video nella lingua sbagliata resta meglio di nessun
+   * video — quindi si insiste sulla lingua, e solo dopo si cede. */
+  ok(/const tentativi = \[/.test(srcA),
+     'si prova con più formulazioni prima di arrendersi');
+  ok(/ripiego: 0[\s\S]{0,400}ripiego: 1[\s\S]{0,400}ripiego: 2/.test(srcA),
+     'prima nella lingua della persona, poi in inglese, poi in qualunque lingua');
+  ok(/PARLATO IN/.test(IV('it', 0)) && /in qualunque lingua/.test(IV('it', 2)),
+     'e l istruzione cambia di conseguenza a ogni passaggio');
+
+  /* Se il video offre una traccia audio nella lingua della persona, si
+   * sceglie quella: un documentario doppiato diventa comprensibile
+   * senza doverne cercare un altro. */
+  const mpL = fsA2.readFileSync(pathA2.join(quiA2, '..', 'js/media/MediaPlayer.js'), 'utf8');
+  ok(/_scegliAudioLingua\(\)/.test(mpL),
+     'e si prova a scegliere la traccia audio nella lingua della persona');
+  ok(/catch \{ \/\* funzione assente/.test(mpL),
+     'in silenzio se non è disponibile: è un miglioramento, non un requisito');
 
   ok(PA.openrouter.modelli[0] === 'openrouter/free',
      'il router gratuito è il primo, quindi il predefinito');
