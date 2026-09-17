@@ -415,6 +415,71 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
      `nessuna vista di Punta è visibile fuori dalla sua scheda (${cattive.join(', ') || 'confermato'})`);
 }
 
+/* ── Ciò che copre lo schermo non può stare dentro un pannello ──
+ *
+ * ⚠️ Errore già commesso: la velatura scura stava dentro il pannello
+ * Punta, e i pannelli non attivi sono `display:none`. In Parla era
+ * quindi in un contenitore nascosto e non si vedeva MAI, per quanto il
+ * programma la rendesse visibile — `position:fixed` non aiuta, un
+ * antenato nascosto cancella tutto il sottoalbero.
+ *
+ * È un errore invisibile finché non lo si prova, e il codice attorno
+ * sembra corretto perché lo è. */
+{
+  const html = read('index.html');
+  const iScuro = html.indexOf('id="schermoScuro"');
+  ok(iScuro > 0, 'la velatura scura esiste nella pagina');
+  if (iScuro > 0) {
+    /* Si contano le aperture e chiusure di <main> prima di quel punto:
+     * se le aperture superano le chiusure, sta dentro un pannello. */
+    const prima = html.slice(0, iScuro);
+    const aperti = (prima.match(/<main\b/g) || []).length;
+    const chiusi = (prima.match(/<\/main>/g) || []).length;
+    ok(aperti === chiusi,
+       `la velatura è fuori da ogni pannello (${aperti} aperti, ${chiusi} chiusi)`);
+  }
+}
+
+/* ── Ogni parametro usato dev'essere anche REGOLABILE ──
+ *
+ * ⚠️ Sei volte in questo progetto è successo lo stesso: un parametro
+ * scritto nella configurazione, usato dal programma, e senza alcun
+ * comando per cambiarlo. Chi installa non poteva toccarlo, e spesso
+ * non sapeva nemmeno che esistesse.
+ *
+ * Questa verifica copre l'intera classe di errori invece del singolo
+ * caso: ogni parametro di `scan` e `pointer` — i due gruppi che chi
+ * assiste tara davvero — dev'essere raggiungibile dalle impostazioni.
+ */
+{
+  const sv = read('js/ui/SettingsView.js');
+  const cfgSrc = read('js/core/config.js');
+
+  /* Si prendono i nomi dichiarati nei due gruppi, saltando quelli
+   * annidati che hanno comandi propri. */
+  const gruppi = ['scan', 'pointer'];
+  const mancanti = [];
+  for (const g of gruppi) {
+    const i = cfgSrc.indexOf(`  ${g}: {`);
+    if (i < 0) continue;
+    const corpo = cfgSrc.slice(i, cfgSrc.indexOf('\n  },', i));
+    for (const m of corpo.matchAll(/^\s{4}([a-zA-Z][a-zA-Z0-9]*)\s*:\s*(?!\{)/gm)) {
+      const via = `${g}.${m[1]}`;
+      if (!sv.includes(`'${via}'`)) mancanti.push(via);
+    }
+  }
+  /* ⚠️ Alcuni sono volutamente non regolabili: sono dati salvati, non
+   * scelte. Si dichiarano qui, così restano una decisione esplicita. */
+  const esenti = new Set([
+    'pointer.calibrationData',   // la calibrazione, non un'impostazione
+    'scan.groups',               // i gruppi hanno un editor dedicato
+    'scan.phraseGroups',         // idem
+  ]);
+  const veri = mancanti.filter(x => !esenti.has(x));
+  ok(veri.length === 0,
+     `ogni parametro di scansione e puntatore è regolabile (mancano: ${veri.join(', ') || 'nessuno'})`);
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 if (problems.length) { console.log('\nDA CORREGGERE:'); problems.forEach(p => console.log('  · ' + p)); }
 process.exit(fail ? 1 : 0);

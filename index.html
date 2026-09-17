@@ -233,9 +233,6 @@
        che si possono colpire per sbaglio. -->
   <div class="pt-dest" id="ptDest" hidden></div>
 
-  <!-- Velatura scura dopo un periodo di quiete. È solo grafica: sotto
-       continua tutto, telecamera compresa. -->
-  <div class="schermo-scuro" id="schermoScuro" hidden aria-hidden="true"></div>
 
   <div class="pt-view" id="ptView-frasi">
     <div class="pt-tiles" id="ptFrasi"></div>
@@ -571,5 +568,24 @@
     });
   }
 </script>
+<!-- ══════════════════════════════════════════════════════════════
+     VELATURA SCURA DOPO UN PERIODO DI QUIETE
+     ══════════════════════════════════════════════════════════════
+
+     ⚠️ FUORI da ogni pannello, e non è un dettaglio.
+
+     Stava dentro il pannello Punta, e i pannelli non attivi sono
+     `display:none`: in Parla la velatura era dentro un contenitore
+     nascosto e non si vedeva mai, per quanto il programma la rendesse
+     visibile. `position:fixed` non aiuta — un antenato nascosto
+     cancella tutto il sottoalbero.
+
+     Qui copre lo schermo in qualunque scheda ci si trovi.
+
+     ⚠️ È SOLO grafica: sotto continua tutto — telecamera,
+     rilevamento, scansione, musica. Nulla si ferma, quindi nulla deve
+     essere riavviato al risveglio. -->
+<div class="schermo-scuro" id="schermoScuro" hidden aria-hidden="true"></div>
+
 </body>
 </html>
