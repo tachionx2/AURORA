@@ -950,8 +950,14 @@ class App {
         document.body.append(this.radioEl);
       }
       this.radioEl.src = stazione.url;
-      this.radioEl.volume = this.cfg.audio.speechVolume ?? 1;
+      /* ⚠️ Il volume scelto dalla persona sopravvive al cambio di
+       * stazione: reimpostarlo ogni volta annullava i comandi "più
+       * volume" e "meno volume" appena dati. */
+      if (this._volRadioVoluto == null) {
+        this._volRadioVoluto = this.cfg.audio.speechVolume ?? 1;
+      }
       this.radioNome = stazione.nome;
+      this.allineaVolumiMedia();
       /* ⚠️ Partire da SOLA, senza che nessuno prema nulla.
        *
        * Chi comanda con un gesto solo non ha un "riproduci" da
@@ -985,6 +991,14 @@ class App {
        * ⚠️ E la voce guida NON si mette in pausa per la radio, di
        * proposito: è un sottofondo, non un contenuto da seguire, e
        * serve poter cambiare stazione mentre suona. */
+      /* ⚠️ Anche la radio mette in pausa la voce guida, come ogni
+       * altro contenuto.
+       *
+       * Prima restava attiva e la scansione continuava a ciclare fra
+       * le stazioni: chi ne aveva appena scelta una si sentiva
+       * proporre tutte le altre, senza poter comandare nulla, e doveva
+       * aspettare la fine del giro per uscire. */
+      this._zittisciPerMedia();
       this.refreshContext();
       this.renderMediaBar?.();
     } catch (e) {
@@ -1006,6 +1020,27 @@ class App {
    * ascoltare la radio significherebbe non sentire più la guida — e
    * quindi non poter più cambiare stazione.
    */
+  /**
+   * Allinea la riduzione del volume allo stato della voce guida.
+   *
+   * ⚠️ Non al singolo annuncio: fra una voce e l'altra ci sono pause,
+   * e risalire ogni volta produceva un pulsare continuo che rendeva la
+   * guida più difficile da seguire, non più facile.
+   *
+   * La regola è una sola: se la voce guida è attiva e qualcosa suona,
+   * quel qualcosa resta basso. Quando la persona mette in pausa la
+   * guida, torna al volume che aveva scelto.
+   */
+  allineaVolumiMedia() {
+    const guidaAttiva = !this.scan.paused;
+    try { this.media?.riduciVolume?.(guidaAttiva); } catch {}
+    if (this.radioEl) {
+      if (this._volRadioVoluto == null) this._volRadioVoluto = this.radioEl.volume ?? 1;
+      const v = this._volRadioVoluto * (guidaAttiva ? 0.18 : 1);
+      try { this.radioEl.volume = Math.max(0, Math.min(1, v)); } catch {}
+    }
+  }
+
   abbassaPerAnnuncio(attivo) {
     /* ⚠️ Si abbassa TUTTO ciò che suona, non solo la radio.
      *
@@ -1017,10 +1052,11 @@ class App {
      * ⚠️ Si abbassa, NON si ferma. Il contenuto continua: si ferma solo
      * se la persona lo chiede, con "pausa" o "chiudi". Alla fine
      * dell'annuncio il volume torna com'era. */
-    const pieno = this.cfg.audio.speechVolume ?? 1;
-    const quota = attivo ? 0.15 : 1;
-    if (this.radioEl && !this.radioEl.paused) this.radioEl.volume = pieno * quota;
-    try { this.media?.abbassaVolume?.(quota); } catch {}
+    /* ⚠️ Non si fa più nulla per il singolo annuncio: la riduzione
+     * segue lo STATO della voce guida, non le sue singole frasi.
+     * Lasciato come punto d'aggancio perché il direttore audio lo
+     * chiama comunque. */
+    this.allineaVolumiMedia();
   }
 
   /* ------------------------------ Posta ------------------------------ */
@@ -1194,7 +1230,13 @@ class App {
        * ma RICORDA indirizzi, e molti non esistono più. Se non è
        * attiva lo si dice, invece di aprire una pagina rotta.
        */
-      const chiedeVideo = /\s+(v|video|vid)\s*$/i.test(testo);
+      /* ⚠️ Tutte le forme con cui si può scrivere "video" in fretta.
+       *
+       * Chi compone lettera per lettera abbrevia per forza, e ogni
+       * lettera costa un giro di scansione: "v" costa un quinto di
+       * "video". Accettarle tutte significa non costringere a
+       * ricordare quale sia quella giusta. */
+      const chiedeVideo = /\s+(v|vi|vid|vide|video|yt)\s*$/i.test(testo);
       if (chiedeVideo) {
         /* ⚠️ Senza ricerca sul web lo si DICE, invece di far finta di
          * niente.
@@ -1210,7 +1252,7 @@ class App {
             : 'Per cercare video serve attivare la ricerca sul web nelle impostazioni', 'menu');
           return;
         }
-        const argomento = testo.replace(/\s+(v|video|vid)\s*$/i, '').trim();
+        const argomento = testo.replace(/\s+(v|vi|vid|vide|video|yt)\s*$/i, '').trim();
         if (argomento) return this.cercaEApriVideo(argomento);
       }
       const { chiedi, inFrasi } = await import('./lang/Assistant.js');
@@ -2584,6 +2626,25 @@ class App {
    * menu, e chi lo usa non deve reimparare nulla ogni volta.
    */
   /**
+   * Ferma le bande se il contenuto è di quelli che si GUARDANO.
+   *
+   * ⚠️ Solo per video, immagini, testi e PDF: una banda che scorre
+   * sopra un film è fastidiosa e copre i sottotitoli.
+   *
+   * Musica e radio no — lì lo schermo non serve, e togliere il cursore
+   * vorrebbe dire togliere il comando senza alcun guadagno. E le bande
+   * non fanno rumore, quindi non c'è nulla da abbassare come invece
+   * serve per la voce guida.
+   */
+  _sospendiBandePer(kind) {
+    const daGuardare = ['youtube', 'video', 'image', 'text', 'pdf'].includes(kind);
+    if (daGuardare && this.stripe?.active) {
+      this.stripe.cancel();
+      this._bandeSospeseDaMedia = true;
+    }
+  }
+
+  /**
    * Mette in pausa la voce guida perché un contenuto sta suonando.
    *
    * ⚠️ In PAUSA, non spenta: il gesto di ripresa la riaccende, e da lì
@@ -2620,10 +2681,12 @@ class App {
         } else el.pause();
         break;
       case 'volUp':
-        el.volume = Math.min(1, (el.volume || 0) + 0.1);
+        this._volRadioVoluto = Math.min(1, (this._volRadioVoluto ?? 1) + 0.1);
+        this.allineaVolumiMedia();
         break;
       case 'volDown':
-        el.volume = Math.max(0, (el.volume || 0) - 0.1);
+        this._volRadioVoluto = Math.max(0, (this._volRadioVoluto ?? 1) - 0.1);
+        this.allineaVolumiMedia();
         break;
       case 'next':
         if (st.length > 1) this.apriRadio(st[(i + 1) % st.length]);
@@ -2648,7 +2711,16 @@ class App {
   /** I comandi da mostrare: del riproduttore, o della radio. */
   _comandiCorrenti() {
     if (this.media.active) return this.media.commands();
-    if (this.radioEl && !this.radioEl.paused) return COMMANDS_BY_KIND.radio;
+    /* ⚠️ I comandi restano anche a radio in PAUSA.
+     *
+     * Legandoli a "sta suonando", mettere in pausa faceva sparire il
+     * menu: da fuori sembrava che il tasto avesse chiuso la radio,
+     * mentre l'aveva solo fermata — e non c'era più modo di
+     * riprenderla né di chiuderla davvero.
+     *
+     * Finché una stazione è caricata i comandi ci sono, esattamente
+     * come per un file audio in pausa. */
+    if (this.radioEl && this.radioNome) return COMMANDS_BY_KIND.radio;
     return null;
   }
 
@@ -2682,11 +2754,7 @@ class App {
        * sottotitoli. Musica e audiolibri no — lì lo schermo non serve,
        * e togliere il cursore vorrebbe dire togliere il comando senza
        * alcun guadagno. */
-      const daGuardare = ['youtube', 'video', 'image', 'text', 'pdf'].includes(e.kind);
-      if (daGuardare && this.stripe?.active) {
-        this.stripe.cancel();
-        this._bandeSospeseDaMedia = true;
-      }
+      this._sospendiBandePer(e.kind);
     }
     if (e.type === 'opened') {
       document.body.classList.add('has-media');
@@ -2737,7 +2805,16 @@ class App {
      * sopra la musica. La stessa situazione deve dare lo stesso
      * comportamento, sempre — altrimenti chi usa il programma non può
      * prevederlo, e ogni volta deve scoprire come si comporterà. */
-    if (e.type === 'state' && e.playing) this._zittisciPerMedia();
+    if (e.type === 'state' && e.playing) {
+      this._zittisciPerMedia();
+      /* ⚠️ Anche le bande si fermano a OGNI avvio, non solo alla
+       * prima apertura.
+       *
+       * Era lo stesso difetto già corretto per la voce guida: fermando
+       * e riprendendo un video, le bande tornavano a scorrergli sopra.
+       * La stessa situazione deve dare lo stesso comportamento. */
+      this._sospendiBandePer(this.media?.kind);
+    }
 
     if (e.type === 'readAloud') {
       /* ══════════════════════════════════════════════════════════════
@@ -3466,6 +3543,15 @@ class App {
 
   _frameUi(now) {
     this._safe('schermo scuro', () => this._schermoScuro(now));
+    /* ⚠️ La riduzione del volume segue lo stato della voce guida, che
+     * può cambiare da molte strade — un gesto, un comando, il cambio
+     * di scheda. Allinearla qui, una volta per fotogramma, evita di
+     * doverlo ricordare in ognuna di quelle strade: è il posto dove
+     * una dimenticanza non può nascondersi. */
+    if (this._guidaEraAttiva !== !this.scan.paused) {
+      this._guidaEraAttiva = !this.scan.paused;
+      this._safe('volumi media', () => this.allineaVolumiMedia());
+    }
     {
       const fill = document.getElementById('scanbarFill');
       if (fill) fill.style.width = `${(this.scan.snapshot().progress * 100).toFixed(1)}%`;

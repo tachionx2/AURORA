@@ -200,50 +200,60 @@ export class MediaPlayer {
    * volta finirebbe per memorizzare quello già abbassato, e il
    * contenuto resterebbe basso per sempre.
    */
-  abbassaVolume(quota) {
-    if (this.el) {
-      // Stessa regola per i file: si ripristina il valore ricordato.
-      if (quota >= 1) {
-        const pieno = this._volPieno;
-        this._volPieno = null;
-        if (Number.isFinite(pieno) && pieno > 0) this.el.volume = Math.min(1, pieno);
-        return;
-      }
-      if (this._volPieno == null) {
-        const v = this.el.volume;
-        this._volPieno = (Number.isFinite(v) && v > 0.2) ? v : 1;
-      }
-      this.el.volume = Math.max(0.01, Math.min(1, this._volPieno * quota));
-    }
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * VOLUME: UN VALORE VOLUTO E UNO STATO DI RIDUZIONE
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ⚠️ Prima si moltiplicava il volume corrente a ogni annuncio e lo
+   * si rimoltiplicava alla fine. Tre difetti insieme:
+   *
+   * · dopo qualche giro il valore "pieno" memorizzato era sbagliato, e
+   *   la riduzione smetteva di funzionare;
+   * · saliva e scendeva a ogni singola voce del menu, un su e giù
+   *   continuo che rendeva la voce guida più difficile da seguire, non
+   *   più facile;
+   * · i comandi "più volume" e "meno volume" cambiavano un valore che
+   *   la riduzione successiva sovrascriveva, quindi non facevano nulla.
+   *
+   * Ora ci sono due cose distinte: il volume VOLUTO dalla persona, che
+   * solo lei cambia, e uno stato di riduzione acceso o spento. Il
+   * volume reale è sempre il primo moltiplicato per il secondo, e si
+   * ricalcola da capo: nessun valore si accumula, nessuno si perde.
+   */
+  setVolumeVoluto(v) {
+    this._volVoluto = Math.max(0, Math.min(1, v));
+    this._applicaVolume();
+    return this._volVoluto;
+  }
+
+  get volumeVoluto() {
+    if (this._volVoluto == null) this._volVoluto = 1;
+    return this._volVoluto;
+  }
+
+  /**
+   * Accende o spegne la riduzione.
+   *
+   * ⚠️ Resta bassa per TUTTO il tempo in cui la voce guida è attiva,
+   * non solo mentre pronuncia: fra una voce e l'altra ci sono pause, e
+   * risalire ogni volta produceva un pulsare continuo.
+   */
+  riduciVolume(attiva) {
+    this._ridotto = !!attiva;
+    this._applicaVolume();
+  }
+
+  _applicaVolume() {
+    const v = this.volumeVoluto * (this._ridotto ? 0.18 : 1);
+    if (this.el) { try { this.el.volume = Math.max(0, Math.min(1, v)); } catch {} }
     if (this.yt?.setVolume) {
-      /* ⚠️ Il volume pieno si ricorda alla PRIMA riduzione e si
-       * ripristina per intero, invece di rimoltiplicarlo.
-       *
-       * Qui il video restava muto: una seconda riduzione catturava il
-       * volume GIÀ ridotto come se fosse quello pieno, e da lì ogni
-       * ripristino riportava a quel valore — sempre più basso, fino a
-       * zero. E l'audio non tornava nemmeno mettendo in pausa e
-       * riprendendo, perché il valore "pieno" ormai memorizzato era
-       * sbagliato. */
-      if (quota >= 1) {
-        // Ripristino: si torna al valore ricordato, non a un prodotto.
-        const pieno = this._volYt;
-        this._volYt = null;
-        if (Number.isFinite(pieno) && pieno > 0) {
-          try { this.yt.setVolume(Math.max(1, Math.min(100, pieno))); } catch {}
-        }
-        return;
-      }
-      if (this._volYt == null) {
-        let v = 100;
-        try { v = this.yt.getVolume?.(); } catch { v = 100; }
-        // ⚠️ Un valore già basso non è il volume pieno: è una riduzione
-        // ancora in corso. Meglio tornare al massimo che restare muti.
-        this._volYt = (Number.isFinite(v) && v > 20) ? v : 100;
-      }
-      try { this.yt.setVolume(Math.max(1, Math.min(100, this._volYt * quota))); } catch {}
+      try { this.yt.setVolume(Math.round(Math.max(0, Math.min(1, v)) * 100)); } catch {}
     }
   }
+
+  /** Compatibilità: la vecchia chiamata diventa accendi/spegni. */
+  abbassaVolume(quota) { this.riduciVolume(quota < 1); }
 
   _emit(type, data = {}) { this.onEvent?.({ type, kind: this.kind, ...data }); }
 
@@ -485,10 +495,16 @@ export class MediaPlayer {
         else if (this.el) this.el.currentTime = Math.max(0, this.el.currentTime - step);
         break;
       case MediaCommand.VOL_UP:
+        this.setVolumeVoluto(this.volumeVoluto + 0.1);
+        break;
+      case '__vol_up_vecchio':
         if (this.kind === 'youtube' && this.ytReady) this.yt.setVolume(Math.min(100, this.yt.getVolume() + 15));
         else if (this.el) this.el.volume = Math.min(1, this.el.volume + 0.15);
         break;
       case MediaCommand.VOL_DOWN:
+        this.setVolumeVoluto(this.volumeVoluto - 0.1);
+        break;
+      case '__vol_down_vecchio':
         if (this.kind === 'youtube' && this.ytReady) this.yt.setVolume(Math.max(0, this.yt.getVolume() - 15));
         else if (this.el) this.el.volume = Math.max(0, this.el.volume - 0.15);
         break;

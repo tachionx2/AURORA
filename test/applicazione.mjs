@@ -1838,13 +1838,62 @@ app.goto('parla');
    * capiva perché il video non partisse. */
   ok(/serve attivare la ricerca sul web/.test(mainA),
      'senza ricerca sul web lo si dice, invece di far finta di niente');
-  const reV = /\s+(v|video|vid)\s*$/i;
-  for (const t of ['DOC AFRIC V', 'doc africa v', 'africa video', 'africa vid']) {
+  /* ⚠️ Tutte le forme con cui si può scrivere "video" in fretta.
+   *
+   * Chi compone lettera per lettera abbrevia per forza, e ogni lettera
+   * costa un giro di scansione: "v" costa un quinto di "video".
+   * Accettarle tutte significa non costringere a ricordare quale sia
+   * quella giusta. */
+  const reV = /\s+(v|vi|vid|vide|video|yt)\s*$/i;
+  for (const t of ['DOC AFRIC V', 'doc africa v', 'africa vi', 'africa vid',
+                   'africa vide', 'africa video', 'africa yt']) {
     ok(reV.test(t), `"${t}" viene riconosciuta come richiesta di video`);
   }
   for (const t of ['ciao come stai', 'vivo bene']) {
     ok(!reV.test(t), `"${t}" resta una domanda normale`);
   }
+
+  /* ══════ Il prompt che non restituiva mai un video ══════
+   *
+   * ⚠️ Quattro difetti che si sommavano:
+   * · si chiedeva un identificativo di undici caratteri, forma che i
+   *   modelli non producono naturalmente — pensano in link;
+   * · "se non sei sicuro rispondi NIENTE" più "non inventare mai"
+   *   formavano una coppia che spingeva alla rinuncia;
+   * · la domanda era telegrafica, la forma che i modelli non trattano
+   *   come una ricerca;
+   * · le abbreviazioni non venivano espanse: "doc" restava "doc". */
+  const { espandiArgomento: esp, idYouTube: idY, ISTRUZIONE_VIDEO: IV } =
+    await import('../js/lang/Assistant.js');
+
+  ok(/INDIRIZZO COMPLETO/.test(IV('it')),
+     'si chiede un indirizzo, non un codice di undici caratteri');
+  ok(/SCEGLI SEMPRE il migliore/.test(IV('it')),
+     'e si toglie la via d uscita facile: un video imperfetto vale più di nessun video');
+  ok(!/Non inventare mai/.test(IV('it')),
+     'senza la coppia di istruzioni che spingeva a rinunciare');
+
+  ok(esp('doc africa') === 'documentario africa',
+     'le abbreviazioni vengono espanse prima di cercare');
+  ok(esp('mus classica') === 'musica classica', 'anche le altre');
+  ok(esp('africa') === 'africa', 'e ciò che non è abbreviato resta intatto');
+
+  /* L indirizzo si estrae da qualunque forma, e con più indirizzi si
+   * prende il PRIMO: nelle risposte di chi ha cercato davvero,
+   * l ordine riflette la pertinenza. */
+  ok(idY('https://www.youtube.com/watch?v=dQw4w9WgXcQ - Africa') === 'dQw4w9WgXcQ',
+     'l indirizzo si estrae dalla forma completa');
+  ok(idY('Ecco: https://youtu.be/dQw4w9WgXcQ — Doc') === 'dQw4w9WgXcQ',
+     'e dalla forma breve');
+  ok(idY('https://www.youtube.com/watch?v=dQw4w9WgXcQ\nhttps://youtu.be/abcdefghijk') === 'dQw4w9WgXcQ',
+     'con più indirizzi si prende il primo');
+  ok(idY('NIENTE') === null, 'e una risposta vuota resta vuota');
+
+  /* ⚠️ Due tentativi: i modelli gratuiti sono incostanti, la stessa
+   * domanda riesce una volta e fallisce la successiva. */
+  const srcA = fsA2.readFileSync(pathA2.join(quiA2, '..', 'js/lang/Assistant.js'), 'utf8');
+  ok(/const domande = \[/.test(srcA),
+     'si prova con due formulazioni diverse prima di arrendersi');
 
   ok(PA.openrouter.modelli[0] === 'openrouter/free',
      'il router gratuito è il primo, quindi il predefinito');
@@ -2231,10 +2280,14 @@ app.goto('parla');
    * sopra un audiolibro le due voci si sovrapponevano. */
   ok(/abbassaVolume\(quota\)/.test(mpM),
      'il riproduttore sa abbassare il volume senza fermarsi');
-  ok(/this\.media\?\.abbassaVolume/.test(mainM),
+  ok(/this\.media\?\.riduciVolume/.test(mainM),
      'e la voce guida lo usa, non solo per la radio');
-  ok(/_volPieno == null/.test(mpM),
-     'il volume di partenza si ricorda una volta sola, o resterebbe basso per sempre');
+  /* ⚠️ Nessun valore si accumula: il volume reale si RICALCOLA da
+   * capo come voluto × riduzione. Prima si moltiplicava il valore
+   * corrente a ogni annuncio, e dopo qualche giro il "pieno"
+   * memorizzato era sbagliato. */
+  ok(/_applicaVolume\(\)/.test(mpM),
+     'il volume si ricalcola da capo, invece di moltiplicare quello corrente');
 
   // Il video parte da solo, come i file audio.
   ok(/autoplay: 1/.test(mpM), 'il video parte da solo');
@@ -2358,8 +2411,13 @@ app.goto('parla');
   /* ⚠️ La voce guida NON si mette in pausa per la radio, di proposito:
    * è un sottofondo, non un contenuto da seguire, e serve poter
    * cambiare stazione mentre suona. */
-  ok(!/_zittisciPerMedia/.test(corpoAp),
-     'e la voce guida resta attiva: la radio è un sottofondo, non un contenuto da seguire');
+  /* ⚠️ Anche la radio mette in pausa la voce guida, come ogni altro
+   * contenuto. Prima restava attiva e la scansione continuava a
+   * ciclare fra le stazioni: chi ne aveva appena scelta una si sentiva
+   * proporre tutte le altre, senza poter comandare nulla, e doveva
+   * aspettare la fine del giro per uscire. */
+  ok(/_zittisciPerMedia/.test(corpoAp),
+     'anche la radio mette in pausa la voce guida, come gli altri contenuti');
 
   /* ⚠️ E il gesto di PAUSA non deve fermare la radio.
    *
@@ -2374,6 +2432,27 @@ app.goto('parla');
      'il percorso dei gesti non tocca la radio: il gesto di pausa ferma la voce guida, non la musica');
   ok(/case 'playPause'/.test(mainRr) && /case 'exit'/.test(mainRr),
      'la radio si ferma solo dai suoi comandi: pausa e chiudi');
+
+  /* ⚠️ Pausa e chiusura sono due cose diverse, anche per la radio.
+   *
+   * I comandi erano legati a "sta suonando": mettendo in pausa il menu
+   * spariva, e da fuori sembrava che il tasto avesse chiuso la radio —
+   * mentre l aveva solo fermata. Non c era più modo né di riprenderla
+   * né di chiuderla davvero. */
+  ok(/this\.radioEl && this\.radioNome/.test(mainRr),
+     'i comandi restano anche a radio in pausa, come per un file audio fermo');
+  const iPP = mainRr.indexOf("case 'playPause':");
+  const corpoPP = mainRr.slice(iPP, iPP + 300);
+  ok(!/src = ''/.test(corpoPP) && !/radioNome = null/.test(corpoPP),
+     'il tasto pausa NON chiude: ferma soltanto');
+  const iEx = mainRr.indexOf("case 'exit':");
+  ok(/src = ''/.test(mainRr.slice(iEx, iEx + 300)),
+     'a chiudere ci pensa il tasto CHIUDI, che scollega il flusso');
+
+  /* ⚠️ E il volume scelto sopravvive al cambio di stazione:
+   * reimpostarlo ogni volta annullava i comandi appena dati. */
+  ok(/_volRadioVoluto == null/.test(mainRr),
+     'il volume scelto sopravvive al cambio di stazione');
 
   ok(/comandoRadio\(cmd\)/.test(mainRr),
      'e i comandi vengono eseguiti sulla radio, non mandati al riproduttore dei file');
@@ -2411,10 +2490,10 @@ app.goto('parla');
   const quiV2 = pathV2.dirname(import.meta.filename || process.argv[1]);
   const mp2 = fsV2.readFileSync(pathV2.join(quiV2, '..', 'js/media/MediaPlayer.js'), 'utf8');
 
-  ok(/const pieno = this\._volYt;/.test(mp2),
-     'ripristinando si torna al valore RICORDATO, non a un prodotto');
-  ok(/v > 20\) \? v : 100/.test(mp2),
-     'e un valore già basso non viene scambiato per il volume pieno');
+  ok(/riduciVolume\(attiva\)/.test(mp2),
+     'la riduzione è uno stato acceso o spento, non una moltiplicazione ripetuta');
+  ok(/setVolumeVoluto\(v\)/.test(mp2),
+     'e il volume voluto dalla persona è distinto: i comandi lo cambiano davvero');
 
   // La logica, provata su più annunci di seguito.
   let vol = 100, mem = null;

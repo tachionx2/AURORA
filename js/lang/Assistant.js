@@ -275,16 +275,50 @@ export async function chiedi(cfg, domanda, opzioni = {}) {
  * Con la ricerca attiva l'assistente guarda davvero, e l'indirizzo che
  * restituisce è un indirizzo che ha visto.
  */
-export const ISTRUZIONE_VIDEO = (lingua = 'it') => [
-  `Cerca video in ${lingua === 'en' ? 'inglese' : 'italiano'} se esistono.`,
-  'Cerca su internet e restituisci UN SOLO video di YouTube, il più pertinente',
-  'e in lingua italiana se esiste.',
-  'Rispondi ESATTAMENTE in questa forma, senza aggiungere altro:',
-  'ID|titolo',
-  "dove ID è l'identificativo di undici caratteri del video YouTube.",
-  'Se non trovi nulla di sicuro, rispondi soltanto: NIENTE',
-  'Non inventare mai un identificativo: meglio NIENTE che un video inesistente.',
-].join(' ');
+export const ISTRUZIONE_VIDEO = (lingua = 'it') => {
+  const L = lingua === 'en' ? 'inglese' : 'italiano';
+  return [
+    `Sei un assistente che cerca video su YouTube per una persona che`,
+    `può muovere un solo occhio e non può navigare il web da sola.`,
+    `Cerca su internet e rispondi con l'INDIRIZZO COMPLETO del video YouTube`,
+    `più pertinente e più visto sull'argomento, preferibilmente in ${L}.`,
+    `Rispondi con il solo indirizzo, per esempio:`,
+    `https://www.youtube.com/watch?v=XXXXXXXXXXX`,
+    `Puoi aggiungere dopo l'indirizzo un trattino e il titolo.`,
+    `⚠️ SCEGLI SEMPRE il migliore fra i risultati che hai trovato:`,
+    `chi legge non può cercare da sé, quindi un video imperfetto vale`,
+    `infinitamente più di nessun video.`,
+    `Rispondi "NIENTE" soltanto se la ricerca non ha restituito alcun risultato.`,
+  ].join(' ');
+};
+
+/**
+ * Espande le abbreviazioni con cui si scrive componendo lettera per
+ * lettera.
+ *
+ * ⚠️ Chi scrive con un gesto solo abbrevia per forza: «doc africa»
+ * costa metà del tempo di «documentario sull'Africa». Ma un modello che
+ * riceve «doc africa» non sa che «doc» sta per documentario, e cerca
+ * male o non cerca affatto.
+ *
+ * L'espansione si fa QUI, non chiedendola al modello: è un lavoro
+ * meccanico e prevedibile, e farlo fare a lui aggiungerebbe un modo in
+ * più di sbagliare.
+ */
+const ABBREVIAZIONI = {
+  doc: 'documentario', docum: 'documentario', film: 'film',
+  mus: 'musica', can: 'canzone', conc: 'concerto',
+  tg: 'telegiornale', doc2: 'documentario',
+};
+
+export function espandiArgomento(testo) {
+  return String(testo || '')
+    .split(/\s+/)
+    .map(p => ABBREVIAZIONI[p.toLowerCase()] || p)
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+}
 
 /** Estrae un identificativo YouTube da una risposta, comunque scritta. */
 export function idYouTube(testo) {
@@ -302,15 +336,50 @@ export async function cercaVideo(cfg, argomento) {
   const A = cfg?.assistente;
   if (!A?.enabled) return { ok: false, errore: 'assistente non attivo' };
   if (!A.ricercaWeb) return { ok: false, errore: 'la ricerca sul web non è attiva' };
-  const r = await chiedi(cfg, `Trova un video su: ${argomento}`, {
-    istruzione: ISTRUZIONE_VIDEO(cfg?.ui?.language || 'it'), ricerca: true, maxParole: 40,
-  });
-  if (!r.ok) return { ok: false, errore: r.errore };
-  if (/^\s*NIENTE/i.test(r.testo)) return { ok: false, errore: 'nessun video trovato' };
-  const id = idYouTube(r.testo);
-  if (!id) return { ok: false, errore: 'risposta non riconosciuta' };
-  const titolo = (r.testo.split('|')[1] || '').trim().slice(0, 120);
-  return { ok: true, id, titolo: titolo || argomento };
+
+  const lingua = cfg?.ui?.language || 'it';
+  const tema = espandiArgomento(argomento);
+
+  /* ⚠️ La domanda si formula come la formulerebbe una persona.
+   *
+   * Prima si mandava «Trova un video su: DOC AFRICA» — telegrafico, e
+   * proprio la forma che i modelli non trattano come una ricerca.
+   * Scritta per esteso, la stessa richiesta funziona. */
+  const domande = [
+    `Cerca su YouTube e dammi il link del video più visto e pertinente su: ${tema}`,
+    `Qual è il miglior video YouTube su "${tema}"? Dammi il link diretto.`,
+  ];
+
+  /* ⚠️ Due tentativi, con formulazioni diverse.
+   *
+   * I modelli gratuiti sono incostanti: la stessa domanda riesce una
+   * volta e fallisce la successiva. Un secondo tentativo costa un
+   * istante e trasforma gran parte dei fallimenti in successi — e per
+   * chi non può cercare da sé, la differenza fra un video e un
+   * "non l'ho trovato" è tutta. */
+  let ultimo = 'nessun video trovato';
+  for (const domanda of domande) {
+    const r = await chiedi(cfg, domanda, {
+      istruzione: ISTRUZIONE_VIDEO(lingua), ricerca: true, maxParole: 60,
+    });
+    if (!r.ok) { ultimo = r.errore; continue; }
+    if (/^\s*NIENTE\s*$/i.test(r.testo)) { ultimo = 'nessun video trovato'; continue; }
+
+    /* Se propone più indirizzi si prende il PRIMO: nelle risposte di
+     * chi ha cercato davvero, l'ordine riflette la pertinenza. */
+    const id = idYouTube(r.testo);
+    if (!id) { ultimo = 'risposta non riconosciuta'; continue; }
+
+    // Il titolo è ciò che resta dopo l'indirizzo, ripulito.
+    const titolo = r.testo
+      .replace(/https?:\/\/\S+/g, ' ')
+      .replace(/[|\-–—]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim()
+      .slice(0, 120);
+    return { ok: true, id, titolo: titolo || tema };
+  }
+  return { ok: false, errore: ultimo };
 }
 
 /**

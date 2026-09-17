@@ -665,5 +665,40 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '81. le bande ricevono il gesto prima che la guardia sulla scansione intervenga');
 }
 
+/* ══════ Le bande si fermano a OGNI avvio, non solo al primo ══════
+ *
+ * ⚠️ Stesso difetto già corretto per la voce guida: fermando e
+ * riprendendo un video, le bande tornavano a scorrergli sopra. La
+ * stessa situazione deve dare lo stesso comportamento.
+ *
+ * ⚠️ Ma SOLO per ciò che si guarda. Musica e radio no: lì lo schermo
+ * non serve, e togliere il cursore vorrebbe dire togliere il comando
+ * senza alcun guadagno. E le bande non fanno rumore, quindi non c è
+ * nulla da abbassare come invece serve per la voce guida.           */
+{
+  const fsB2 = await import('node:fs');
+  const pathB2 = await import('node:path');
+  const quiB2 = pathB2.dirname(import.meta.filename || process.argv[1]);
+  const main = fsB2.readFileSync(pathB2.join(quiB2, '..', 'js/main.js'), 'utf8');
+
+  ok(/_sospendiBandePer\(kind\) \{/.test(main),
+     '82. c è un unico punto che decide se fermare le bande');
+  ok((main.match(/_sospendiBandePer\(/g) || []).length >= 3,
+     '83. usato sia all apertura sia alla ripresa del contenuto');
+
+  const iS3 = main.indexOf('_sospendiBandePer(kind) {');
+  const corpo = main.slice(iS3, iS3 + 700);
+  ok(/'youtube', 'video', 'image', 'text', 'pdf'/.test(corpo),
+     '84. si fermano per video, immagini, testi e PDF');
+  ok(!/'audio'/.test(corpo) && !/'radio'/.test(corpo),
+     '85. ma NON per musica e radio: lì lo schermo non serve');
+
+  /* ⚠️ E le bande non vanno abbassate di volume: non fanno rumore.
+   * Portare a Punta la riduzione pensata per la voce guida sarebbe
+   * stato aggiungere un comportamento inutile. */
+  ok(!/riduciVolume/.test(corpo),
+     '86. e non si tocca alcun volume: le bande sono silenziose');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);
