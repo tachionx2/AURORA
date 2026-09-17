@@ -933,21 +933,41 @@ body.in-finestra .mini{height:100vh;justify-content:center}
 }
 
 /* Visualizzatore contenuti */
+/* ⚠️ Niente scorrimento per ciò che si GUARDA.
+ *
+ * Il riquadro scorreva per i PDF, che sono più alti dello schermo. Ma
+ * la stessa regola applicata ai video produceva una barra che chi
+ * punta con lo sguardo non può trascinare: meglio un video più piccolo
+ * e intero che uno grande e tagliato. */
 .media-stage{
   background:var(--ink);border:1px solid var(--line);border-radius:var(--r);
-  min-height:min(58vh,520px);max-height:72vh;
+  min-height:0;max-height:100%;
   /* Scorrimento INTERNO: una pagina di PDF è più alta del riquadro e
      va potuta scorrere. È l'unica eccezione alla regola "niente
      scorrimento", e riguarda il contenuto, non l'interfaccia. */
   overflow:auto;-webkit-overflow-scrolling:touch;
-  display:flex;flex-direction:column;align-items:center;padding:.6rem;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:.6rem;
 }
 .media-stage:empty::after{
   content:attr(data-empty);color:var(--muted);font-size:.9rem;margin:auto;
 }
+/* ⚠️ Il video si adatta ALL'ALTEZZA disponibile, non solo alla
+ * larghezza.
+ *
+ * Con la sola larghezza al cento per cento, su un riquadro basso il
+ * video diventava più alto dello spazio e compariva una barra di
+ * scorrimento verticale: chi comanda con lo sguardo non può
+ * trascinarla, quindi perdeva la parte bassa dell'immagine — e i
+ * sottotitoli stanno proprio lì.
+ *
+ * `height:100%` con `width:auto` fa sì che sia l'altezza a comandare e
+ * la larghezza a seguire: il video rimpicciolisce quanto serve, ma ci
+ * sta sempre tutto. */
 .media-stage #ytHost,.media-stage iframe{
-  width:100%;aspect-ratio:16/9;border:0;border-radius:9px;flex:0 0 auto;
-  max-width:min(100%, 160vh);
+  height:100%;width:auto;aspect-ratio:16/9;border:0;border-radius:9px;
+  flex:1 1 auto;min-height:0;
+  max-width:100%;max-height:100%;
 }
 .media-canvas{max-width:100%;height:auto;border-radius:6px;background:#fff;flex:0 0 auto}
 .media-image{max-width:100%;height:auto;transform-origin:top center;border-radius:6px}
@@ -1280,3 +1300,42 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
   display:flex;align-items:center;gap:.5rem;margin:.3rem 0;
 }
 .fav-utente .riga-num .input{width:5rem}
+
+
+/* ── Un video non fa MAI scorrere il riquadro ──
+ *
+ * ⚠️ La barra di scorrimento resta solo per i documenti, dove una
+ * pagina è più alta dello schermo e scorrere è il modo normale di
+ * leggerla. Per un video è un difetto: chi punta con lo sguardo non
+ * può trascinarla, e perde la parte bassa dell'immagine — dove stanno
+ * i sottotitoli.
+ */
+body.has-media .media-stage:has(iframe),
+body.has-media .media-stage:has(video){overflow:hidden}
+
+/* ── Sotto-schede dei contenuti in Punta ──
+ *
+ * ⚠️ Un tipo per volta: tutti i gruppi impilati riempivano la pagina e
+ * il riquadro del video finiva in fondo, sotto la radio, raggiungibile
+ * solo con una barra di scorrimento che con lo sguardo non si
+ * trascina.
+ *
+ * Bersagli larghi come le altre schede: si colpiscono nello stesso
+ * modo e devono costare la stessa fatica.
+ */
+.pt-subtabs{display:flex;gap:.4rem;flex-wrap:nowrap;margin-bottom:.5rem}
+.pt-subtab{
+  flex:1 1 0;min-width:0;
+  border:1px solid var(--line);background:var(--surface);color:var(--muted);
+  cursor:pointer;border-radius:10px;
+  padding:clamp(.45rem,1.5vh,.8rem) .3rem;
+  font:700 clamp(.72rem,1.7vh,.95rem) var(--font);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.pt-subtab.is-active{background:var(--accent);color:var(--ink);border-color:var(--accent)}
+
+/* Il riquadro del contenuto prende l'altezza che resta, così un video
+   ci sta intero senza far scorrere nulla. */
+#ptView-media{overflow:hidden}
+#ptTiles{flex:0 0 auto;overflow:hidden}
+#ptMediaStage{flex:1 1 auto;min-height:0}

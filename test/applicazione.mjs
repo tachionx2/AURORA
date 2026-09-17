@@ -552,7 +552,11 @@ const tiles = document.getElementById('ptTiles');
 ok(tiles.children.length >= 2, `i contenuti compaiono come riquadri (${tiles.children.length} gruppi)`);
 const riquadri = [];
 (function raccogli(n){ for (const c of n.children||[]) { if (c.className?.includes('pt-tile ')) riquadri.push(c); raccogli(c); } })(tiles);
-ok(riquadri.length >= 2, `un riquadro per contenuto (${riquadri.length})`);
+/* ⚠️ Ora si mostra un TIPO per volta: tutti i gruppi impilati
+ * riempivano la pagina, e il riquadro del video finiva in fondo sotto
+ * la radio, raggiungibile solo scorrendo — cosa che con lo sguardo non
+ * si fa. Quindi si conta il gruppo visibile, non tutti insieme. */
+ok(riquadri.length >= 1, `un riquadro per contenuto del tipo scelto (${riquadri.length})`);
 ok(riquadri.every(r => r.className.includes('ptr-target')),
    'ogni riquadro è un bersaglio del puntatore');
 ok(riquadri.every(r => typeof r.onclick === 'function'), 'ogni riquadro apre il contenuto');

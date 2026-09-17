@@ -844,5 +844,41 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '99i. e i tasti in fondo alla tastiera hanno la stessa altezza delle schede');
 }
 
+/* ══════ Ciò che si guarda non deve mai richiedere di scorrere ══════
+ *
+ * ⚠️ Una barra di scorrimento è un bersaglio che con lo sguardo non si
+ * usa: chi punta può premere, non trascinare. Un video più alto del
+ * riquadro perdeva la parte bassa — dove stanno i sottotitoli — e non
+ * c era modo di recuperarla.
+ *
+ * Meglio un video più piccolo e intero che uno grande e tagliato. */
+{
+  const fsL2 = await import('node:fs');
+  const pathL2 = await import('node:path');
+  const quiL2 = pathL2.dirname(import.meta.filename || process.argv[1]);
+  const css2 = fsL2.readFileSync(pathL2.join(quiL2, '..', 'css/app.css'), 'utf8');
+  const pv2 = fsL2.readFileSync(pathL2.join(quiL2, '..', 'js/ui/PointerView.js'), 'utf8');
+
+  ok(/\.media-stage #ytHost,\.media-stage iframe\{[\s\S]{0,160}height:100%;width:auto/.test(css2),
+     '100. il video si adatta all ALTEZZA, non solo alla larghezza');
+  ok(/max-height:100%/.test(css2),
+     '101. e non supera mai il riquadro che lo contiene');
+  ok(/:has\(iframe\)[\s\S]{0,60}overflow:hidden/.test(css2),
+     '102. un video non fa scorrere il riquadro, a differenza dei documenti');
+
+  /* ⚠️ Un tipo per volta: tutti i gruppi impilati riempivano la
+   * pagina, e il riquadro del video finiva in fondo sotto la radio. */
+  ok(/const pieni = gruppi\.filter/.test(pv2),
+     '103. i contenuti sono divisi per tipo');
+  ok((pv2.match(/UN TIPO PER VOLTA/g) || []).length === 1,
+     '104. con un solo blocco che lo decide, non copie sparse');
+  ok(/g\.id !== this\._tipoMedia\) continue/.test(pv2),
+     '105. e si mostra solo il tipo scelto');
+  ok(/pt-subtab/.test(pv2) && /\.pt-subtab\{[\s\S]{0,160}flex:1 1 0/.test(css2),
+     '106. le sotto-schede sono larghe come le altre: si colpiscono nello stesso modo');
+  ok(/#ptMediaStage\{flex:1 1 auto/.test(css2),
+     '107. e il riquadro prende l altezza che resta, così il video ci sta intero');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

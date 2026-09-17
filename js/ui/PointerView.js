@@ -134,6 +134,31 @@ export class PointerView {
     ].filter(g => g.items.length);
 
     wrap.innerHTML = '';
+    /* ══════════════════════════════════════════════════════════════
+     * UN TIPO PER VOLTA
+     * ══════════════════════════════════════════════════════════════
+     *
+     * ⚠️ Tutti i gruppi impilati riempivano la pagina: il riquadro del
+     * video finiva in fondo, sotto la radio, e per vederlo servivano
+     * barre di scorrimento che con lo sguardo non si trascinano.
+     *
+     * Con una scheda per tipo si vede un gruppo solo, e sotto resta
+     * spazio pieno per il contenuto — video interi, immagini intere,
+     * niente scorrimento. */
+    const pieni = gruppi.filter(g => g.items?.length);
+    if (pieni.length > 1) {
+      if (!pieni.some(g => g.id === this._tipoMedia)) this._tipoMedia = pieni[0].id;
+      const barra = h('div', 'pt-subtabs');
+      for (const g of pieni) {
+        const b = h('button', 'pt-subtab ptr-target'
+          + (g.id === this._tipoMedia ? ' is-active' : ''), `${g.ic} ${g.nome}`);
+        b.onclick = () => { this._tipoMedia = g.id; this.renderMedia(); };
+        barra.append(b);
+      }
+      wrap.append(barra);
+    } else {
+      this._tipoMedia = pieni[0]?.id || null;
+    }
     if (!gruppi.length) {
       wrap.append(h('p', 'sub',
         'Nessun contenuto. Caricali dalla scheda Media, oppure aggiungi un link video.'));
@@ -141,6 +166,8 @@ export class PointerView {
     }
 
     for (const g of gruppi) {
+      // Si mostra solo il tipo scelto: gli altri sono a un tocco.
+      if (this._tipoMedia && g.id !== this._tipoMedia) continue;
       const sez = h('div', 'pt-tilegroup');
       sez.append(h('div', 'pt-tilehead', `${g.ic} ${g.nome}`));
       const riga = h('div', 'pt-tilerow');
