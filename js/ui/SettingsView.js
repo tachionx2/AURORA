@@ -241,7 +241,24 @@ export class SettingsView {
     inp.type = 'range'; inp.min = min; inp.max = max; inp.step = step;
     inp.value = this.app.get(path);
     const val = h('span', 'val', `${inp.value}${unit}`);
-    inp.oninput = () => { val.textContent = `${inp.value}${unit}`; this.app.set(path, parseFloat(inp.value)); };
+    inp.oninput = () => {
+      val.textContent = `${inp.value}${unit}`;
+      this.app.set(path, parseFloat(inp.value));
+      /* ⚠️ Anche i CURSORI possono svelare altri controlli.
+       *
+       * L'elenco di ciò che ridisegna copriva caselle e menu a tendina
+       * ma non i cursori: portando i minuti dello schermo scuro sopra
+       * zero, il cursore dell'opacità compariva solo uscendo dalle
+       * impostazioni e rientrando.
+       *
+       * ⚠️ Ma NON si ridisegna mentre si trascina: si perderebbe il
+       * cursore sotto le dita a ogni millimetro. Si aspetta che sia
+       * rilasciato. */
+      if (INTERRUTTORI_CHE_APRONO.has(path)) {
+        clearTimeout(this._ridisegnaFra);
+        this._ridisegnaFra = setTimeout(() => this.render(), 350);
+      }
+    };
     return field(label, desc, inp, val);
   }
 

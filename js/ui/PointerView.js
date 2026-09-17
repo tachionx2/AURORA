@@ -148,7 +148,12 @@ export class PointerView {
         // Una cartella si apre sul primo file: da lì avanti e indietro
         // restano dentro l'album.
         const b = h('button', 'pt-tile ptr-target');
-        b.innerHTML = `<span class="tt">${esc(it.title)}</span>` +
+        /* ⚠️ Le stazioni radio hanno `nome`, i file hanno `title`.
+         *
+         * Cercando solo `title` i pulsanti della radio mostravano tutti
+         * "undefined": un elenco di bersagli indistinguibili, in cui
+         * scegliere è impossibile. */
+        b.innerHTML = `<span class="tt">${esc(it.title || it.nome || '—')}</span>` +
           (it.folder ? `<small>${it.folder.length} file</small>` : '');
         b.onclick = () => {
           /* La radio non passa dalla libreria: è un flusso continuo

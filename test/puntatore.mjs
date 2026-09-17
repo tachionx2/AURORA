@@ -762,5 +762,41 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '95. e vivono solo nella sessione: nulla viene salvato su disco');
 }
 
+/* ══════ Ogni riquadro deve avere un nome leggibile ══════
+ *
+ * ⚠️ I pulsanti della radio mostravano tutti "undefined": le stazioni
+ * hanno `nome`, i file hanno `title`, e si cercava solo il secondo.
+ * Un elenco di bersagli indistinguibili è un elenco in cui scegliere
+ * è impossibile — e per chi punta con lo sguardo, impossibile davvero.
+ */
+{
+  const fsN = await import('node:fs');
+  const pathN = await import('node:path');
+  const quiN = pathN.dirname(import.meta.filename || process.argv[1]);
+  const pv = fsN.readFileSync(pathN.join(quiN, '..', 'js/ui/PointerView.js'), 'utf8');
+  const sv = fsN.readFileSync(pathN.join(quiN, '..', 'js/ui/SettingsView.js'), 'utf8');
+  const css = fsN.readFileSync(pathN.join(quiN, '..', 'css/app.css'), 'utf8');
+
+  ok(/it\.title \|\| it\.nome/.test(pv),
+     '96. i riquadri leggono sia "title" sia "nome": le stazioni non hanno il primo');
+
+  /* ⚠️ E anche i CURSORI devono ridisegnare quando svelano altro.
+   *
+   * L elenco copriva caselle e menu a tendina ma non i cursori:
+   * portando i minuti dello schermo scuro sopra zero, il cursore
+   * dell opacità compariva solo uscendo dalle impostazioni e
+   * rientrando. È la stessa classe di difetto già incontrata tre
+   * volte, in una forma nuova. */
+  ok(/INTERRUTTORI_CHE_APRONO\.has\(path\)[\s\S]{0,200}setTimeout/.test(sv),
+     '97. anche i cursori ridisegnano quando svelano altri controlli');
+  ok(/clearTimeout\(this\._ridisegnaFra\)/.test(sv),
+     '98. ma non mentre si trascina: si perderebbe il cursore sotto le dita');
+
+  /* Un riquadro spaiato non deve allargarsi a dismisura: sembrerebbe
+   * un elemento diverso, o un errore. */
+  ok(/max-width:clamp\(240px,36vw,440px\)/.test(css),
+     '99. l ultimo riquadro di una riga spaiata resta della misura degli altri');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

@@ -868,8 +868,14 @@ body.in-finestra .mini{height:100vh;justify-content:center}
 .pt-tilegroup{display:flex;flex-direction:column;gap:.3rem}
 .pt-tilehead{font:700 .8rem var(--mono);color:var(--accent);letter-spacing:.06em}
 .pt-tilerow{display:flex;gap:.5rem;flex-wrap:wrap}
+/* ⚠️ Il riquadro cresce, ma non oltre il doppio della sua misura.
+ *
+ * Con `flex:1 1` senza limite, l'ultimo di una riga spaiata si
+ * allargava per tutto lo spazio rimasto: sette stazioni diventavano
+ * sei normali più una enorme, e sembrava un elemento diverso — o un
+ * errore. Ora l'ultimo resta della misura degli altri. */
 .pt-tile{
-  flex:1 1 clamp(120px,18vw,220px);min-width:0;
+  flex:1 1 clamp(120px,18vw,220px);min-width:0;max-width:clamp(240px,36vw,440px);
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:.15rem;
   padding:clamp(.5rem,1.6vh,.9rem) .6rem;
   background:var(--raised);border:1px solid var(--line);border-radius:10px;
