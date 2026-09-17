@@ -1261,3 +1261,22 @@ body.in-finestra .mini-cmd .btn{padding:.18rem .35rem;font-size:.66rem;border-ra
   min-height:0;height:100%;padding:.4rem .5rem;
   font-size:clamp(.7rem,2.2vh,1.05rem);line-height:1.15;
 }
+
+/* ── Etichetta dei video tenuti da parte dalla persona ──
+ *
+ * ⚠️ Chi assiste deve capire a colpo d'occhio da dove viene una voce:
+ * senza segno, si ritroverebbe nella propria lista video che non
+ * ricorda di aver messo, e non saprebbe se toglierli.
+ */
+.tag-salvato{
+  display:inline-block;padding:.05rem .4rem;border-radius:6px;
+  background:var(--accent);color:var(--ink);
+  font:700 .62rem var(--font);vertical-align:middle;
+}
+
+/* I due controlli del salvataggio, sotto l'elenco dei preferiti. */
+.fav-utente{margin-top:.7rem;padding-top:.6rem;border-top:1px solid var(--line)}
+.fav-utente .riga-switch,.fav-utente .riga-num{
+  display:flex;align-items:center;gap:.5rem;margin:.3rem 0;
+}
+.fav-utente .riga-num .input{width:5rem}

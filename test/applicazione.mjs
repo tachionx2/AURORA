@@ -2760,5 +2760,110 @@ app.goto('parla');
      'e in cattura, così arriva comunque anche a ciò che sta sotto');
 }
 
+/* ══════ Segnalibro: dove si era arrivati ══════
+ *
+ * ⚠️ Un documentario di un ora non si guarda in una volta sola, e
+ * ricominciare da capo ogni volta significa non guardarlo affatto. */
+{
+  const fsB3 = await import('node:fs');
+  const pathB3 = await import('node:path');
+  const quiB3 = pathB3.dirname(import.meta.filename || process.argv[1]);
+  const mainB = fsB3.readFileSync(pathB3.join(quiB3, '..', 'js/main.js'), 'utf8');
+  const mpB = fsB3.readFileSync(pathB3.join(quiB3, '..', 'js/media/MediaPlayer.js'), 'utf8');
+  const { DEFAULT_CONFIG: DB } = await import('../js/core/config.js');
+
+  ok(DB.media.segnalibroMinSec === 30, 'la soglia del segnalibro è mezzo minuto');
+  /* ⚠️ Permettere alla persona di tenere da parte i video trovati è
+   * una SCELTA di chi assiste, non un comportamento imposto: quei
+   * video finiscono nella lista che cura lui, e deve poter decidere se
+   * condividerla. */
+  ok(DB.media.salvataggioUtente === false,
+     'il salvataggio da parte della persona è spento di default');
+  ok(DB.media.maxSalvati >= 1 && DB.media.maxSalvati <= 30,
+     `e il tetto è regolabile (${DB.media.maxSalvati} di partenza)`);
+  ok(/const permesso = !!this\.cfg\.media\?\.salvataggioUtente/.test(mainB),
+     'i comandi salva ed elimina compaiono solo se è stato permesso');
+
+  /* I due controlli stanno nella scheda dei preferiti: è lì che chi
+   * assiste cura la lista, ed è lì che deve poter decidere. */
+  const htmlB = fsB3.readFileSync(pathB3.join(quiB3, '..', 'index.html'), 'utf8');
+  ok(/id="favSalvaUtente"/.test(htmlB) && /id="favMaxSalvati"/.test(htmlB),
+     'interruttore e tetto stanno accanto all elenco dei video preferiti');
+  ok(/favSalvaUtente/.test(mainB) && /favMaxSalvati/.test(mainB),
+     'ed entrambi sono collegati');
+
+  /* ⚠️ E chi assiste deve capire a colpo d occhio da dove viene una
+   * voce: senza segno, si ritroverebbe nella propria lista video che
+   * non ricorda di aver messo, e non saprebbe se toglierli. */
+  ok(/tag-salvato/.test(mainB),
+     'i video tenuti da parte sono marcati nell elenco di chi assiste');
+
+  /* ⚠️ Le due regole che evitano il caso che romperebbe tutto. */
+  const regola = (pos, dur, min = 30) => (pos < min || (dur > 0 && pos > dur - min));
+  ok(regola(12, 3600), 'sotto mezzo minuto non si segna nulla');
+  ok(!regola(45, 3600), 'più avanti si segna');
+  ok(!regola(1800, 3600), 'e a metà pure');
+  ok(regola(3575, 3600),
+     '⚠️ negli ultimi trenta secondi si CANCELLA: un video chiuso alla fine ripartirebbe alla fine e finirebbe subito');
+
+  ok(/salvaSegnalibro\(\)/.test(mainB), 'il segnalibro si salva');
+  ok(/if \(cmd === 'exit'\) this\.salvaSegnalibro\(\);/.test(mainB),
+     '⚠️ e si prende PRIMA di chiudere: dopo, il riproduttore è smontato e la posizione è persa');
+  ok(/start: Math\.floor\(startSeconds\)/.test(mpB),
+     'e si riprende dicendolo al riproduttore all avvio, senza salti visibili');
+
+  /* "Dall'inizio", "salva" ed "elimina" compaiono solo quando servono:
+   * un comando che non fa nulla costa un giro di scansione. */
+  ok(/id: 'daCapo', label: '⏮', spoken: 'inizio'/.test(mainB),
+     'il comando dall inizio ha un icona sola ma la voce dice "inizio"');
+  ok(/this\.leggiSegnalibro\(k\) > 0/.test(mainB),
+     'e compare solo se c è un segnalibro da ignorare');
+  ok(/!inLista && this\._candidatiVideo/.test(mainB),
+     'salvare vale solo per i video trovati, non per quelli già in lista');
+  ok(/inLista\?\.salvato/.test(mainB),
+     '⚠️ ed eliminare solo ciò che ha salvato la persona: quelli di chi assiste non si cancellano da qui');
+  ok(/Hai già \$\{max\} video salvati/.test(mainB),
+     'raggiunto il tetto lo si dice, invece di ignorare il comando');
+  ok(/salvato: true/.test(mainB),
+     'e i video salvati sono marcati, così chi assiste sa da dove vengono');
+
+  /* ⚠️ Ogni comando accanto a quello con cui si usa.
+   *
+   * Metterli tutti in cima era comodo da scrivere ma sbagliato da
+   * usare: "salva" ed "elimina" riguardano il video nel suo insieme e
+   * stanno accanto a pausa; "dall inizio" è un salto all indietro e
+   * sta dopo "indietro quindici". Chi cerca un comando lo cerca vicino
+   * a quelli che gli somigliano. */
+  const { COMMANDS_BY_KIND: CB, MediaCommand: MB } = await import('../js/media/MediaPlayer.js');
+  const dopo = (e, r, v) => {
+    if (!v.length) return e;
+    const i = e.findIndex(c => c.id === r);
+    return i < 0 ? [...e, ...v] : [...e.slice(0, i + 1), ...v, ...e.slice(i + 1)];
+  };
+  const extraB = [{ id: 'altroVideo' }, { id: 'salvaVideo' },
+                  { id: 'eliminaVideo' }, { id: 'daCapo' }];
+  const pB = (id) => extraB.filter(c => c.id === id);
+  let ordine = CB.youtube;
+  ordine = dopo(ordine, MB.PLAY_PAUSE,
+                [...pB('altroVideo'), ...pB('salvaVideo'), ...pB('eliminaVideo')]);
+  ordine = dopo(ordine, MB.BACK, pB('daCapo'));
+  const pos = (id) => ordine.findIndex(c => c.id === id);
+
+  ok(pos('salvaVideo') > pos(MB.PLAY_PAUSE),
+     'salva viene dopo pausa');
+  ok(pos('eliminaVideo') > pos('salvaVideo') && pos('eliminaVideo') < pos(MB.FORWARD),
+     'elimina sta fra salva e avanti quindici');
+  ok(pos('daCapo') > pos(MB.BACK) && pos('daCapo') < pos(MB.VOL_UP),
+     'e dall inizio sta fra indietro quindici e i volumi');
+
+  /* Il volume di TUTTO ciò che suona scende mentre la voce guida
+   * parla: due voci insieme non si capiscono, e chi ascolta ha bisogno
+   * del menu proprio per poter chiudere. */
+  ok(/this\.media\?\.riduciVolume\?\.\(guidaAttiva\)/.test(mainB),
+     'video e audio si abbassano con la voce guida attiva');
+  ok(/guidaAttiva \? 0\.18 : 1/.test(mainB),
+     'e la radio con loro, alla stessa quota');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);

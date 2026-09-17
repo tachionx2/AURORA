@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 42;
+export const CONFIG_VERSION = 43;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -1226,7 +1226,27 @@ export const DEFAULT_CONFIG = {
     readAloudEnabled: true,
     // Elenco di video preferiti, gestito dall'assistente: la persona
     // li sceglie in scansione senza dover cercare né digitare nulla.
-    favorites: [],               // [{ title, url }]
+    favorites: [],               // [{ title, url, salvato? }]
+    /* ⚠️ Dove si era arrivati in ciascun contenuto.
+     *
+     * Un documentario di un'ora non si guarda in una volta sola, e
+     * ricominciare da capo ogni volta significa non guardarlo affatto.
+     *
+     * Chiave: identificativo del video o nome del file. Valore:
+     * secondi. Si conserva fra le sessioni, come tutto il resto. */
+    segnalibri: {},
+    /* ⚠️ Sotto questa soglia non si segna nulla, e negli ultimi
+     * altrettanti secondi il segnalibro si azzera: un video chiuso a
+     * tre secondi dalla fine ripartirebbe a tre secondi dalla fine e
+     * finirebbe subito, e chi guarda penserebbe che sia rotto. */
+    segnalibroMinSec: 30,
+    /* ⚠️ Permettere alla persona di tenere da parte i video trovati è
+     * una SCELTA di chi assiste, non un comportamento imposto: quei
+     * video finiscono nella lista che lui cura, e deve poter decidere
+     * se condividerla. Spento di default. */
+    salvataggioUtente: false,
+    // Quanti video la persona può tenere da parte dalle ricerche.
+    maxSalvati: 5,
   },
 
   /* ---------------- Dispositivo esterno (braccio robotico) ----------
@@ -1323,6 +1343,12 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 43 && c.media) {
+    if (!c.media.segnalibri || typeof c.media.segnalibri !== 'object') c.media.segnalibri = {};
+    if (c.media.segnalibroMinSec === undefined) c.media.segnalibroMinSec = 30;
+    if (c.media.maxSalvati === undefined) c.media.maxSalvati = 5;
+    if (c.media.salvataggioUtente === undefined) c.media.salvataggioUtente = false;
+  }
   if (v < 42 && c.radio && (!Array.isArray(c.radio.stazioni) || !c.radio.stazioni.length)) {
     /* ⚠️ Solo se l'elenco è VUOTO: chi ha già messo le proprie
      * stazioni non deve ritrovarsele sostituite. */

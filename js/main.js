@@ -35,7 +35,7 @@ import { GazePointer } from './pointer/GazePointer.js';
 import { StripeCursor } from './pointer/StripeCursor.js';
 import { PointerOverlay } from './pointer/PointerOverlay.js';
 import { DeviceLink } from './device/DeviceLink.js';
-import { MediaPlayer, youtubeId, COMMANDS_BY_KIND } from './media/MediaPlayer.js';
+import { MediaPlayer, youtubeId, COMMANDS_BY_KIND, MediaCommand } from './media/MediaPlayer.js';
 
 const COLORS = {
   bg: '#0A0F14', text: '#EEF4F7', muted: '#7C93A4',
@@ -120,6 +120,12 @@ class App {
         // Il comando dei risultati alternativi è gestito qui: riguarda
         // la ricerca, non il riproduttore.
         if (cmd === 'altroVideo') return this.altroVideo();
+        if (cmd === 'daCapo') return this.riparti();
+        if (cmd === 'salvaVideo') return this.salvaVideoTrovato();
+        if (cmd === 'eliminaVideo') return this.eliminaVideoSalvato();
+        /* ⚠️ Il segnalibro si prende PRIMA di chiudere: dopo, il
+         * riproduttore è già stato smontato e la posizione è persa. */
+        if (cmd === 'exit') this.salvaSegnalibro();
         return this.media.active ? this.media.command(cmd) : this.comandoRadio(cmd);
       },
       onMediaOpen: (sel) => {
@@ -1382,6 +1388,90 @@ class App {
    */
 
   /**
+   * Ricomincia dall'inizio, ignorando il segnalibro.
+   *
+   * ⚠️ L'etichetta è una sola icona per non rubare larghezza agli
+   * altri comandi, ma la voce guida dice "inizio": è ciò che serve
+   * capire, e chi ascolta non vede l'icona.
+   */
+  async riparti() {
+    const k = this._chiaveSegnalibro();
+    if (k) {
+      const seg = { ...(this.cfg.media.segnalibri || {}) };
+      delete seg[k];
+      this.set('media.segnalibri', seg);
+    }
+    try {
+      if (this.media.kind === 'youtube' && this.media.ytReady) {
+        this.media.yt.seekTo(0, true);
+        this.media.yt.playVideo();
+      } else if (this.media.el) {
+        this.media.el.currentTime = 0;
+        this.media.el.play().catch(() => {});
+      }
+    } catch {}
+  }
+
+  /**
+   * Tiene da parte un video trovato con una ricerca.
+   *
+   * ⚠️ Finisce nella stessa lista che cura chi assiste, quindi viene
+   * marcato: così lui capisce da dove viene e non si chiede chi l'abbia
+   * messo lì. E c'è un tetto, altrimenti dieci ricerche curiose
+   * riempirebbero la lista che lui ha preparato con cura.
+   */
+  async salvaVideoTrovato() {
+    const id = this._videoCorrenteId;
+    if (!id) return;
+    const lista = [...(this.cfg.media.favorites || [])];
+    if (lista.some(x => youtubeId(x.url) === id)) {
+      await this.audio.say(this.cfg.ui.language === 'en' ? 'Already saved' : 'Già salvato', 'menu');
+      return;
+    }
+    const max = this.cfg.media?.maxSalvati ?? 10;
+    const salvati = lista.filter(x => x.salvato);
+    if (salvati.length >= max) {
+      await this.audio.say(this.cfg.ui.language === 'en'
+        ? `You already have ${max} saved videos: remove one first`
+        : `Hai già ${max} video salvati: eliminane uno prima`, 'menu');
+      return;
+    }
+    lista.push({
+      title: (this._titoloVideoAI || 'Video').slice(0, 90),
+      url: `https://www.youtube.com/watch?v=${id}`,
+      salvato: true,
+    });
+    this.set('media.favorites', lista);
+    this.renderFavorites?.();
+    this.refreshContext();
+    await this.audio.say(this.cfg.ui.language === 'en' ? 'Video saved' : 'Video salvato', 'menu');
+  }
+
+  /**
+   * Toglie dalla lista il video in riproduzione.
+   *
+   * ⚠️ Solo se lo ha salvato la persona: quelli messi da chi assiste
+   * non si cancellano da qui, o basterebbe un gesto involontario per
+   * perdere ciò che qualcun altro ha preparato.
+   */
+  async eliminaVideoSalvato() {
+    const id = this._videoCorrenteId;
+    if (!id) return;
+    const lista = this.cfg.media.favorites || [];
+    const i = lista.findIndex(x => youtubeId(x.url) === id && x.salvato);
+    if (i < 0) {
+      await this.audio.say(this.cfg.ui.language === 'en'
+        ? 'This one was not saved by you' : 'Questo non lo hai salvato tu', 'menu');
+      return;
+    }
+    const nuova = lista.filter((_, k) => k !== i);
+    this.set('media.favorites', nuova);
+    this.renderFavorites?.();
+    this.refreshContext();
+    await this.audio.say(this.cfg.ui.language === 'en' ? 'Removed' : 'Eliminato', 'menu');
+  }
+
+  /**
    * Passa al risultato successivo della stessa ricerca.
    *
    * ⚠️ Il video giusto non è sempre il primo, e con la ricerca vera ne
@@ -1423,7 +1513,8 @@ class App {
         : 'Quel video non si può aprire qui', 'menu');
       return;
     }
-    await this.media.openYouTube(id);
+    this._videoCorrenteId = id;
+    await this.media.openYouTube(id, null, this.leggiSegnalibro(`yt:${id}`));
     document.body.classList.add('has-media');
     this.refreshContext();
     this.renderMediaBar();
@@ -2689,6 +2780,51 @@ class App {
 
   /** Sposta il visualizzatore nel riquadro della scheda corrente. */
   /**
+   * ══════════════════════════════════════════════════════════════════
+   * SEGNALIBRO: dove si era arrivati
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * ⚠️ Un documentario di un ora non si guarda in una volta sola, e
+   * ricominciare da capo ogni volta significa non guardarlo affatto.
+   *
+   * Due regole evitano il caso che romperebbe tutto:
+   *
+   * · sotto mezzo minuto non si segna nulla — non è un punto a cui
+   *   valga la pena tornare;
+   * · negli ultimi trenta secondi il segnalibro si CANCELLA. Un video
+   *   chiuso a tre secondi dalla fine ripartirebbe a tre secondi dalla
+   *   fine e finirebbe subito, e chi guarda penserebbe che sia rotto.
+   *   Un contenuto finito è un contenuto da rivedere da capo.
+   */
+  _chiaveSegnalibro() {
+    if (this.media.kind === 'youtube') {
+      return this._videoCorrenteId ? `yt:${this._videoCorrenteId}` : null;
+    }
+    return this._titoloMediaCorrente ? `f:${this._titoloMediaCorrente}` : null;
+  }
+
+  salvaSegnalibro() {
+    try {
+      const k = this._chiaveSegnalibro();
+      if (!k) return;
+      const pos = this.media.posizione();
+      const dur = this.media.durata();
+      if (pos == null) return;
+      const min = this.cfg.media?.segnalibroMinSec ?? 30;
+      const seg = { ...(this.cfg.media.segnalibri || {}) };
+      if (pos < min || (dur > 0 && pos > dur - min)) delete seg[k];
+      else seg[k] = Math.floor(pos);
+      this.set('media.segnalibri', seg);
+    } catch { /* un segnalibro non salvato non deve fermare nulla */ }
+  }
+
+  /** Secondi da cui riprendere per una chiave, o 0. */
+  leggiSegnalibro(chiave) {
+    const v = (this.cfg.media?.segnalibri || {})[chiave];
+    return (typeof v === 'number' && v > 0) ? v : 0;
+  }
+
+  /**
    * Dimentica i risultati di una ricerca precedente.
    *
    * ⚠️ Restavano in memoria: aprendo poi un video della libreria, fra
@@ -2840,14 +2976,60 @@ class App {
        * comando che non fa nulla è peggio di un comando assente: costa
        * un giro di scansione ogni volta e delude chi lo sceglie. */
       const altri = (this._candidatiVideo?.length || 0) - (this._tentativoVideo || 0) - 1;
+      const extra = [];
+
+      /* "Altro" solo se ce n'è davvero un altro fra i risultati. */
       if (this.media.kind === 'youtube' && altri > 0) {
-        return [
-          base[0],
-          { id: 'altroVideo', label: '🔀 ALTRO', spoken: 'prova un altro video' },
-          ...base.slice(1),
-        ];
+        extra.push({ id: 'altroVideo', label: '🔀 ALTRO', spoken: 'prova un altro video' });
       }
-      return base;
+
+      /* ⚠️ "Dall'inizio" solo se c'è un segnalibro da ignorare: senza,
+       * il video parte già da capo e il comando non farebbe nulla. */
+      const k = this._chiaveSegnalibro?.();
+      if (k && this.leggiSegnalibro(k) > 0) {
+        extra.push({ id: 'daCapo', label: '⏮', spoken: 'inizio' });
+      }
+
+      /* Salvare vale solo per i video TROVATI: quelli già in lista ci
+       * sono già, e proporlo sarebbe un comando che non fa nulla. */
+      if (this.media.kind === 'youtube' && this._videoCorrenteId) {
+        const inLista = (this.cfg.media.favorites || [])
+          .find(x => youtubeId(x.url) === this._videoCorrenteId);
+        /* ⚠️ Solo se chi assiste lo ha permesso: quei video finiscono
+         * nella lista che cura lui, e deve poter decidere se
+         * condividerla. */
+        const permesso = !!this.cfg.media?.salvataggioUtente;
+        if (permesso && !inLista && this._candidatiVideo?.length) {
+          extra.push({ id: 'salvaVideo', label: '⭐ SALVA', spoken: 'salva questo video' });
+        } else if (permesso && inLista?.salvato) {
+          /* Eliminare solo ciò che ha salvato la persona: quelli messi
+           * da chi assiste non si cancellano da qui. */
+          extra.push({ id: 'eliminaVideo', label: '🗑', spoken: 'elimina dai salvati' });
+        }
+      }
+
+      if (!extra.length) return base;
+
+      /* ⚠️ Ogni comando accanto a quello con cui si usa.
+       *
+       * Metterli tutti in cima era comodo da scrivere ma sbagliato da
+       * usare: "salva" e "elimina" riguardano il video nel suo
+       * insieme e stanno accanto a pausa; "dall'inizio" è un salto
+       * all'indietro e sta dopo "indietro quindici". Chi cerca un
+       * comando lo cerca vicino a quelli che gli somigliano. */
+      const dopo = (elenco, idRif, voci) => {
+        if (!voci.length) return elenco;
+        const i = elenco.findIndex(c => c.id === idRif);
+        if (i < 0) return [...elenco, ...voci];
+        return [...elenco.slice(0, i + 1), ...voci, ...elenco.slice(i + 1)];
+      };
+      const prendi = (id) => extra.filter(c => c.id === id);
+
+      let out = base;
+      out = dopo(out, MediaCommand.PLAY_PAUSE,
+                 [...prendi('altroVideo'), ...prendi('salvaVideo'), ...prendi('eliminaVideo')]);
+      out = dopo(out, MediaCommand.BACK, prendi('daCapo'));
+      return out;
     }
     /* ⚠️ I comandi restano anche a radio in PAUSA.
      *
@@ -3089,6 +3271,15 @@ class App {
       row.className = 'row';
       const k = document.createElement('span');
       k.className = 'k'; k.textContent = f.title || f.url;
+      /* ⚠️ Chi assiste deve capire a colpo d'occhio da dove viene una
+       * voce: senza segno, si ritroverebbe nella propria lista video
+       * che non ricorda di aver messo, e non saprebbe se toglierli. */
+      if (f.salvato) {
+        const tag = document.createElement('span');
+        tag.className = 'tag-salvato';
+        tag.textContent = 'salvato';
+        k.append(' ', tag);
+      }
       const play = document.createElement('button');
       play.textContent = '▶'; play.title = 'Riproduci';
       play.onclick = () => this.playFavorite(i);
@@ -3125,7 +3316,9 @@ class App {
       this.agganciaMedia();
       const urls = (this.cfg.media.favorites || []).map(x => x.url);
       this._scordaRicercaVideo();
-      await this.media.openYouTube(f.url, urls);
+      const idF = youtubeId(f.url);
+      this._videoCorrenteId = idF;
+      await this.media.openYouTube(f.url, urls, this.leggiSegnalibro(`yt:${idF}`));
     } catch (e) { this.toast(e.message, true); }
   }
 
@@ -4252,6 +4445,28 @@ class App {
       };
       aggiorna();
       this._aggiornaSoloParla = aggiorna;
+    }
+
+    /* I due controlli del salvataggio, nella scheda dei video
+     * preferiti: è lì che chi assiste cura la lista, ed è lì che deve
+     * poter decidere se condividerla. */
+    const sw = document.getElementById('favSalvaUtente');
+    if (sw) {
+      sw.checked = !!this.cfg.media?.salvataggioUtente;
+      sw.onchange = () => {
+        this.set('media.salvataggioUtente', sw.checked);
+        this.refreshContext();
+        this.renderFavorites?.();
+      };
+    }
+    const nm = document.getElementById('favMaxSalvati');
+    if (nm) {
+      nm.value = this.cfg.media?.maxSalvati ?? 5;
+      nm.onchange = () => {
+        const v = Math.max(1, Math.min(30, Number(nm.value) || 5));
+        nm.value = v;
+        this.set('media.maxSalvati', v);
+      };
     }
 
     const bStop = document.getElementById('btnCalibStop');

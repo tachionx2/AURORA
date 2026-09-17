@@ -143,6 +143,22 @@
       <button class="btn btn-sm" id="btnFavAdd" data-i18n="btn.add">Aggiungi</button>
     </div>
     <div class="list" id="favList"></div>
+
+    <!-- ⚠️ Permettere alla persona di tenere da parte i video che
+         trova è una scelta di chi assiste, non un comportamento
+         imposto: finiscono in QUESTA lista, che è la sua.
+         Spento di default. -->
+    <div class="fav-utente">
+      <label class="riga-switch">
+        <input type="checkbox" id="favSalvaUtente">
+        <span data-i18n="fav.userSave">Permetti di salvare i video trovati con «Chiedi»</span>
+      </label>
+      <label class="riga-num">
+        <span data-i18n="fav.userMax">Quanti al massimo</span>
+        <input class="input" type="number" id="favMaxSalvati" min="1" max="30" step="1">
+      </label>
+      <p class="sub" data-i18n="fav.userNote">I video tenuti da parte compaiono qui sopra con l'etichetta «salvato», così si distinguono da quelli inseriti da chi assiste — che possono comunque essere rimossi da qui.</p>
+    </div>
   </section>
 
       <section class="card">

@@ -63,6 +63,13 @@ export const MediaCommand = {
    * prima: aprire subito costa zero gesti nel caso normale, mentre
    * scegliere da un elenco costerebbe tre o quattro gesti SEMPRE. */
   ALTRO_VIDEO: 'altroVideo',
+  /* Ricomincia dall'inizio, ignorando il segnalibro. L'etichetta è
+   * un'icona sola per non rubare spazio; la voce guida dice "inizio",
+   * che è ciò che serve capire. */
+  DA_CAPO: 'daCapo',
+  // Tiene da parte un video trovato con una ricerca.
+  SALVA_VIDEO: 'salvaVideo',
+  ELIMINA_VIDEO: 'eliminaVideo',
   READ_BACK: 'readBack',
   READ_RESTART: 'readRestart',
   EXIT: 'exit',
@@ -299,7 +306,25 @@ export class MediaPlayer {
 
   /* ------------------------------ YouTube ------------------------------ */
 
-  async openYouTube(idOrUrl, playlist = null) {
+  /** Secondi a cui è arrivato il contenuto, o null se non applicabile. */
+  posizione() {
+    try {
+      if (this.kind === 'youtube' && this.ytReady) return this.yt.getCurrentTime() || 0;
+      if (this.el) return this.el.currentTime || 0;
+    } catch {}
+    return null;
+  }
+
+  /** Durata totale, per capire se si è arrivati alla fine. */
+  durata() {
+    try {
+      if (this.kind === 'youtube' && this.ytReady) return this.yt.getDuration() || 0;
+      if (this.el) return this.el.duration || 0;
+    } catch {}
+    return 0;
+  }
+
+  async openYouTube(idOrUrl, playlist = null, startSeconds = 0) {
     const id = youtubeId(idOrUrl);
     if (!id) throw new Error('Link YouTube non riconosciuto');
     this.close(false);
@@ -321,6 +346,10 @@ export class MediaPlayer {
          * scansione fino al comando giusto, per un video che aveva
          * appena scelto. */
         autoplay: 1,
+        /* ⚠️ Riprende da dove si era rimasti. Il riproduttore lo fa da
+         * sé se glielo si dice all'avvio: farlo dopo produrrebbe un
+         * salto visibile e qualche secondo di video già visto. */
+        ...(startSeconds > 0 ? { start: Math.floor(startSeconds) } : {}),
         // I comandi nativi restano disponibili per chi assiste, ma la
         // guida vera passa dai comandi in scansione.
         controls: 1, iv_load_policy: 3,
