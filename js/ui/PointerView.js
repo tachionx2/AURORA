@@ -152,7 +152,17 @@ export class PointerView {
       for (const g of pieni) {
         const b = h('button', 'pt-subtab ptr-target'
           + (g.id === this._tipoMedia ? ' is-active' : ''), `${g.ic} ${g.nome}`);
-        b.onclick = () => { this._tipoMedia = g.id; this.renderMedia(); };
+        b.onclick = () => {
+          this._tipoMedia = g.id;
+          this.renderMedia();
+          /* ⚠️ Cambiando sotto-scheda cambia anche CHI riceve i
+           * comandi: senza rinfrescarli, la barra continuava a mostrare
+           * quelli del contenuto precedente. Premendo "chiudi" nella
+           * scheda RADIO si vedeva il pulsante del video — e il video
+           * era ciò che si chiudeva. */
+          this.app.refreshContext?.();
+          this.app.renderMediaBar?.();
+        };
         barra.append(b);
       }
       wrap.append(barra);

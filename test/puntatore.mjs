@@ -878,6 +878,20 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
      '106. le sotto-schede sono larghe come le altre: si colpiscono nello stesso modo');
   ok(/#ptMediaStage\{flex:1 1 auto/.test(css2),
      '107. e il riquadro prende l altezza che resta, così il video ci sta intero');
+
+  /* ⚠️ Cambiando sotto-scheda cambia anche CHI riceve i comandi.
+   *
+   * Senza rinfrescarli, la barra continuava a mostrare quelli del
+   * contenuto precedente: premendo "chiudi" nella scheda RADIO si
+   * vedeva il pulsante del video, e il video era ciò che si chiudeva.
+   *
+   * Non basta decidere bene a chi mandare il comando: bisogna anche
+   * mostrare i comandi giusti, o la persona ne preme uno credendo di
+   * premerne un altro. */
+  ok(/this\.app\.renderMediaBar\?\.\(\)/.test(pv2),
+     '108. cambiando sotto-scheda i comandi vengono rinfrescati');
+  ok(/this\.app\.refreshContext\?\.\(\)/.test(pv2),
+     '109. e con essi il menu della scansione');
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);
