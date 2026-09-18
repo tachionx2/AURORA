@@ -206,6 +206,52 @@ non nel rilevamento. È una prova diagnostica, prima che un modo d'uso.
 
 ---
 
+## DECISIONE PONDERATA: LA PASSWORD DI POSTA NELLA CONFIGURAZIONE
+
+Fino alla versione `20260917-1904` la regola era assoluta: **nessuna
+credenziale di posta nella configurazione**, perché è leggibile con gli
+strumenti di sviluppo del browser. Dalla `20260918-1130` la regola è
+cambiata **di proposito**, e chi trova qui una password non sta
+guardando una svista.
+
+**Perché.** Un browser non può parlare SMTP — mai, per regola del web —
+quindi serve comunque un servizio di appoggio. Ma con le credenziali
+fra le variabili d'ambiente di Netlify, *una* installazione serve *una*
+casella: ogni famiglia avrebbe bisogno di un proprio sito, e di
+qualcuno che lo configuri. Con le credenziali nella configurazione
+locale, **una sola Aurora pubblica serve tutti**, ognuno con la propria
+casella, e nessuno deve toccare Netlify.
+
+**Il prezzo, che resta vero.** La password è leggibile sul computer di
+chi la scrive e finisce dentro il file di configurazione esportato.
+Quel file vale la casella di posta.
+
+**Le condizioni che rendono la scelta accettabile** — verificate dai
+test, non da una promessa:
+
+1. `email.smtpPass` nasce **vuota**: chi usa le variabili d'ambiente non
+   si accorge del cambiamento (`33q`, integrità).
+2. Vuota, **non viene trasmessa affatto**: il servizio ricade sulle
+   proprie variabili, comportamento identico a prima (`33v`).
+3. Le credenziali partono **solo verso l'indirizzo configurato** (`33x`).
+4. Il servizio accetta credenziali **solo da pagine del proprio sito**,
+   confrontando `Origin` con l'host della richiesta — senza dipendere da
+   variabili da impostare a mano, altrimenti un sito non configurato
+   smetterebbe di spedire senza che si capisca perché.
+5. Chi esporta un profilo **viene avvisato** di cosa contiene
+   (`segretiInConfig`, avviso fisso accanto al pulsante).
+
+⚠️ **Non rimuovere nessuna delle cinque.** Sono ciò che separa questa
+scelta da una fuga di credenziali. In particolare il punto 4: senza,
+il servizio diventa un ponte anonimo per spedire posta.
+
+Le due strade convivono. `netlify/functions/invia-email.js` usa le
+credenziali della richiesta se complete, altrimenti le variabili
+d'ambiente. Difese facoltative: `MAIL_ALLOWED` (destinatari ammessi),
+`MAIL_CHIAVE` (parola condivisa), `MAIL_ORIGINI` (altre provenienze).
+
+---
+
 ## CHI È DANIELA, E PERCHÉ CONTA
 
 Sindrome locked-in. Un solo movimento volontario: l'occhio **sinistro**

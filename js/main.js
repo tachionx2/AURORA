@@ -6,7 +6,7 @@
  * restino testabili singolarmente.
  */
 
-import { DEFAULT_CONFIG, migrateConfig, validateConfig, exportProfile, importProfile, deepClone } from './core/config.js';
+import { DEFAULT_CONFIG, migrateConfig, validateConfig, exportProfile, importProfile, segretiInConfig, deepClone } from './core/config.js';
 import { bus, saveConfig, loadConfig, saveStats, loadStats, appendLog, LS_CONFIG } from './core/store.js';
 import { GestureEngine } from './signal/GestureEngine.js';
 import { analizza as analizzaSegnale } from './signal/AutoTune.js';
@@ -4575,7 +4575,19 @@ class App {
       a.href = URL.createObjectURL(blob);
       a.download = `aurora-${(this.cfg.profileName || 'profilo').replace(/\W+/g, '-')}.json`;
       a.click();
-      this.toast('Profilo esportato');
+      /* ⚠️ Se nel profilo ci sono credenziali, chi lo esporta deve
+       * saperlo ADESSO: quel file si manda per posta, si copia su una
+       * chiavetta, si lascia in una cartella condivisa — e vale la
+       * casella di posta di chi lo usa. */
+      const segreti = segretiInConfig(this.cfg);
+      if (segreti.length) {
+        // Segnalazione lunga e in evidenza: un avviso che sparisce in
+        // due secondi è come non averlo dato.
+        this.toast('⚠️ Profilo esportato. Contiene ' + segreti.join(', ')
+          + ': custodisci questo file come una password.', true);
+      } else {
+        this.toast('Profilo esportato');
+      }
     };
 
     document.getElementById('fileImport').onchange = async (e) => {

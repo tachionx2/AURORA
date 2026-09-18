@@ -15,10 +15,23 @@
  * qualunque indirizzo che accetti una richiesta. L'assistente lo
  * configura una volta e non ci pensa più.
  *
- * ⚠️ LE CREDENZIALI DELLA CASELLA NON STANNO QUI. Restano sul
- * servizio. In un programma che gira nel browser, una password di
- * posta sarebbe leggibile da chiunque apra gli strumenti di sviluppo —
- * e stiamo parlando della casella personale di una persona malata.
+ * ⚠️ DOVE STANNO LE CREDENZIALI — due strade, entrambe valide.
+ *
+ * 1. Nella configurazione locale (email.smtpPass). Viaggiano dentro
+ *    la richiesta, sotto HTTPS, e il servizio le usa per quel singolo
+ *    invio senza conservarle. Così una sola Aurora pubblica serve
+ *    tutti: ogni famiglia ha la propria casella e nessuno deve
+ *    toccare le variabili d'ambiente del servizio.
+ *
+ *    ⚠️ Il prezzo: quella password resta nel browser e finisce nel
+ *    file di configurazione esportato. Quel file vale la casella.
+ *
+ * 2. Sul servizio, fra le sue variabili d'ambiente. Nessun browser la
+ *    vede mai, ma va configurata a mano per ogni installazione.
+ *
+ * Se la password locale è vuota non viene trasmesso nulla e il
+ * servizio ricade sulle proprie variabili: chi ha già configurato
+ * Netlify continua a spedire esattamente come prima.
  *
  * ══════════════════════════════════════════════════════════════════
  * COSA MANDA
@@ -53,6 +66,17 @@ export function verificaConfigurazione(cfg) {
   }
   const contatti = (e.contatti || []).filter(c => indirizzoValido(c?.indirizzo));
   if (!contatti.length) problemi.push('nessun destinatario valido in elenco');
+  /* ⚠️ Credenziali a metà: è lo stato più insidioso. Con la password
+   * scritta ma senza server o casella, il servizio riceve dati
+   * incompleti e risponde con un errore tecnico che non dice nulla a
+   * chi installa. Meglio accorgersene qui.
+   *
+   * Password vuota NON è un problema: significa che la casella è
+   * configurata sul servizio, ed è una scelta legittima. */
+  if (e.smtpPass) {
+    if (!e.smtpHost) problemi.push('c\'è la password ma manca il server di posta (SMTP)');
+    if (!e.smtpUser) problemi.push('c\'è la password ma manca l\'indirizzo della casella in uscita');
+  }
   return { ok: problemi.length === 0, problemi, contatti };
 }
 
@@ -82,16 +106,20 @@ export async function invia(cfg, { destinatario, testo, oggetto }) {
      * al messaggio: così lo stesso servizio funziona con qualunque
      * provider senza doverlo riconfigurare.
      *
-     * ⚠️ Senza password: quella resta fra le variabili d'ambiente del
-     * servizio, dove nessun browser può leggerla. */
+     * La password si aggiunge SOLO se è stata scritta: vuota, non
+     * compare proprio nella richiesta e il servizio ricade sulle
+     * proprie variabili d'ambiente, come faceva prima. */
     ...(E.smtpHost ? {
       smtp: {
         host: E.smtpHost,
         port: Number(E.smtpPort) || 587,
         secure: !!E.smtpSicuro,
         user: E.smtpUser || '',
+        ...(E.smtpPass ? { pass: E.smtpPass } : {}),
       },
     } : {}),
+    /* Lucchetto del servizio, se chi installa ne ha messo uno. */
+    ...(E.chiaveServizio ? { chiave: E.chiaveServizio } : {}),
   };
 
   try {
@@ -107,7 +135,16 @@ export async function invia(cfg, { destinatario, testo, oggetto }) {
     });
     clearTimeout(scaduto);
     if (!r.ok) {
-      return { ok: false, messaggio: `il servizio ha risposto ${r.status}` };
+      /* ⚠️ Il servizio spiega COSA non va («Invalid login», «password
+       * mancante»): riportarlo cambia la vita a chi installa, mentre
+       * un numero secco non dice nulla. Se il corpo non si legge si
+       * resta al numero: mai un'eccezione qui. */
+      let dettaglio = '';
+      try {
+        const d = await r.json();
+        if (d && d.errore) dettaglio = ': ' + String(d.errore).slice(0, 200);
+      } catch { /* corpo illeggibile: pazienza, resta il numero */ }
+      return { ok: false, messaggio: `il servizio ha risposto ${r.status}${dettaglio}` };
     }
     return { ok: true, messaggio: `inviato a ${destinatario.nome || destinatario.indirizzo}` };
   } catch (e) {
@@ -127,13 +164,16 @@ export async function invia(cfg, { destinatario, testo, oggetto }) {
  */
 export const ESEMPIO_NETLIFY = `// netlify/functions/invia-email.js
 //
-// ⚠️ SMTP, PORTE E CREDENZIALI VANNO QUI, NON IN AURORA.
+// ⚠️ QUESTO È SOLO UN ESEMPIO MINIMO, da leggere per capire come
+// funziona. Il servizio VERO è già dentro Aurora, nella cartella
+// netlify/functions/, ed è più completo di questo: accetta le
+// credenziali scritte nelle impostazioni del programma oppure le
+// proprie variabili d'ambiente, e si difende dall'uso da parte di
+// estranei. Non c'è niente da copiare.
 //
 // Un browser non sa parlare SMTP: quel protocollo non esiste nel
-// browser e non ci sarà mai. Perciò server, porta, utente e password
-// stanno in QUESTO file e nelle variabili d'ambiente del servizio —
-// non nelle impostazioni di Aurora, dove sarebbero leggibili da
-// chiunque apra gli strumenti di sviluppo del browser.
+// browser e non ci sarà mai. Per questo serve comunque un servizio
+// come questo, ovunque stiano le credenziali.
 //
 // Per un provider diverso da Gmail, sostituire il blocco service
 // con host, porta e sicurezza espliciti:
@@ -145,17 +185,23 @@ export const ESEMPIO_NETLIFY = `// netlify/functions/invia-email.js
 //     auth: { user: process.env.MAIL_USER, pass: process.env.MAIL_PASS },
 //   });
 //
-// Se Aurora invia anche i parametri della casella (campo smtp), il
-// servizio può usarli e tenere in ambiente SOLO la password — così lo
-// stesso servizio serve più installazioni senza riconfigurarlo:
+// Se Aurora invia anche i parametri della casella (campo smtp,
+// password compresa), il servizio può usare quelli — così lo stesso
+// servizio serve più installazioni senza riconfigurarlo:
 //
 //   const s = JSON.parse(event.body).smtp;
 //   const transporter = nodemailer.createTransport({
 //     host: s?.host || process.env.MAIL_HOST,
 //     port: s?.port || Number(process.env.MAIL_PORT || 587),
 //     secure: s?.secure ?? false,
-//     auth: { user: s?.user || process.env.MAIL_USER, pass: process.env.MAIL_PASS },
+//     auth: { user: s?.user || process.env.MAIL_USER,
+//             pass: s?.pass || process.env.MAIL_PASS },
 //   });
+//
+// ⚠️ Accettando credenziali dall'esterno, controllare SEMPRE che la
+// richiesta arrivi dal proprio sito: altrimenti chiunque ne scopra
+// l'indirizzo può usarlo come ponte per spedire. Il servizio incluso
+// in Aurora lo fa già.
 //
 // Richiede: npm install nodemailer
 // Variabili d'ambiente da impostare su Netlify (Site settings →

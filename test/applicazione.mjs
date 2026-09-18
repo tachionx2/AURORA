@@ -236,6 +236,44 @@ for (const g of gruppi) {
 app.settingsView.gruppoAttivo = gruppi[0]?.id;
 ok(cards.length >= 25,
    `nessuna scheda perduta nel raggruppamento (trovate ${cards.length} su 25)`);
+
+/* ⚠️ Le schede qui sopra si disegnano con le funzioni SPENTE, e a
+ * funzione spenta metà dei campi non viene nemmeno costruita: un
+ * errore dentro quei rami passerebbe inosservato fino a quando non è
+ * chi installa a trovarlo. Si riprovano accese. */
+{
+  const spente = [];
+  for (const chiave of ['email', 'telegram', 'domotica', 'assistente']) {
+    if (!app.cfg[chiave]) continue;
+    spente.push([chiave, app.cfg[chiave].enabled]);
+    app.cfg[chiave].enabled = true;
+  }
+  let errAcc = null, mascherati = 0, totali = 0;
+  const conta = (n) => {
+    for (const c of n.children || []) {
+      if (c.tagName === 'INPUT') { totali++; if (c.type === 'password') mascherati++; }
+      conta(c);
+    }
+  };
+  for (const g of gruppi) {
+    app.settingsView.gruppoAttivo = g.id;
+    grid.children = [];
+    try { app.settingsView.render(); } catch (e) { errAcc = `${g.id}: ${e.message}`; break; }
+    conta(grid);
+  }
+  ok(!errAcc, `ogni scheda si disegna anche a funzione ACCESA: ${errAcc || ''}`);
+
+  /* ⚠️ La password della posta deve avere un campo suo, e mascherato:
+   * senza campo chi installa non ha modo di scriverla e la posta non
+   * parte; in chiaro la si scrive davanti a chiunque passi. */
+  ok(mascherati >= 2,
+     `la password di posta e la parola del servizio hanno campi mascherati (${mascherati} su ${totali})`);
+
+  for (const [chiave, prima] of spente) app.cfg[chiave].enabled = prima;
+  app.settingsView.gruppoAttivo = gruppi[0]?.id;
+  grid.children = [];
+  app.settingsView.render();
+}
 function countDeep(node, acc = { fields: 0, inputs: 0 }) {
   for (const c of node.children || []) {
     if (c.className === 'field' || c.classList?.contains?.('field')) acc.fields++;
@@ -2877,6 +2915,126 @@ app.goto('parla');
      'video e audio si abbassano con la voce guida attiva');
   ok(/guidaAttiva \? 0\.18 : 1/.test(mainB),
      'e la radio con loro, alla stessa quota');
+}
+
+/* ═══ Il servizio di invio posta, provato davvero ═══
+ *
+ * Non si legge il codice: lo si ESEGUE, con un finto nodemailer al
+ * posto di quello vero, e si guarda cosa decide. È l'unico modo per
+ * essere sicuri di due cose che contano:
+ *
+ *   1. chi ha già configurato le variabili d'ambiente continua a
+ *      spedire esattamente come prima (nessuna regressione);
+ *   2. le credenziali scritte nelle impostazioni di Aurora non
+ *      trasformano il servizio in un ponte aperto per estranei.
+ */
+{
+  const vmP = await import('node:vm');
+  const fsM = await import('node:fs');
+  const pathM = await import('node:path');
+  const quiM = pathM.dirname(import.meta.filename || process.argv[1]);
+  const fnPath = pathM.join(quiM, '..', 'netlify/functions/invia-email.js');
+  const srcMail = fsM.readFileSync(fnPath, 'utf8');
+
+  const carica = (env, spedito) => {
+    const mod = { exports: {} };
+    vmP.runInNewContext(srcMail, {
+      module: mod, exports: mod.exports,
+      require: () => ({ createTransport: (t) => ({
+        sendMail: async (m) => { spedito.push({ t, m }); } }) }),
+      process: { env }, console, Buffer, URL, setTimeout, clearTimeout,
+    });
+    return mod.exports.handler;
+  };
+  const SITO = { origin: 'https://aurora.netlify.app', host: 'aurora.netlify.app' };
+  const CRED = { host: 'smtp.libero.it', port: 465, secure: true,
+                 user: 'daniela@libero.it', pass: 'segretissima' };
+  const chiama = async (env, corpo, headers = SITO) => {
+    const spedito = [];
+    const r = await carica(env, spedito)({ httpMethod: 'POST', headers,
+      body: JSON.stringify({ to: 'mario@esempio.it', text: 'ciao', ...corpo }) });
+    return { stato: r.statusCode, corpo: JSON.parse(r.body), spedito };
+  };
+
+  /* ── 1. La strada vecchia non deve cambiare di una virgola ── */
+  const AMB = { MAIL_HOST: 'smtp.gmail.com', MAIL_PORT: '465',
+                MAIL_USER: 'x@gmail.com', MAIL_PASS: 'p' };
+  const vecchio = await chiama(AMB, {});
+  ok(vecchio.stato === 200 && vecchio.spedito[0]?.t.auth.user === 'x@gmail.com',
+     'posta: con le sole variabili d ambiente si spedisce come prima');
+  ok(vecchio.spedito[0]?.t.host === 'smtp.gmail.com' && vecchio.spedito[0]?.t.secure === true,
+     'posta: server e cifratura restano quelli delle variabili d ambiente');
+
+  /* ── 2. La strada nuova: credenziali dalle impostazioni ── */
+  const nuovo = await chiama({}, { smtp: CRED });
+  ok(nuovo.stato === 200 && nuovo.spedito[0]?.t.auth.pass === 'segretissima',
+     'posta: le credenziali scritte in Aurora bastano, senza variabili d ambiente');
+  ok(nuovo.spedito[0]?.t.host === 'smtp.libero.it',
+     'posta: e sono quelle usate, non altre');
+
+  /* ⚠️ Con entrambe presenti vincono quelle di chi sta spedendo: è ciò
+   * che permette a una sola Aurora pubblica di servire più famiglie. */
+  const insieme = await chiama(AMB, { smtp: CRED });
+  ok(insieme.spedito[0]?.t.auth.user === 'daniela@libero.it',
+     'posta: con entrambe, vince la casella di chi sta spedendo');
+
+  /* ── 3. ⚠️ Non deve diventare un ponte per estranei ── */
+  const estraneo = await chiama({}, { smtp: CRED },
+    { origin: 'https://sito-cattivo.it', host: 'aurora.netlify.app' });
+  ok(estraneo.stato === 403,
+     'posta: credenziali da una pagina di un altro sito vengono rifiutate');
+  const senzaOrigine = await chiama({}, { smtp: CRED }, { host: 'aurora.netlify.app' });
+  ok(senzaOrigine.stato === 403,
+     'posta: e una richiesta che non dice da dove viene, pure');
+
+  /* ⚠️ Il controllo NON deve dipendere da variabili configurate a
+   * mano: se dipendesse, un sito non configurato smetterebbe di
+   * spedire senza che nessuno capisca perché. */
+  const proprio = await chiama({}, { smtp: CRED },
+    { origin: 'https://aurora.miosito.it', host: 'aurora.miosito.it' });
+  ok(proprio.stato === 200,
+     'posta: su un dominio proprio funziona senza configurare nulla');
+  const locale = await chiama({}, { smtp: CRED }, { origin: 'http://localhost:8080' });
+  ok(locale.stato === 200, 'posta: e in locale, per chi sta provando');
+  const allargato = await chiama({ MAIL_ORIGINI: 'https://altro.it' }, { smtp: CRED },
+    { origin: 'https://altro.it', host: 'aurora.netlify.app' });
+  ok(allargato.stato === 200, 'posta: MAIL_ORIGINI permette di allargare, se serve');
+
+  /* ── 4. Il lucchetto facoltativo ── */
+  ok((await chiama({ MAIL_CHIAVE: 'w' }, { smtp: CRED })).stato === 403,
+     'posta: col lucchetto attivo, senza la parola non si spedisce');
+  ok((await chiama({ MAIL_CHIAVE: 'w' }, { smtp: CRED, chiave: 'w' })).stato === 200,
+     'posta: con la parola giusta si spedisce');
+  ok((await chiama({}, { smtp: CRED, chiave: 'qualunque' })).stato === 200,
+     'posta: senza lucchetto impostato, la parola non dà fastidio');
+
+  /* ── 5. Le protezioni di prima restano ── */
+  ok((await chiama({ ...AMB, MAIL_ALLOWED: 'solo@questo.it' }, {})).stato === 403,
+     'posta: l elenco dei destinatari ammessi vale ancora');
+
+  /* ── 6. Errori che dicono cosa fare ── */
+  const niente = await chiama({}, {});
+  ok(niente.stato === 500 && /impostazioni di Aurora/.test(niente.corpo.errore),
+     'posta: senza nulla di configurato, l errore indica entrambe le strade');
+  const senzaPass = await chiama({}, { smtp: { host: 'h', user: 'u', port: 587 } });
+  ok(senzaPass.stato === 500 && /password/.test(senzaPass.corpo.errore),
+     'posta: con server e casella ma senza password, lo dice chiaramente');
+
+  /* ── 7. Il mittente ── */
+  const conNome = await chiama({}, { smtp: CRED, from: 'Daniela' });
+  ok(conNome.spedito[0]?.m.from === '"Daniela" <daniela@libero.it>',
+     'posta: il nome scelto compare accanto all indirizzo di chi spedisce');
+  const cattivo = await chiama({}, { smtp: CRED, from: 'A"\r\nBcc: x@y.it' });
+  ok(!/[\r\n"]/.test(cattivo.spedito[0]?.m.from.replace(/^"|" <.*$/g, '')),
+     'posta: un nome con virgolette o a capo non può aggiungere intestazioni');
+
+  /* ── 8. Il riepilogo aperto nel browser ── */
+  {
+    const r = await carica({}, [])({ httpMethod: 'GET', headers: {} });
+    const g = JSON.parse(r.body);
+    ok(g.pronto === true && g.ambienteConfigurato === false,
+       'posta: aperto nel browser si dichiara pronto anche senza variabili d ambiente');
+  }
 }
 
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);

@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 43;
+export const CONFIG_VERSION = 44;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -1104,10 +1104,8 @@ export const DEFAULT_CONFIG = {
    * funzione su Netlify, EmailJS, o qualunque indirizzo che accetti
    * una richiesta e spedisca. L'assistente lo configura qui.
    *
-   * Le credenziali della casella NON stanno mai qui: restano sul
-   * servizio. In un programma che gira nel browser di una persona
-   * malata, una password di posta sarebbe leggibile da chiunque
-   * apra gli strumenti di sviluppo. */
+   * Le credenziali della casella possono stare QUI oppure sul
+   * servizio: si veda il riquadro sotto. */
   email: {
     enabled: false,
     endpoint: '',        // indirizzo del servizio che spedisce
@@ -1120,16 +1118,37 @@ export const DEFAULT_CONFIG = {
      * lo stesso servizio funziona con qualunque provider senza doverlo
      * riconfigurare: Netlify, un server proprio, un hosting qualunque.
      *
-     * ⚠️ LA PASSWORD NON STA QUI, ed è una scelta di sicurezza, non una
-     * dimenticanza. Tutto ciò che si scrive nelle impostazioni resta
-     * nel browser, dove chiunque apra gli strumenti di sviluppo può
-     * leggerlo — e parliamo della casella personale di una persona
-     * malata. La password va messa fra le variabili d'ambiente del
-     * servizio, dove nessun browser la vede. */
+     * ⚠️ DOVE STA LA PASSWORD — due strade, ed entrambe funzionano.
+     *
+     * 1. QUI (smtpPass). Ogni famiglia usa la propria casella senza
+     *    toccare Netlify, e una sola Aurora pubblica serve tutti. È la
+     *    strada normale.
+     *
+     *    ⚠️ Il prezzo: questa password resta nel browser, dove chi apre
+     *    gli strumenti di sviluppo la legge, e finisce dentro il file
+     *    di configurazione esportato. Quel file va trattato come una
+     *    chiave di casa: non si manda per posta, non si mette su un
+     *    disco condiviso. Vale la password della casella, e con Gmail
+     *    spesso anche il recupero di altri account.
+     *
+     * 2. SUL SERVIZIO, fra le variabili d'ambiente (MAIL_USER,
+     *    MAIL_PASS). Nessun browser la vede mai. Serve però un
+     *    intervento su Netlify per ogni installazione.
+     *
+     * Se smtpPass è compilata vince la prima; se è vuota, il servizio
+     * ricade sulle proprie variabili d'ambiente. Chi ha già
+     * configurato Netlify non deve cambiare nulla. */
     smtpHost: '',        // es. smtp.gmail.com
     smtpPort: 587,       // 587 con STARTTLS, 465 con TLS diretto
     smtpUser: '',        // indirizzo della casella in uscita
+    smtpPass: '',        // password della casella (vedi riquadro sopra)
     smtpSicuro: false,   // vero solo sulla porta 465
+    /* Lucchetto facoltativo del servizio di invio.
+     *
+     * Serve solo a chi imposta MAIL_CHIAVE fra le variabili d'ambiente
+     * su Netlify: in quel caso il servizio accetta soltanto richieste
+     * che portano la stessa parola. Lasciato vuoto non cambia nulla. */
+    chiaveServizio: '',
   },
 
   /* ── Domotica tramite Home Assistant ──
@@ -1343,6 +1362,13 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 44 && c.email) {
+    /* Le credenziali possono ora stare nella configurazione locale.
+     * ⚠️ Si aggiungono VUOTE: un profilo che spediva tramite le
+     * variabili d'ambiente di Netlify continua a spedire così. */
+    if (c.email.smtpPass === undefined) c.email.smtpPass = '';
+    if (c.email.chiaveServizio === undefined) c.email.chiaveServizio = '';
+  }
   if (v < 43 && c.media) {
     if (!c.media.segnalibri || typeof c.media.segnalibri !== 'object') c.media.segnalibri = {};
     if (c.media.segnalibroMinSec === undefined) c.media.segnalibroMinSec = 30;
@@ -1552,6 +1578,32 @@ export function validateConfig(c) {
       errs.push(`scan.groups[${i}]: gruppo vuoto`);
   });
   return errs;
+}
+
+/**
+ * Elenca, in parole, le credenziali che questa configurazione contiene.
+ *
+ * ⚠️ Serve per AVVISARE prima di esportare. Il file di configurazione
+ * è comodissimo — si salva, si sposta, si reinstalla — ed è proprio
+ * per questo che è pericoloso: chi lo riceve riceve anche la password
+ * della casella di posta e le chiavi dei servizi. Chi installa deve
+ * saperlo mentre preme il pulsante, non dopo.
+ *
+ * Restituisce un elenco vuoto se non c'è niente di delicato: in quel
+ * caso il file si può passare a chiunque senza pensarci.
+ */
+export function segretiInConfig(cfg) {
+  const trovati = [];
+  if (cfg?.email?.smtpPass) trovati.push('la password della casella di posta');
+  if (cfg?.email?.chiaveServizio) trovati.push('la parola del servizio di invio');
+  if (cfg?.telegram?.token) trovati.push('il gettone del robot Telegram');
+  if (cfg?.domotica?.token) trovati.push('il gettone di Home Assistant');
+  const ia = cfg?.assistente || {};
+  const chiaviIA = Object.values(ia.chiavi || {}).filter(Boolean).length + (ia.chiave ? 1 : 0);
+  if (chiaviIA) trovati.push(chiaviIA === 1
+    ? 'una chiave di accesso all\'assistente'
+    : `${chiaviIA} chiavi di accesso all'assistente`);
+  return trovati;
 }
 
 export function exportProfile(cfg, stats) {

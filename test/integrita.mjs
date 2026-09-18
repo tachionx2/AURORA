@@ -380,11 +380,46 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
   ok(/MAIL_ALLOWED/.test(fn),
      'si possono limitare i destinatari ammessi');
 
-  /* Le credenziali NON devono comparire nelle impostazioni di Aurora:
-   * lì sarebbero leggibili da chiunque apra gli strumenti di sviluppo. */
+  /* ── La password nella configurazione locale ──
+   *
+   * ⚠️ Scelta ponderata, non una svista: tenerla qui è ciò che
+   * permette a una sola Aurora pubblica di servire più famiglie, ognuna
+   * con la propria casella, senza che nessuno tocchi Netlify. Il
+   * prezzo è che quella password è leggibile sul computer di chi la
+   * scrive e viaggia dentro il file di configurazione esportato.
+   *
+   * Poiché è una scelta con un prezzo, le tre condizioni che la
+   * rendono accettabile vanno verificate ogni volta. */
   const cfgSrc = read('js/core/config.js');
-  ok(!/mailPass|smtpPass|MAIL_PASS/.test(cfgSrc),
-     'nessuna password di posta è salvata nella configurazione del programma');
+  ok(/smtpPass: ''/.test(cfgSrc),
+     'la password della casella esiste nella configurazione, e nasce vuota');
+  ok(/segretiInConfig/.test(cfgSrc),
+     'esiste un modo per sapere quali credenziali contiene un profilo');
+  const mainSrc = read('js/main.js');
+  ok(/segretiInConfig\(this\.cfg\)/.test(mainSrc),
+     'chi esporta un profilo viene avvisato di cosa sta esportando');
+  const idx = read('index.html');
+  ok(/id="exportAvviso"/.test(idx),
+     'e l avviso è scritto anche accanto al pulsante, non solo di passaggio');
+  const setSrc = read('js/ui/SettingsView.js');
+  ok(/_segreto\('email\.smtpPass'/.test(setSrc),
+     'la password si scrive in un campo mascherato, non in chiaro');
+
+  /* ⚠️ La difesa che rende il servizio non abusabile: accettando
+   * credenziali dall esterno, senza questo controllo chiunque ne
+   * scoprisse l indirizzo potrebbe usarlo come ponte per spedire. */
+  ok(/function origineAmmessa/.test(fn),
+     'il servizio accetta credenziali solo da pagine del proprio sito');
+  ok(/hostRichiesta/.test(fn),
+     'e lo verifica senza dipendere da variabili da configurare a mano');
+  ok(/MAIL_CHIAVE/.test(fn),
+     'più un lucchetto facoltativo, per chi vuole chiudere del tutto');
+
+  /* La strada vecchia deve restare percorribile: chi ha già messo le
+   * credenziali fra le variabili d ambiente non va costretto a
+   * cambiare nulla. */
+  ok(/process\.env\.MAIL_USER/.test(fn) && /process\.env\.MAIL_PASS/.test(fn),
+     'le credenziali nelle variabili d ambiente continuano a funzionare');
 
   ok(/errore: String\(e && e\.message/.test(fn),
      'un guasto riporta il motivo del provider, non un generico "non riuscito"');

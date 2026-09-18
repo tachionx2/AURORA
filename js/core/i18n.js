@@ -88,6 +88,9 @@ const IT = {
   'btn.loadVideo': 'Carica video', 'btn.export': 'Esporta profilo',
   'btn.import': 'Importa profilo', 'btn.reset': 'Ripristina', 'btn.autotune': 'Taratura automatica', 'btn.statsExport': 'Esporta statistiche', 'btn.statsMerge': 'Importa e unisci', 'btn.statsReplace': 'Importa e sostituisci',
   'btn.add': 'Aggiungi',
+  // ⚠️ Il file esportato contiene TUTTO, credenziali comprese: chi lo
+  // sposta deve saperlo prima di spostarlo.
+  'export.avviso': '⚠️ Il profilo esportato contiene tutte le impostazioni, comprese password e chiavi dei servizi configurati (posta, Telegram, assistente, dispositivi di casa). Custodisci quel file come una password: non mandarlo per posta e non lasciarlo su dischi condivisi.',
 
   'status.paused': 'In pausa', 'status.running': 'In scansione',
   'status.noEye': 'nessun occhio', 'status.good': 'segnale buono',
@@ -221,6 +224,7 @@ const EN = {
   'btn.loadVideo': 'Load video', 'btn.export': 'Export profile',
   'btn.import': 'Import profile', 'btn.reset': 'Reset', 'btn.autotune': 'Auto-tune', 'btn.statsExport': 'Export statistics', 'btn.statsMerge': 'Import and merge', 'btn.statsReplace': 'Import and replace',
   'btn.add': 'Add',
+  'export.avviso': '⚠️ The exported profile contains every setting, including passwords and keys of the configured services (mail, Telegram, assistant, home devices). Keep that file like a password: do not email it and do not leave it on shared drives.',
 
   'status.paused': 'Paused', 'status.running': 'Scanning',
   'status.noEye': 'no eye found', 'status.good': 'good signal',

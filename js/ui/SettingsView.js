@@ -722,6 +722,31 @@ export class SettingsView {
     return field(etichetta, (nota && /\s/.test(String(nota))) ? nota : null, inp);
   }
 
+  /**
+   * Campo per una password o una parola segreta.
+   *
+   * ⚠️ Nascosto mentre si scrive — a chi installa capita di farlo con
+   * qualcuno accanto — ma con un tasto per mostrarlo: una password per
+   * le applicazioni di Google è di sedici caratteri senza senso, e
+   * digitarla alla cieca senza poterla rileggere è il modo più sicuro
+   * per sbagliarla e non capire perché la posta non parte.
+   */
+  _segreto(percorso, etichetta, nota) {
+    const box = h('div', 'lista-riga');
+    const inp = h('input', 'input largo');
+    inp.type = 'password';
+    inp.autocomplete = 'off';
+    inp.value = this.app.get(percorso) ?? '';
+    if (nota && !/\s/.test(String(nota))) inp.placeholder = nota;
+    inp.onchange = () => this.app.set(percorso, inp.value.trim());
+    const occhio = h('button', 'btn btn-sm', '👁');
+    occhio.type = 'button';
+    occhio.title = P(['Mostra o nascondi', 'Show or hide']);
+    occhio.onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; };
+    box.append(inp, occhio);
+    return field(etichetta, (nota && /\s/.test(String(nota))) ? nota : null, box);
+  }
+
   /** Elenco modificabile di voci con due campi. */
   _elencoDue(percorso, voci, campi, etichettaAggiungi) {
     const box = h('div', 'pgroup');
@@ -1173,14 +1198,13 @@ export class SettingsView {
       const testo = h('div');
       testo.innerHTML = P([
         `<p class="note">Un browser <b>non può spedire posta da solo</b>: non è un limite di Aurora ma una regola di sicurezza del web, e non cambierà. Serve un piccolo servizio esterno che riceva il messaggio e lo spedisca.</p>
-         <p class="sub"><b>✅ Il servizio è GIÀ INCLUSO in Aurora</b>, nella cartella <code>netlify/functions/</code>, insieme a <code>package.json</code> e <code>netlify.toml</code> alla radice che servono a installarlo. Non devi creare né copiare nulla: restano tre cose da fare.</p>
-         <p class="sub"><b>1.</b> Su Netlify, <i>Site configuration → Environment variables</i>: aggiungi <code>MAIL_USER</code> (l'indirizzo) e <code>MAIL_PASS</code> (la password), più <code>MAIL_SERVICE=gmail</code> se usi Gmail, oppure <code>MAIL_HOST</code> e <code>MAIL_PORT</code> per qualunque altro provider.</p>
-         <p class="sub"><b>2.</b> <i>Deploys → Trigger deploy</i>: le variabili valgono dal caricamento successivo.</p>
-         <p class="sub"><b>3.</b> Scrivi qui sotto <code>https://iltuosito.netlify.app/.netlify/functions/invia-email</code>.</p>
-         <p class="sub">⚠️ Per controllare, <b>apri quell'indirizzo nel browser</b>: risponde dicendo se è pronto e quali variabili mancano ancora.</p>
+         <p class="sub"><b>✅ Il servizio è GIÀ INCLUSO in Aurora</b>, nella cartella <code>netlify/functions/</code>, insieme a <code>package.json</code> e <code>netlify.toml</code> alla radice che servono a installarlo. Non devi creare né copiare nulla.</p>
+         <p class="sub"><b>Strada semplice — tutto da qui, niente da configurare su Netlify.</b> Scrivi qui sotto l'indirizzo del servizio, <code>https://iltuosito.netlify.app/.netlify/functions/invia-email</code>, poi compila <i>casella in uscita</i>: server, porta, indirizzo e <b>password</b>. Restano in questo computer e viaggiano cifrati fino al servizio solo al momento di spedire. Così la stessa Aurora pubblica serve più famiglie, ognuna con la propria casella.</p>
          <p class="sub">💡 Con <b>Libero, Aruba, Outlook, Yahoo, Zoho</b> bastano indirizzo e password <b>normali</b> della casella — più semplice che con Gmail, che richiede una password per le applicazioni a sedici caratteri. Indirizzi e porte dei provider più comuni sono elencati in cima al file del servizio.</p>
-         <p class="sub">🔒 Consigliata anche <code>MAIL_ALLOWED</code>, con gli indirizzi ammessi separati da virgola: senza, chi scopre l'indirizzo del servizio può usarlo per spedire a chiunque.</p>
-         <p class="note">🔒 Con Gmail serve una <b>password per le applicazioni</b>, MAI quella principale. Le credenziali restano sul servizio: qui non vengono mai salvate, perché sarebbero leggibili da chiunque apra gli strumenti di sviluppo del browser.</p>`,
+         <p class="note">🔒 Il prezzo di questa comodità: la password resta leggibile da chi apre gli strumenti di sviluppo del browser, e finisce nel file di configurazione esportato. <b>Quel file vale la casella di posta</b>: non va mandato per posta né lasciato su un disco condiviso. Con Gmail usa sempre una password per le <b>applicazioni</b>, mai quella principale: si revoca da sola senza toccare l'account.</p>
+         <p class="sub"><b>Strada alternativa — credenziali sul servizio</b>, se preferisci che nessun browser le veda mai. Lascia vuota la password qui sotto e imposta su Netlify, in <i>Site configuration → Environment variables</i>: <code>MAIL_USER</code>, <code>MAIL_PASS</code>, più <code>MAIL_SERVICE=gmail</code> oppure <code>MAIL_HOST</code> e <code>MAIL_PORT</code>. Poi <i>Deploys → Trigger deploy</i>. Va rifatto per ogni installazione.</p>
+         <p class="sub">⚠️ Per controllare, <b>apri l'indirizzo del servizio nel browser</b>: risponde dicendo se è pronto e come è configurato.</p>
+         <p class="sub">🔒 Difese contro l'uso da parte di estranei, entrambe facoltative: <code>MAIL_ALLOWED</code> limita i destinatari possibili, <code>MAIL_CHIAVE</code> fa accettare solo le richieste che portano la stessa parola (da ripetere qui sotto in <i>parola del servizio</i>). Senza configurare nulla, il servizio accetta comunque credenziali solo dalle pagine del proprio sito.</p>`,
         `<p class="note">A browser <b>cannot send email by itself</b>: this is a web security rule, not an Aurora limitation, and it will not change. A small external service is needed to receive the message and send it.</p>
          <p class="sub">The simplest route, if the program is already on Netlify: create <code>netlify/functions/invia-email.js</code> with the code below, set the <code>MAIL_USER</code> and <code>MAIL_PASS</code> environment variables in the site settings, and write the address <code>https://yoursite.netlify.app/.netlify/functions/invia-email</code> here.</p>
          <p class="note">🔒 With Gmail you need an <b>app password</b>, NEVER the main one. Credentials stay on the service: they are never saved here, because they would be readable by anyone opening the browser developer tools.</p>`]);
@@ -1204,8 +1228,8 @@ export class SettingsView {
         P(['Oggetto predefinito', 'Default subject']), null));
       righe.push(h('div', 'vb-testa', P(['CASELLA IN USCITA (facoltativa)', 'OUTGOING MAILBOX (optional)'])));
       righe.push(h('p', 'sub', P(
-        ['Da compilare solo se Aurora non sta su Netlify, o se il servizio di invio deve servire più installazioni. Questi valori vengono trasmessi al servizio insieme al messaggio, così lo stesso servizio funziona con qualunque provider senza riconfigurarlo. Lasciandoli vuoti, il servizio usa la propria configurazione.',
-         'Fill these only if Aurora is not on Netlify, or if one sending service must serve several installations. Leave empty to use the service own configuration.'])));
+        ['È la strada semplice: compilati tutti e quattro, password compresa, la posta parte senza configurare nulla su Netlify e ogni installazione usa la propria casella. Lasciandoli vuoti, il servizio di invio usa le credenziali proprie (le variabili d\'ambiente).',
+         'The simple route: fill all four, password included, and mail is sent without configuring anything on Netlify. Leave empty to use the service own credentials.'])));
       righe.push(this._text('email.smtpHost',
         P(['Server di posta in uscita', 'Outgoing mail server']), 'smtp.gmail.com'));
       righe.push(this._range('email.smtpPort',
@@ -1219,9 +1243,17 @@ export class SettingsView {
         P(['Connessione cifrata diretta (porta 465)', 'Direct TLS (port 465)']),
         P(['Da accendere SOLO sulla porta 465. Sulla 587 la cifratura si negozia dopo il collegamento e questo interruttore va lasciato spento.',
            'Turn on ONLY for port 465. On 587 encryption is negotiated after connecting.'])));
+      righe.push(this._segreto('email.smtpPass',
+        P(['Password della casella', 'Mailbox password']),
+        P(['Compilata, il servizio la usa per questo invio e la dimentica: non serve configurare nulla su Netlify e ogni installazione può avere la propria casella. Lasciata vuota, il servizio usa le credenziali proprie (variabili d\'ambiente).',
+           'When filled, the service uses it for this send only: nothing to configure on Netlify. Left empty, the service uses its own credentials.'])));
       righe.push(h('p', 'note', P(
-        ['🔒 LA PASSWORD NON SI METTE QUI, ed è una scelta di sicurezza, non una dimenticanza. Tutto ciò che si scrive in queste impostazioni resta nel browser, dove chiunque apra gli strumenti di sviluppo può leggerlo — e parliamo della casella personale di una persona malata. La password va messa fra le variabili d\'ambiente del servizio di invio, dove nessun browser la vede. Il codice di esempio qui sopra mostra come.',
-         '🔒 THE PASSWORD DOES NOT GO HERE. Anything written in these settings stays in the browser, readable by anyone opening developer tools. Put it in the sending service environment variables.'])));
+        ['🔒 DOVE FINISCE QUESTA PASSWORD. Resta in questo computer e viene trasmessa cifrata al servizio di invio solo al momento di spedire. Ma resta anche leggibile da chi apre gli strumenti di sviluppo del browser, e finisce dentro il file di configurazione esportato: quel file vale la casella di posta, non va mandato per posta né lasciato su un disco condiviso. Con Gmail serve una password per le APPLICAZIONI, mai quella principale — così si revoca da sola senza toccare l\'account.',
+         '🔒 WHERE THIS PASSWORD ENDS UP. It stays on this computer and is sent encrypted to the sending service only when sending. It is also readable by anyone opening the browser developer tools, and it is included in the exported configuration file: treat that file as the mailbox key. With Gmail use an APP password, never the main one.'])));
+      righe.push(this._segreto('email.chiaveServizio',
+        P(['Parola del servizio (facoltativa)', 'Service word (optional)']),
+        P(['Da compilare solo se chi ha installato il servizio ha impostato la variabile MAIL_CHIAVE su Netlify: in quel caso il servizio accetta solo richieste che portano la stessa parola. Lasciata vuota non cambia nulla.',
+           'Only needed if the MAIL_CHIAVE variable was set on the service. Leave empty otherwise.'])));
 
       righe.push(this._toggle('email.conferma',
         P(['Chiedi conferma prima di spedire', 'Ask for confirmation before sending']),

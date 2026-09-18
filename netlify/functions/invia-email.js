@@ -4,22 +4,38 @@
 // SERVIZIO DI INVIO POSTA
 // ══════════════════════════════════════════════════════════════════
 //
-// ⚠️ Questo file NON fa nulla finché non viene configurato. Senza le
-// variabili d'ambiente risponde con un errore chiaro e si ferma. Chi
-// non usa la posta può ignorarlo del tutto: sta qui pronto, non
-// attivo.
-//
 // Perché serve: un browser non sa parlare SMTP. Quel protocollo non
 // esiste nel browser e non ci sarà mai — è una regola di sicurezza del
 // web, non un limite di Aurora. Serve qualcosa che stia fuori dal
 // browser e spedisca per suo conto.
 //
-// ⚠️ E soprattutto: SERVER, PORTA, UTENTE E PASSWORD STANNO QUI, NON
-// IN AURORA. Nelle impostazioni del programma sarebbero leggibili da
-// chiunque apra gli strumenti di sviluppo del browser.
+// ══════════════════════════════════════════════════════════════════
+// DUE MODI DI CONFIGURARE, E FUNZIONANO ENTRAMBI
+// ══════════════════════════════════════════════════════════════════
+//
+// A) CREDENZIALI DALLE IMPOSTAZIONI DI AURORA — nessuna variabile
+//    d'ambiente, nessun redeploy. Chi installa scrive server, porta,
+//    casella e password nelle impostazioni del programma: restano nel
+//    suo computer e viaggiano cifrate fino a qui, che le usa per quel
+//    singolo invio e le dimentica.
+//
+//    È il modo che permette a UNA SOLA Aurora pubblica di servire
+//    tutti: ogni famiglia usa la propria casella.
+//
+//    ⚠️ Il prezzo: quella password resta nel browser di chi la scrive
+//    e finisce nel file di configurazione esportato. Quel file vale
+//    la casella di posta — non va mandato in giro.
+//
+// B) CREDENZIALI QUI, fra le variabili d'ambiente (sotto). Nessun
+//    browser le vede mai, ma vanno impostate a mano per ogni
+//    installazione.
+//
+// Se la richiesta porta credenziali complete vince A; altrimenti si
+// ricade su B. Chi ha già configurato le variabili d'ambiente non
+// deve cambiare nulla: continua a funzionare identico.
 //
 // ──────────────────────────────────────────────────────────────────
-// COME CONFIGURARLO — variabili d'ambiente su Netlify
+// MODO B — variabili d'ambiente su Netlify
 // (Site configuration → Environment variables)
 // ──────────────────────────────────────────────────────────────────
 //
@@ -61,8 +77,62 @@
 // sito: Deploys → Trigger deploy. Valgono dal caricamento successivo.
 //
 // ──────────────────────────────────────────────────────────────────
+// PROTEZIONI (valgono soprattutto per il modo A)
+// ──────────────────────────────────────────────────────────────────
+//
+// ⚠️ Un servizio che accetta credenziali dall'esterno potrebbe essere
+// usato da estranei come ponte per spedire. Il rischio è minore di
+// quanto sembra — chi lo usasse dovrebbe metterci la PROPRIA casella,
+// che verrebbe chiusa subito — ma resta quello di nascondere da dove
+// parte la posta. Due difese, nessuna da configurare:
+//
+//   1. Provenienza. Le credenziali dalla richiesta sono accettate solo
+//      se la richiesta arriva dal sito stesso (o da un indirizzo
+//      locale, per chi sta provando). Si allarga con:
+//
+//          MAIL_ORIGINI = https://altro-sito.it,https://ancora-un-altro.it
+//
+//   2. Lucchetto facoltativo. Impostando
+//
+//          MAIL_CHIAVE = una-parola-lunga-a-piacere
+//
+//      il servizio accetta solo richieste che portano la stessa parola
+//      (in Aurora: impostazioni → posta → "parola del servizio").
+//      Lasciata non impostata, non cambia nulla.
+//
+// ──────────────────────────────────────────────────────────────────
 
 const nodemailer = require('nodemailer');
+
+/**
+ * Le provenienze ammesse quando le credenziali arrivano dalla
+ * richiesta: il sito stesso, gli indirizzi locali di chi sta provando,
+ * più quelli eventualmente elencati in MAIL_ORIGINI.
+ *
+ * ⚠️ Non è una difesa forte — un programma qualunque può dichiarare
+ * ciò che vuole — ma ferma l'uso casuale da parte di chi trovasse
+ * l'indirizzo di questo servizio, e non costa niente a chi installa.
+ */
+function origineAmmessa(origine, hostRichiesta) {
+  const dominio = (x) => String(x || '').trim().toLowerCase()
+    .replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+
+  const o = dominio(origine);
+  if (!o) return false;
+
+  // Chi sta provando in locale, prima di caricare il sito.
+  if (o === 'localhost' || o === '127.0.0.1' || o === '[::1]') return true;
+
+  /* ⚠️ Il confronto che conta: la pagina che chiede viene dallo stesso
+   * indirizzo a cui è arrivata la richiesta. Non dipende da alcuna
+   * variabile d'ambiente — e quindi non può smettere di funzionare
+   * perché qualcosa non è stato configurato. */
+  if (hostRichiesta && o === dominio(hostRichiesta)) return true;
+
+  const proprie = [process.env.URL, process.env.DEPLOY_URL, process.env.DEPLOY_PRIME_URL];
+  const extra = (process.env.MAIL_ORIGINI || '').split(',');
+  return [...proprie, ...extra].map(dominio).filter(Boolean).includes(o);
+}
 
 /** Risposta con intestazioni per il browser. */
 function rispondi(statusCode, corpo) {
@@ -92,13 +162,23 @@ exports.handler = async (event) => {
     if (!process.env.MAIL_SERVICE && !process.env.MAIL_HOST) {
       manca.push('MAIL_SERVICE oppure MAIL_HOST');
     }
+    /* ⚠️ Con le credenziali nelle impostazioni di Aurora il servizio è
+     * pronto ANCHE senza variabili d'ambiente: dirgli "non
+     * configurato" manderebbe chi installa a cercare un problema che
+     * non c'è. */
     return rispondi(200, {
       servizio: 'invia-email',
-      pronto: manca.length === 0,
+      pronto: true,
+      ambienteConfigurato: manca.length === 0,
       mancano: manca,
+      lucchetto: !!process.env.MAIL_CHIAVE,
       nota: manca.length
-        ? 'Aggiungi queste variabili su Netlify, poi Deploys → Trigger deploy.'
-        : 'Configurato. Aurora può spedire a questo indirizzo.',
+        ? 'Pronto. Nessuna casella nelle variabili d\'ambiente: userà server, '
+          + 'casella e password scritti nelle impostazioni di Aurora. In '
+          + 'alternativa aggiungi ' + manca.join(', ') + ' su Netlify, poi '
+          + 'Deploys → Trigger deploy.'
+        : 'Pronto, con la casella configurata nelle variabili d\'ambiente. '
+          + 'Le credenziali scritte in Aurora, se presenti, hanno la precedenza.',
     });
   }
 
@@ -129,33 +209,96 @@ exports.handler = async (event) => {
     return rispondi(403, { ok: false, errore: 'destinatario non ammesso' });
   }
 
-  const user = process.env.MAIL_USER;
-  const pass = process.env.MAIL_PASS;
-  if (!user || !pass) {
-    return rispondi(500, { ok: false,
-      errore: 'servizio non configurato: mancano MAIL_USER o MAIL_PASS' });
+  /* ⚠️ Lucchetto facoltativo: attivo solo se qualcuno ha impostato
+   * MAIL_CHIAVE. Non impostata, questo blocco non fa nulla — chi ha
+   * già il servizio in funzione non se ne accorge. */
+  if (process.env.MAIL_CHIAVE) {
+    if (String(dati.chiave || '') !== String(process.env.MAIL_CHIAVE)) {
+      return rispondi(403, { ok: false,
+        errore: 'parola del servizio mancante o sbagliata' });
+    }
   }
 
-  /* Due modi di configurare, secondo ciò che si è impostato:
-   * il nome abbreviato del provider, oppure server e porta espliciti. */
-  let trasporto;
-  if (process.env.MAIL_SERVICE) {
-    trasporto = { service: process.env.MAIL_SERVICE, auth: { user, pass } };
-  } else {
-    const porta = Number(process.env.MAIL_PORT || 587);
+  /* ══ Da dove vengono le credenziali ══
+   *
+   * Se la richiesta ne porta di complete (server + casella +
+   * password) si usano quelle: è il modo che permette a una sola
+   * Aurora pubblica di servire più famiglie, ognuna con la propria
+   * casella, senza toccare le variabili d'ambiente.
+   *
+   * Altrimenti si ricade sulle variabili d'ambiente, esattamente come
+   * prima: un'installazione già configurata non cambia comportamento. */
+  const s = (dati.smtp && typeof dati.smtp === 'object') ? dati.smtp : null;
+  const daRichiesta = !!(s && s.host && s.user && s.pass);
+
+  let user, pass, trasporto, mittenteDefault;
+
+  if (daRichiesta) {
+    /* ⚠️ Credenziali dall'esterno: si accettano solo da chi arriva dal
+     * sito. Senza questo controllo il servizio sarebbe un ponte
+     * anonimo utilizzabile da chiunque ne scoprisse l'indirizzo. */
+    const h = event.headers || {};
+    const origine = h.origin || h.Origin || h.referer || h.Referer || '';
+    const host = h['x-forwarded-host'] || h['X-Forwarded-Host'] || h.host || h.Host || '';
+    if (!origineAmmessa(origine, host)) {
+      return rispondi(403, { ok: false,
+        errore: 'provenienza non ammessa per credenziali inviate dal programma. '
+              + 'Chi installa può autorizzarla con la variabile MAIL_ORIGINI.' });
+    }
+
+    user = String(s.user);
+    pass = String(s.pass);
+    const porta = Number(s.port) || 587;
     trasporto = {
-      host: process.env.MAIL_HOST,
+      host: String(s.host),
       port: porta,
       // La 465 è cifrata dall'inizio, la 587 si cifra dopo il saluto.
-      secure: porta === 465,
+      secure: s.secure === undefined ? porta === 465 : !!s.secure,
       auth: { user, pass },
     };
+    // Con credenziali proprie il mittente è la casella di chi spedisce:
+    // MAIL_FROM appartiene all'altra configurazione e non va imposto.
+    mittenteDefault = user;
+  } else {
+    user = process.env.MAIL_USER;
+    pass = process.env.MAIL_PASS;
+    if (!user || !pass) {
+      /* ⚠️ Messaggio esplicito sulle DUE strade: chi legge questo
+       * errore sta cercando di capire cosa gli manca, e la risposta
+       * può essere «niente su Netlify, ti manca la password nelle
+       * impostazioni di Aurora». */
+      const manca = s && s.host && s.user && !s.pass
+        ? 'manca la password della casella nelle impostazioni di Aurora'
+        : 'nessuna casella configurata: scrivi server, casella e password '
+          + 'nelle impostazioni di Aurora, oppure imposta MAIL_USER e '
+          + 'MAIL_PASS fra le variabili d\'ambiente del servizio';
+      return rispondi(500, { ok: false, errore: manca });
+    }
+    /* Due modi di configurare, secondo ciò che si è impostato:
+     * il nome abbreviato del provider, oppure server e porta espliciti. */
+    if (process.env.MAIL_SERVICE) {
+      trasporto = { service: process.env.MAIL_SERVICE, auth: { user, pass } };
+    } else {
+      const porta = Number(process.env.MAIL_PORT || 587);
+      trasporto = {
+        host: process.env.MAIL_HOST,
+        port: porta,
+        secure: porta === 465,
+        auth: { user, pass },
+      };
+    }
+    mittenteDefault = process.env.MAIL_FROM || user;
   }
+
+  /* Il nome che comparirà come mittente, se è stato scelto. Senza,
+   * resta il solo indirizzo, come prima. */
+  const nome = String(dati.from || dati.mittente || '').trim().replace(/["<>\r\n]/g, '');
+  const from = nome ? `"${nome}" <${mittenteDefault}>` : mittenteDefault;
 
   try {
     const transporter = nodemailer.createTransport(trasporto);
     await transporter.sendMail({
-      from: process.env.MAIL_FROM || user,
+      from,
       to: a,
       subject: oggetto,
       text: testo,

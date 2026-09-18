@@ -1136,15 +1136,112 @@ function buildTreeFor(b){ return b.eng.tree; }
   ok(esiti[4]?.ok === false, '33o. un destinatario storto non parte');
   ok(esiti[5]?.ok === false, '33p. a funzione spenta non parte nulla');
 
-  // ⚠️ Nessuna credenziale deve MAI finire nella configurazione: è
-  // leggibile da chiunque apra gli strumenti di sviluppo.
-  const chiavi = Object.keys(DEFAULT_CONFIG.email);
-  ok(!chiavi.some(k => /pass|pwd|token|secret|key/i.test(k)),
-     `33q. la configurazione non prevede alcuna credenziale (${chiavi.join(', ')})`);
+  /* ⚠️ La password PUÒ ora stare nella configurazione — è la scelta
+   * che permette a una sola Aurora pubblica di servire più famiglie —
+   * ma a tre condizioni non negoziabili, verificate qui sotto:
+   *   1. di default è VUOTA: chi aggiorna non si ritrova credenziali
+   *      apparse dal nulla, e chi usa le variabili d'ambiente continua
+   *      a usarle senza accorgersi del cambiamento;
+   *   2. non viene MAI trasmessa se non è stata scritta;
+   *   3. chi esporta il profilo viene avvisato di cosa contiene. */
+  ok(DEFAULT_CONFIG.email.smtpPass === '',
+     '33q. la password della casella è vuota di default');
+  ok(DEFAULT_CONFIG.email.chiaveServizio === '',
+     '33q1. la parola del servizio è vuota di default');
   ok(DEFAULT_CONFIG.email.conferma === true,
      '33r. la conferma prima di spedire è attiva di default: un messaggio non torna indietro');
   ok(DEFAULT_CONFIG.email.enabled === false && DEFAULT_CONFIG.radio.enabled === false,
      '33s. entrambe le funzioni sono spente di default');
+
+  /* ═══ 33bis. Credenziali locali: cosa parte e cosa NON parte ═══ */
+  {
+    const fetchVero2 = globalThis.fetch;
+    const inviato = [];
+    const base = deepClone(DEFAULT_CONFIG);
+    base.email.enabled = true;
+    base.email.endpoint = 'https://esempio.it/invia';
+    base.email.contatti = [{ nome: 'Mario', indirizzo: 'mario@esempio.it' }];
+    base.email.smtpHost = 'smtp.libero.it';
+    base.email.smtpUser = 'daniela@libero.it';
+    const d2 = { nome: 'Mario', indirizzo: 'mario@esempio.it' };
+
+    try {
+      globalThis.fetch = async (_u, o) => { inviato.push(JSON.parse(o.body)); return { ok: true, status: 200 }; };
+
+      // Password vuota: la richiesta NON deve contenerla affatto, così
+      // il servizio ricade sulle proprie variabili d'ambiente.
+      await invia(base, { destinatario: d2, testo: 'ciao' });
+      ok(inviato[0].smtp && inviato[0].smtp.pass === undefined,
+         '33v. senza password locale la richiesta non porta alcuna password');
+      ok(inviato[0].chiave === undefined,
+         '33z. senza parola del servizio non viene trasmessa alcuna parola');
+
+      // Password scritta: viaggia, perché è lì che serve.
+      const conPass = deepClone(base);
+      conPass.email.smtpPass = 'segretissima';
+      conPass.email.chiaveServizio = 'parolona';
+      await invia(conPass, { destinatario: d2, testo: 'ciao' });
+      ok(inviato[1].smtp.pass === 'segretissima',
+         '33w. con la password locale scritta, viene trasmessa al servizio');
+      ok(inviato[1].chiave === 'parolona',
+         '33z1. la parola del servizio viene trasmessa quando c\'è');
+      ok(inviato[1].smtp.host === 'smtp.libero.it' && inviato[1].smtp.user === 'daniela@libero.it',
+         '33w1. server e casella viaggiano insieme alla password');
+
+      // ⚠️ Le credenziali non devono MAI partire verso un indirizzo
+      // diverso da quello configurato: sarebbe una fuga silenziosa.
+      let destinazione = null;
+      globalThis.fetch = async (u) => { destinazione = u; return { ok: true, status: 200 }; };
+      await invia(conPass, { destinatario: d2, testo: 'ciao' });
+      ok(destinazione === 'https://esempio.it/invia',
+         '33x. le credenziali partono solo verso il servizio configurato');
+    } finally { globalThis.fetch = fetchVero2; }
+
+    /* Credenziali a metà: va detto PRIMA, non con un errore tecnico
+     * del servizio quando la lettera è già scritta. */
+    const monca = deepClone(base);
+    monca.email.smtpPass = 'segretissima';
+    monca.email.smtpHost = '';
+    ok(!verificaConfigurazione(monca).ok
+       && verificaConfigurazione(monca).problemi.some(p => /server/i.test(p)),
+       '33y. password senza server: il problema è segnalato prima di spedire');
+    const monca2 = deepClone(base);
+    monca2.email.smtpPass = 'segretissima';
+    monca2.email.smtpUser = '';
+    ok(!verificaConfigurazione(monca2).ok,
+       '33y1. password senza indirizzo della casella: segnalato allo stesso modo');
+    // ⚠️ Password vuota NON è un problema: è la configurazione di chi
+    // tiene le credenziali sul servizio, e deve restare valida.
+    ok(verificaConfigurazione(base).ok,
+       '33y2. senza password locale la configurazione resta valida: le credenziali stanno sul servizio');
+  }
+
+  /* ═══ 33ter. Chi esporta deve sapere cosa sta esportando ═══ */
+  {
+    const { segretiInConfig, exportProfile: esporta } = await import('../js/core/config.js');
+    const pulita = deepClone(DEFAULT_CONFIG);
+    ok(segretiInConfig(pulita).length === 0,
+       '33A. un profilo senza credenziali non fa scattare alcun avviso');
+
+    const carica = deepClone(DEFAULT_CONFIG);
+    carica.email.smtpPass = 'p';
+    carica.telegram.token = 't';
+    carica.domotica.token = 'd';
+    carica.assistente.chiavi.openrouter = 'k';
+    const avvisi = segretiInConfig(carica);
+    ok(avvisi.length === 4, `33B. ogni credenziale presente viene elencata (${avvisi.length})`);
+    ok(avvisi.some(x => /posta/.test(x)) && avvisi.some(x => /Telegram/.test(x))
+       && avvisi.some(x => /assistente/.test(x)),
+       '33C. l\'avviso dice in parole quali credenziali contiene');
+
+    /* ⚠️ Prova che l'avviso non mente: se le credenziali sono davvero
+     * nel file, l'utente va avvisato; se un domani venissero tolte
+     * dall'export, questo test va aggiornato di conseguenza. */
+    const testo = esporta(carica, null);
+    ok(testo.includes('segretissima') === false, '33D. controllo di sanità del test');
+    ok(testo.includes('"smtpPass": "p"'),
+       '33E. la password è davvero dentro il file esportato: l\'avviso è dovuto');
+  }
 
   /* ── La voce MANDA compare solo quando può funzionare ── */
   const { buildTree: bt5 } = await import('../js/scan/ScanEngine.js');
