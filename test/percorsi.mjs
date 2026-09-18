@@ -1216,6 +1216,99 @@ function buildTreeFor(b){ return b.eng.tree; }
        '33y2. senza password locale la configurazione resta valida: le credenziali stanno sul servizio');
   }
 
+  /* ═══ 33quater. La lettera: saluto, corpo, congedo, firma ═══
+   *
+   * ⚠️ Chi scrive con un occhio solo paga ogni carattere. "Ciao
+   * Francesco," e "Saluti, Daniela" sono decine di selezioni per le
+   * parole più prevedibili della lettera: le mette il programma. */
+  {
+    const { componiLettera } = await import('../js/lang/Mailer.js');
+    const cfgL = deepClone(DEFAULT_CONFIG);
+    cfgL.email.mittente = 'Daniela';
+    const dest = { nome: 'FRA', indirizzo: 'fra@esempio.it' };
+    const L = componiLettera(cfgL, dest, 'Ho sete.');
+
+    ok(L.testo.startsWith('Ciao FRA,\n\n'),
+       '33F. apre salutando il destinatario con il suo nome');
+    ok(L.testo.includes('\nHo sete.\n'), '33G. il testo scritto resta intatto in mezzo');
+    ok(/Saluti/.test(L.testo), '33H. si congeda');
+    ok(L.testo.trim().endsWith('Messaggio scritto da Daniela con Aurora'),
+       '33I. e chiude spiegando a chi riceve come è stato scritto');
+    ok(L.testo.indexOf('Saluti') < L.testo.indexOf('Daniela'),
+       '33L1. la firma viene dopo i saluti, non prima');
+    ok(L.testo.indexOf('Ho sete.') < L.testo.indexOf('Saluti'),
+       '33L2. e il testo prima di entrambi');
+
+    /* La versione HTML dice le STESSE parole: cambia solo l'aspetto.
+     * Se divergessero, chi legge in un programma e chi nell'altro
+     * riceverebbe due messaggi diversi. */
+    ok(/Ciao FRA,/.test(L.html) && /Ho sete\./.test(L.html)
+       && /Messaggio scritto da Daniela con Aurora/.test(L.html),
+       '33M. la versione con formattazione dice le stesse parole');
+    ok(/font-style:italic/.test(L.html),
+       '33N. la riga finale è in corsivo, come una nota di servizio');
+    ok(/style=/.test(L.html) && !/<link|<style/.test(L.html),
+       '33O. stili solo in riga: i programmi di posta buttano via i fogli di stile');
+
+    /* ⚠️ Il testo della persona finisce dentro una pagina HTML: se non
+     * fosse reso innocuo, un carattere "<" romperebbe il messaggio. */
+    const M = componiLettera(cfgL, dest, 'a < b & c > d "cit"');
+    ok(!/<b /.test(M.html) && /&lt; b &amp; c &gt;/.test(M.html),
+       '33P. il testo scritto non può rompere la pagina HTML');
+    ok(M.testo.includes('a < b & c > d "cit"'),
+       '33Q. mentre in solo testo resta esattamente com è stato scritto');
+
+    /* Pezzi mancanti: meglio niente che un segnaposto vuoto.
+     * "Ciao ," è peggio di nessun saluto. */
+    const senzaNome = componiLettera(cfgL, { indirizzo: 'x@y.it' }, 'ciao');
+    ok(!/Ciao\s*,/.test(senzaNome.testo),
+       '33R. destinatario senza nome: si omette il saluto, non si scrive "Ciao ,"');
+    const cfgS = deepClone(DEFAULT_CONFIG);
+    const senzaMitt = componiLettera(cfgS, dest, 'ciao');
+    ok(/Messaggio scritto con Aurora/.test(senzaMitt.testo)
+       && !/scritto da\s+con/.test(senzaMitt.testo),
+       '33S. mittente senza nome: la riga finale resta sensata');
+
+    /* ⚠️ Spenta, si spedisce ESATTAMENTE ciò che è stato scritto:
+     * chi preferiva il testo nudo non deve accorgersi di nulla. */
+    const cfgOff = deepClone(DEFAULT_CONFIG);
+    cfgOff.email.mittente = 'Daniela';
+    cfgOff.email.formatta = false;
+    const off = componiLettera(cfgOff, dest, 'Ho sete.');
+    ok(off.testo === 'Ho sete.' && off.html === '',
+       '33T1. spenta la formattazione, parte il testo nudo e nessun HTML');
+    ok(DEFAULT_CONFIG.email.formatta === true,
+       '33T2. ma di default è accesa: è ciò che serve quasi sempre');
+
+    /* In inglese le formule cambiano: una lettera metà in una lingua e
+     * metà nell altra è peggio di nessuna formula. */
+    const cfgEn = deepClone(DEFAULT_CONFIG);
+    cfgEn.ui.language = 'en';
+    cfgEn.email.mittente = 'Daniela';
+    const en = componiLettera(cfgEn, dest, 'I am thirsty.');
+    ok(/^Hi FRA,/.test(en.testo) && /Best regards/.test(en.testo)
+       && /Message written by Daniela with Aurora/.test(en.testo),
+       '33U. in inglese cambiano tutte le formule, non una sola');
+
+    /* La lettera deve arrivare al servizio: comporla e poi spedire il
+     * testo nudo sarebbe un lavoro buttato. */
+    const fetchVero3 = globalThis.fetch;
+    let spedito = null;
+    const cfgI = deepClone(DEFAULT_CONFIG);
+    cfgI.email.enabled = true;
+    cfgI.email.endpoint = 'https://esempio.it/invia';
+    cfgI.email.mittente = 'Daniela';
+    cfgI.email.contatti = [dest];
+    try {
+      globalThis.fetch = async (_u, o) => { spedito = JSON.parse(o.body); return { ok: true, status: 200 }; };
+      await invia(cfgI, { destinatario: dest, testo: 'Ho sete.' });
+    } finally { globalThis.fetch = fetchVero3; }
+    ok(/^Ciao FRA,/.test(spedito.text) && /con Aurora$/.test(spedito.text.trim()),
+       '33V. quello che parte è la lettera composta, non il testo nudo');
+    ok(typeof spedito.html === 'string' && /Ciao FRA,/.test(spedito.html),
+       '33Z. e viaggia anche la versione con formattazione');
+  }
+
   /* ═══ 33ter. Chi esporta deve sapere cosa sta esportando ═══ */
   {
     const { segretiInConfig, exportProfile: esporta } = await import('../js/core/config.js');

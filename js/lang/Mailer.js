@@ -80,6 +80,87 @@ export function verificaConfigurazione(cfg) {
   return { ok: problemi.length === 0, problemi, contatti };
 }
 
+/** Rende innocuo un testo dentro una pagina HTML. */
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"]/g, m => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
+}
+
+/* Formule di apertura e chiusura nelle due lingue. Stanno qui e non
+ * sparse nel codice perché sono la voce di chi scrive: si cambiano in
+ * un punto solo. */
+const FORMULE = {
+  it: { ciao: 'Ciao', saluti: 'Saluti', scritto: (chi) =>
+        chi ? `Messaggio scritto da ${chi} con Aurora` : 'Messaggio scritto con Aurora' },
+  en: { ciao: 'Hi', saluti: 'Best regards', scritto: (chi) =>
+        chi ? `Message written by ${chi} with Aurora` : 'Message written with Aurora' },
+};
+
+/**
+ * Trasforma il testo salvato in una lettera.
+ *
+ * ══════════════════════════════════════════════════════════════════
+ * PERCHÉ NON SI SPEDISCE IL TESTO NUDO
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Chi scrive con un occhio solo paga ogni carattere. Battere "Ciao
+ * Francesco," e poi "Saluti, Daniela" costa decine di selezioni — e
+ * sono le parole più prevedibili della lettera, quelle che un
+ * programma può mettere da sé senza toglierle nulla.
+ *
+ * La riga finale in corsivo non è una firma pubblicitaria: dice a chi
+ * riceve che la brevità non è freddezza. Una lettera di due righe da
+ * qualcuno che non può muoversi si legge diversamente se si sa come è
+ * stata scritta.
+ *
+ * ⚠️ Funzione PURA: stessi ingredienti, stesso risultato, nessun
+ * effetto altrove. È ciò che permette di provarla per davvero e di
+ * mostrarne l'anteprima nelle impostazioni senza spedire nulla.
+ *
+ * @returns {{testo: string, html: string}} — le due versioni dello
+ *          stesso messaggio. Chi legge in solo testo vede la prima.
+ */
+export function componiLettera(cfg, destinatario, testo) {
+  const corpo = String(testo || '').trim();
+  const E = cfg?.email || {};
+  const F = FORMULE[cfg?.ui?.language === 'en' ? 'en' : 'it'];
+
+  // Spenta la formattazione, si spedisce esattamente ciò che è stato
+  // scritto: chi preferiva così non deve accorgersi di nulla.
+  if (E.formatta === false) return { testo: corpo, html: '' };
+
+  const chiRiceve = String(destinatario?.nome || '').trim();
+  const chiScrive = String(E.mittente || '').trim();
+
+  /* ⚠️ Ogni pezzo compare solo se ha di che comparire. Senza il nome
+   * del destinatario, "Ciao ," sarebbe peggio di nessun saluto. */
+  const righe = [];
+  if (chiRiceve) righe.push(`${F.ciao} ${chiRiceve},`, '');
+  righe.push(corpo, '', F.saluti);
+  if (chiScrive) righe.push('', chiScrive);
+  righe.push('', F.scritto(chiScrive));
+
+  /* La versione HTML dice le stesse identiche parole: cambia solo
+   * l'aspetto — il corpo rientrato, la riga finale in corsivo e più
+   * piccola, come si conviene a una nota di servizio.
+   *
+   * Stili in riga e nient'altro: i programmi di posta buttano via i
+   * fogli di stile, e un messaggio deve leggersi ovunque. */
+  const p = [];
+  if (chiRiceve) p.push(`<p style="margin:0 0 1em 0">${esc(F.ciao)} ${esc(chiRiceve)},</p>`);
+  p.push(`<div style="margin:0 0 1.2em 1.5em;white-space:pre-wrap">${esc(corpo)}</div>`);
+  p.push(`<p style="margin:0">${esc(F.saluti)}</p>`);
+  if (chiScrive) p.push(`<p style="margin:.6em 0 0 0">${esc(chiScrive)}</p>`);
+  p.push('<p style="margin:2em 0 0 0;font-size:.85em;font-style:italic;color:#666">'
+       + esc(F.scritto(chiScrive)) + '</p>');
+
+  const html = '<!doctype html><html><body style="font-family:system-ui,-apple-system,'
+    + 'Segoe UI,Roboto,sans-serif;font-size:15px;line-height:1.55;color:#1a1a1a">'
+    + p.join('') + '</body></html>';
+
+  return { testo: righe.join('\n'), html };
+}
+
 /**
  * Spedisce.
  *
@@ -96,12 +177,17 @@ export async function invia(cfg, { destinatario, testo, oggetto }) {
   if (!corpo) return { ok: false, messaggio: 'il messaggio è vuoto' };
 
   const E = cfg.email;
+  /* Il testo scritto diventa una lettera: saluto, corpo, congedo,
+   * firma. Chi legge in solo testo riceve la prima versione, chi legge
+   * in HTML la seconda — stesse parole, aspetto migliore. */
+  const lettera = componiLettera(cfg, destinatario, corpo);
   const dati = {
     to: destinatario.indirizzo,
     toName: destinatario.nome || '',
     from: E.mittente || '',
     subject: oggetto || E.oggetto || 'Messaggio',
-    text: corpo,
+    text: lettera.testo,
+    ...(lettera.html ? { html: lettera.html } : {}),
     /* Parametri della casella in uscita, trasmessi al servizio insieme
      * al messaggio: così lo stesso servizio funziona con qualunque
      * provider senza doverlo riconfigurare.

@@ -13,7 +13,7 @@ import { DEFAULT_CONFIG, GESTURE_CHANNELS, ACTIONS, DEFAULT_GROUPS, ALPHABETICAL
 import { EXPR_CHECKS } from '../signal/GestureEngine.js';
 import { ISTRUZIONI as ISTRUZIONI_TG } from '../lang/Telegram.js';
 import { CHANNEL_PRESETS } from '../core/config.js';
-import { ESEMPIO_NETLIFY, indirizzoValido, verificaConfigurazione } from '../lang/Mailer.js';
+import { ESEMPIO_NETLIFY, indirizzoValido, verificaConfigurazione, componiLettera } from '../lang/Mailer.js';
 import { MODELLI, ISTRUZIONI, entitaValida, verificaDomotica, comandiDi, provaConnessione } from '../device/HomeAssistant.js';
 import { t, L } from '../core/i18n.js';
 import { BUILD } from '../core/version.js';
@@ -77,6 +77,9 @@ const INTERRUTTORI_CHE_APRONO = new Set([
   'signal.modoGrezzo',
   'signal.normalizzaSuRumore',
   'email.enabled',
+  // Spegnendolo sparisce l'anteprima della lettera: senza ridisegno
+  // resterebbe a schermo un esempio che non corrisponde più al vero.
+  'email.formatta',
   'radio.enabled',
   'domotica.enabled',
   'stampa.enabled',
@@ -1254,6 +1257,37 @@ export class SettingsView {
         P(['Parola del servizio (facoltativa)', 'Service word (optional)']),
         P(['Da compilare solo se chi ha installato il servizio ha impostato la variabile MAIL_CHIAVE su Netlify: in quel caso il servizio accetta solo richieste che portano la stessa parola. Lasciata vuota non cambia nulla.',
            'Only needed if the MAIL_CHIAVE variable was set on the service. Leave empty otherwise.'])));
+
+      righe.push(h('div', 'vb-testa', P(['COME VIENE SCRITTA LA LETTERA', 'HOW THE LETTER IS WRITTEN'])));
+      righe.push(this._toggle('email.formatta',
+        P(['Aggiungi saluti e firma da solo', 'Add greeting and signature automatically']),
+        P(['⚠️ Consigliato. Mette da sé "Ciao <nome del destinatario>," in apertura, i saluti e il nome del mittente in chiusura, più una riga in corsivo che spiega a chi riceve come è stato scritto il messaggio. Sono le parole più prevedibili della lettera, e chi scrive con un occhio solo paga ogni carattere. Spento, parte esattamente il testo salvato, senza aggiunte.',
+           '⚠️ Recommended. Adds the greeting, closing and signature by itself, plus an italic line explaining how the message was written. Off, the saved text is sent exactly as it is.'])));
+
+      /* ⚠️ Anteprima VERA, prodotta dalla stessa funzione che spedisce:
+       * una lettera parte e non torna indietro, e chi installa deve
+       * poter vedere com'è fatta PRIMA, non scoprirlo dal destinatario.
+       * Usa il primo contatto in elenco, che è il caso reale. */
+      if (cfg.email.formatta !== false) {
+        const box = h('details', 'dt-trad');
+        box.append(h('summary', null, P(['👁 Come arriverà a chi legge', '👁 How it will look'])));
+        const pre = h('pre', 'codice');
+        /* ⚠️ Ricalcolata ogni volta che si apre, non una volta sola
+         * al disegno: chi ha appena scritto il proprio nome nel campo
+         * mittente vuole vederlo QUI. Ridisegnare l'intera scheda a
+         * ogni tasto ruberebbe il fuoco al campo mentre si scrive. */
+        const aggiorna = () => {
+          const C = this.app.cfg;
+          const primo = (C.email.contatti || []).find(c => c?.nome || c?.indirizzo);
+          pre.textContent = componiLettera(C, primo || { nome: 'Francesco' },
+            P(['Il testo che hai scritto e salvato compare qui.',
+               'The text you wrote and saved appears here.'])).testo;
+        };
+        aggiorna();
+        box.ontoggle = () => { if (box.open) aggiorna(); };
+        box.append(pre);
+        righe.push(box);
+      }
 
       righe.push(this._toggle('email.conferma',
         P(['Chiedi conferma prima di spedire', 'Ask for confirmation before sending']),

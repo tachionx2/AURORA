@@ -3020,6 +3020,22 @@ app.goto('parla');
   ok(senzaPass.stato === 500 && /password/.test(senzaPass.corpo.errore),
      'posta: con server e casella ma senza password, lo dice chiaramente');
 
+  /* ── 6bis. La lettera formattata attraversa il servizio ──
+   *
+   * ⚠️ Il testo semplice deve esserci SEMPRE, anche quando c'è
+   * l'HTML: è ciò che leggono i programmi più vecchi e le sintesi
+   * vocali, ed è anche ciò che distingue un messaggio normale da uno
+   * che i filtri antispam guardano di traverso. */
+  const conHtml = await chiama({}, { smtp: CRED, text: 'Ciao FRA,\n\nHo sete.',
+                                     html: '<p>Ciao FRA,</p>' });
+  ok(conHtml.spedito[0]?.m.html === '<p>Ciao FRA,</p>',
+     'posta: la versione con formattazione arriva fino a chi spedisce');
+  ok(/Ho sete\./.test(conHtml.spedito[0]?.m.text || ''),
+     'posta: e il testo semplice viaggia insieme, non al posto suo');
+  const soloTesto = await chiama({}, { smtp: CRED });
+  ok(soloTesto.spedito[0]?.m.html === undefined,
+     'posta: senza HTML non se ne inventa uno, si spedisce il solo testo');
+
   /* ── 7. Il mittente ── */
   const conNome = await chiama({}, { smtp: CRED, from: 'Daniela' });
   ok(conNome.spedito[0]?.m.from === '"Daniela" <daniela@libero.it>',

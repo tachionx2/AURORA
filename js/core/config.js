@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 44;
+export const CONFIG_VERSION = 45;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -1113,6 +1113,16 @@ export const DEFAULT_CONFIG = {
     oggetto: 'Messaggio da Aurora',
     contatti: [],        // { nome, indirizzo }
     conferma: true,      // chiedere conferma prima di spedire
+    /* ── Lettera invece di testo nudo ──
+     * Aggiunge da sé "Ciao <destinatario>," in apertura, i saluti e la
+     * firma del mittente in chiusura, più una riga in corsivo che dice
+     * che il messaggio è stato scritto con Aurora.
+     *
+     * Chi scrive con un occhio solo paga ogni carattere, e sono
+     * proprio le parole più prevedibili della lettera: metterle da sé
+     * non toglie nulla e risparmia decine di selezioni. Spegnendolo si
+     * spedisce esattamente ciò che è stato scritto. */
+    formatta: true,
     /* ── Parametri della casella in uscita ──
      * Vengono trasmessi al servizio di invio insieme al messaggio, così
      * lo stesso servizio funziona con qualunque provider senza doverlo
@@ -1362,6 +1372,12 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 45 && c.email && c.email.formatta === undefined) {
+    /* ⚠️ Acceso anche nei profili esistenti: è ciò che chi usa Aurora
+     * vuole quasi sempre, e resta un interruttore a portata di mano
+     * per chi preferiva il testo nudo. */
+    c.email.formatta = true;
+  }
   if (v < 44 && c.email) {
     /* Le credenziali possono ora stare nella configurazione locale.
      * ⚠️ Si aggiungono VUOTE: un profilo che spediva tramite le

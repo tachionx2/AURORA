@@ -193,6 +193,19 @@ exports.handler = async (event) => {
   const a = String(dati.to || dati.destinatario || '').trim();
   const testo = String(dati.text || dati.testo || '').trim();
   const oggetto = String(dati.subject || dati.oggetto || 'Messaggio da Aurora').trim();
+  /* ── Versione con formattazione, facoltativa ──
+   *
+   * Aurora la manda quando compone la lettera; se manca, si spedisce
+   * il solo testo come si è sempre fatto.
+   *
+   * ⚠️ Il testo semplice viene messo SEMPRE, anche quando c'è l'HTML:
+   * è la versione che leggono i programmi di posta più vecchi e le
+   * sintesi vocali, ed è anche ciò che distingue un messaggio normale
+   * da uno che i filtri antispam guardano con sospetto.
+   *
+   * Tetto di lunghezza: un corpo enorme farebbe scadere il tempo della
+   * funzione, e il messaggio non partirebbe affatto. */
+  const html = String(dati.html || '').slice(0, 200000);
 
   if (!a || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(a)) {
     return rispondi(400, { ok: false, errore: 'destinatario non valido' });
@@ -302,6 +315,7 @@ exports.handler = async (event) => {
       to: a,
       subject: oggetto,
       text: testo,
+      ...(html ? { html } : {}),
     });
     return rispondi(200, { ok: true });
   } catch (e) {
