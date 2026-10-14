@@ -15,8 +15,97 @@
  */
 
 import { SEED_WORDS, SEED_BIGRAMS, LETTER_FREQ_IT, VOCABOLARIO_IT, FREQ_FASCIA, FREQ_BASE } from './seed-it.js';
+import { VOCABOLARIO_FREQ_IT } from './vocabolario-it.js';
 
 const DAY_MS = 86400000;
+
+/* ══════════════════════════════════════════════════════════════════
+ * VOCABOLARIO DEI SUGGERIMENTI
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * Trentamila parole con la loro frequenza reale d'uso, più quelle del
+ * registro di assistenza di seed-it.js, che tengono il proprio peso se
+ * è maggiore (`sete`, `dolore`, `aspetta` contano più qui che nei
+ * giornali).
+ *
+ * ⚠️ Costruito al PRIMO uso, non all'avvio: sono 260 KB da leggere e
+ * chi non scrive non deve pagarli.
+ *
+ * ⚠️ Serve SOLO ai suggerimenti. L'autocorrezione continua a usare il
+ * proprio vocabolario (`lessicoPerCorrezione`), che è stato tarato a
+ * parte e non viene toccato.
+ */
+let _CORPUS = null;
+function corpus() {
+  if (_CORPUS) return _CORPUS;
+  const freq = new Map();
+  const perFrequenza = [];
+  for (const riga of VOCABOLARIO_FREQ_IT.split('\n')) {
+    const i = riga.indexOf(':');
+    const F = Number(riga.slice(0, i));
+    for (const w of riga.slice(i + 1).split(' ')) {
+      if (w && !freq.has(w)) { freq.set(w, F); perFrequenza.push(w); }
+    }
+  }
+  for (const [w, f] of Object.entries(SEED_WORDS)) {
+    if (!freq.has(w)) perFrequenza.push(w);
+    freq.set(w, Math.max(freq.get(w) || 0, f));
+  }
+  /* In ordine alfabetico per trovare un prefisso con una ricerca
+   * binaria: le parole che cominciano allo stesso modo sono contigue,
+   * e trovarle costa una ventina di confronti invece di trentamila. */
+  const ordinate = [...freq.keys()].sort();
+  /* Le parole più frequenti sono quasi tutte funzionali — di, che, per,
+   * sono — e non dicono di cosa si sta parlando: non contano per il
+   * contesto dell'argomento. */
+  const vuote = new Set(perFrequenza.slice(0, 200));
+  _CORPUS = { freq, ordinate, vuote };
+  return _CORPUS;
+}
+
+/** Le parole di un testo, minuscole, senza punteggiatura. */
+const TOKEN = /[a-zàáèéìíîòóùúç]+/g;
+function token(testo) {
+  return String(testo || '').toLowerCase().match(TOKEN) || [];
+}
+
+/** Un conteggio, oppure zero: protegge da valori corrotti nei dati salvati. */
+const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
+
+/**
+ * Cosa mettere nella scansione per la parola in corso.
+ *
+ * ⚠️ Funzione unica, usata dal programma E dai test: se la scelta fosse
+ * scritta due volte, col tempo le due copie divergerebbero e i test
+ * verificherebbero qualcosa che il programma non fa più.
+ *
+ * @param predictor il modello
+ * @param buffer    { letters, words } — la parola in corso e la frase
+ * @param cfg       configurazione completa
+ * @returns {{ proposte: string[], suggerimenti: string[] }}
+ *   proposte      parole da dire a voce come prime voci (un gesto)
+ *   suggerimenti  parole del gruppo "Suggerimenti", senza ripetere le
+ *                 proposte
+ */
+export function scegliSuggerimenti(predictor, buffer, cfg) {
+  const S = cfg.scan || {};
+  const quanti = Math.max(S.suggestionCount || 4, 1) + 3;
+  const ris = cfg.prediction?.enabled
+    ? predictor.suggerisci({ prefisso: buffer?.letters || '', parole: buffer?.words || [], n: quanti })
+    : [];
+  /* Proposta diretta: solo le parole che staccano nettamente le
+   * altre. Chi assiste propone quando intuisce, non a ogni lettera. */
+  const proposte = S.suggerimentiDiretti
+    ? ris.filter(s => s.quota >= (S.suggerimentiDirettiSoglia ?? 0.35))
+         .slice(0, Math.max(1, Math.min(3, S.suggerimentiDirettiN || 1)))
+         .map(s => s.parola)
+    : [];
+  // Nel gruppo non si ripete ciò che è già stato proposto a voce.
+  const suggerimenti = ris.map(s => s.parola)
+    .filter(w => !proposte.includes(w))
+    .slice(0, S.suggestionCount || 4);
+  return { proposte, suggerimenti };
+}
 
 export class Predictor {
   constructor(cfg, saved = null) {
@@ -25,6 +114,16 @@ export class Predictor {
     this.bigrams = new Map();    // "a\tb" → n
     this.phrases = new Map();    // frase → { n, last, pinned }
     this.letters = new Map();    // "ctx\tchar" → n
+    /* Contesto oltre la parola precedente.
+     *   trigrammi: "a\tb\tc" → n — le due parole prima contano più di una;
+     *   compresenze: "a\tb" (in ordine alfabetico) → n — parole dette
+     *     nella stessa frase. È ciò che dà l'ARGOMENTO: se nella frase
+     *     c'è "acqua", "bicchiere" diventa più probabile anche senza
+     *     esserle accanto. */
+    this.trigrams = new Map();
+    this.cooc = new Map();
+    // Cresce a ogni cambiamento delle statistiche: invalida le cache.
+    this._ver = 0;
     this.load(saved);
   }
 
@@ -40,6 +139,10 @@ export class Predictor {
     rehydrate(saved.bigrams, this.bigrams);
     rehydrate(saved.phrases, this.phrases);
     rehydrate(saved.letters, this.letters);
+    // Assenti nelle statistiche salvate prima che esistessero: restano vuoti.
+    rehydrate(saved.trigrams, this.trigrams);
+    rehydrate(saved.cooc, this.cooc);
+    this._ver++;
   }
 
   /**
@@ -57,6 +160,8 @@ export class Predictor {
     this.bigrams.clear();
     this.phrases.clear();
     this.letters.clear();
+    this.trigrams.clear();
+    this.cooc.clear();
     this.load(data);
   }
 
@@ -110,19 +215,40 @@ export class Predictor {
     fondi(this.phrases, data.phrases, 'frasi');
     fondi(this.words, data.words, 'parole');
 
-    // I bigrammi hanno struttura annidata: parola → successiva → conteggio
-    if (data.bigrams) {
+    /* ⚠️ COPPIE DI PAROLE: il formato è PIATTO, "prima\tdopo" → conteggio.
+     *
+     * Difetto corretto: qui si leggeva un formato annidato
+     * (prima → dopo → conteggio) che il programma non ha mai salvato.
+     * Ogni coppia importata diventava una mappa vuota invece di un
+     * numero, il suo contributo ai suggerimenti diventava NaN, e le
+     * coppie già presenti non venivano sommate. L'"importa e unisci"
+     * delle statistiche perdeva in silenzio tutto il contesto — proprio
+     * la parte che rende i suggerimenti pertinenti.
+     *
+     * Si accetta anche il formato annidato, nel caso esistesse in
+     * qualche file vecchio, e si risanano i valori corrotti già
+     * presenti: `num()` li tratta come zero. */
+    const fondiConteggi = (mappa, voci) => {
       let n = 0;
-      for (const [prima, seguenti] of Object.entries(data.bigrams)) {
-        const mia = this.bigrams.get(prima) || new Map();
-        for (const [dopo, c] of Object.entries(seguenti)) {
-          mia.set(dopo, (mia.get(dopo) || 0) + (c || 0));
+      if (!voci || typeof voci !== 'object') return 0;
+      for (const [k, v] of Object.entries(voci)) {
+        if (typeof v === 'number') {
+          mappa.set(k, num(mappa.get(k)) + num(v));
           n++;
+        } else if (v && typeof v === 'object') {
+          for (const [dopo, c] of Object.entries(v)) {
+            const kk = `${k}\t${dopo}`;
+            mappa.set(kk, num(mappa.get(kk)) + num(Number(c)));
+            n++;
+          }
         }
-        this.bigrams.set(prima, mia);
       }
-      esito.coppie = n;
-    }
+      return n;
+    };
+    esito.coppie = fondiConteggi(this.bigrams, data.bigrams);
+    fondiConteggi(this.trigrams, data.trigrams);
+    fondiConteggi(this.cooc, data.cooc);
+    this._ver++;
     return esito;
   }
 
@@ -185,6 +311,7 @@ export class Predictor {
     return {
       words: dump(this.words), bigrams: dump(this.bigrams),
       phrases: dump(this.phrases), letters: dump(this.letters),
+      trigrams: dump(this.trigrams), cooc: dump(this.cooc),
     };
   }
 
@@ -218,6 +345,29 @@ export class Predictor {
       }
       prev = w;
     }
+
+    /* ── Contesto lungo ──
+     * Sulle parole pulite dalla punteggiatura, le stesse che i
+     * suggerimenti leggono dalla frase in composizione: altrimenti
+     * "sete." imparata con il punto non corrisponderebbe mai a "sete". */
+    const tk = token(clean);
+    for (let i = 2; i < tk.length; i++) {
+      const k = `${tk[i - 2]}\t${tk[i - 1]}\t${tk[i]}`;
+      this.trigrams.set(k, num(this.trigrams.get(k)) + 1);
+    }
+    /* Compresenze: solo le parole che portano argomento. Un tetto alle
+     * parole per frase evita che un testo lungo generi centinaia di
+     * coppie in un colpo solo. */
+    const C = corpus();
+    const piene = [...new Set(tk.filter(w => w.length >= 3 && !C.vuote.has(w)))].slice(0, 12);
+    for (let i = 0; i < piene.length; i++) {
+      for (let j = i + 1; j < piene.length; j++) {
+        const [a, b] = [piene[i], piene[j]].sort();
+        const k = `${a}\t${b}`;
+        this.cooc.set(k, num(this.cooc.get(k)) + 1);
+      }
+    }
+    this._ver++;
     this.prune();
   }
 
@@ -242,6 +392,9 @@ export class Predictor {
       e.n = Math.max(e.n, 2);
       this.words.set(w, e);
     }
+    // Usata da chi aggiunge, rinomina o precarica frasi: i suggerimenti
+    // che le continuano vanno ricalcolati.
+    this._ver++;
   }
 
   /** Tetto alla crescita: le voci mai usate e non fissate decadono via. */
@@ -256,6 +409,17 @@ export class Predictor {
     };
     trim(this.words, maxWords);
     trim(this.phrases, maxPhrases);
+    /* Tetto anche al contesto lungo, che cresce più in fretta: una frase
+     * di dieci parole produce otto trigrammi e decine di compresenze.
+     * Si tengono le più usate. */
+    const taglia = (map, max) => {
+      if (map.size <= max) return;
+      const arr = [...map.entries()].sort((a, b) => num(a[1]) - num(b[1]));
+      const via = map.size - max;
+      for (let i = 0; i < via; i++) map.delete(arr[i][0]);
+    };
+    taglia(this.trigrams, 8000);
+    taglia(this.cooc, 20000);
   }
 
   /* --------------------------- Punteggio --------------------------- */
@@ -274,39 +438,192 @@ export class Predictor {
   /* ------------------------- Completamenti ------------------------- */
 
   /**
-   * Candidati di parola per il prefisso corrente.
-   * Miscela: personale pesato sulla recenza + corpus italiano di base.
+   * Candidati di parola per il prefisso corrente — solo i nomi.
+   *
+   * Mantenuta per chi la usava: ora è un adattatore di `suggerisci`,
+   * con la sola parola precedente come contesto.
    */
   completions(prefix, prevWord = null, n = 4) {
-    if (!this.cfg.prediction.enabled) return [];
-    const p = (prefix || '').toLowerCase();
-    if (p.length < this.cfg.prediction.minPrefixForWord) return [];
+    return this.suggerisci({
+      prefisso: prefix, parole: prevWord ? [prevWord] : [], n,
+    }).map(s => s.parola);
+  }
 
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * SUGGERIMENTI DI PAROLA, DALL'INTERA FRASE
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * Ciò che fa una persona attenta che assiste Daniela: guarda le
+   * lettere della parola in corso, ma anche TUTTO quello che è già
+   * stato detto nella frase, e quello che Daniela dice di solito.
+   * Si ricalcola a ogni lettera: con la quarta il campo si restringe e
+   * i suggerimenti cambiano, con la quinta di nuovo.
+   *
+   * Sei fonti, sommate. Dalla più debole alla più forte:
+   *
+   *   1. FREQUENZA DELL'ITALIANO — trentamila parole. È la rete che
+   *      garantisce un suggerimento a qualunque lunghezza del prefisso.
+   *   2. LESSICO PERSONALE — le parole che Daniela usa, pesate sulla
+   *      recenza. Dopo poche settimane domina il corpus generale.
+   *   3. PAROLA PRECEDENTE — "ho" → "sete", "fame", "dolore".
+   *   4. DUE PAROLE PRECEDENTI — "mi fa" → "male".
+   *   5. ARGOMENTO DELLA FRASE — parole dette insieme in passato: se
+   *      nella frase c'è "acqua", "bicchiere" sale anche senza esserle
+   *      accanto.
+   *   6. CONTINUAZIONE DI UNA FRASE NOTA — se ciò che si sta scrivendo
+   *      ricalca una frase già detta, o una delle frasi preparate dalla
+   *      famiglia, la parola che segue in quella frase è la candidata
+   *      più forte di tutte. È la fonte che più assomiglia all'intuito
+   *      di chi la conosce, e pesa di più quanto più lunga è la parte
+   *      che coincide.
+   *
+   * @param prefisso le lettere della parola in corso
+   * @param parole   le parole GIÀ scritte nella frase, nell'ordine
+   * @param n        quanti candidati restituire
+   * @returns [{ parola, punteggio, quota }] — `quota` è la parte del
+   *          punteggio totale che spetta a quella parola, fra 0 e 1:
+   *          misura quanto il suggerimento è sicuro, ed è ciò che
+   *          decide se vale la pena proporlo a voce.
+   */
+  suggerisci({ prefisso = '', parole = [], n = 4 } = {}) {
+    const P = this.cfg.prediction;
+    if (!P?.enabled) return [];
+    const p = String(prefisso || '').toLowerCase().trim();
+    /* ⚠️ Mai senza almeno una lettera della parola: i suggerimenti
+     * riguardano la parola che si sta scrivendo. Dopo uno spazio non
+     * si propone nulla finché non comincia la parola nuova. */
+    if (!p || p.length < Math.max(1, P.minPrefixForWord || 1)) return [];
+
+    const S = (parole || []).flatMap(w => token(w));
+    // Stessa domanda, stesse statistiche: stessa risposta, senza ricalcolare.
+    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}`;
+    if (this._cache?.chiave === chiave) return this._cache.esito;
+
+    const C = corpus();
     const cand = new Map();
-    const add = (w, s) => { if (w.startsWith(p)) cand.set(w, (cand.get(w) || 0) + s); };
+    const add = (w, s) => {
+      if (!(s > 0) || w === p || !w.startsWith(p)) return;
+      cand.set(w, (cand.get(w) || 0) + s);
+    };
 
-    for (const [w, e] of this.words) add(w, this._score(e));
-    const cw = this.cfg.prediction.corpusWeight;
-    for (const [w, f] of Object.entries(SEED_WORDS)) add(w, f * cw);
+    // 1. Frequenza dell'italiano — ricerca binaria sul prefisso.
+    const cw = P.corpusWeight ?? 0.2;
+    let lo = 0, hi = C.ordinate.length;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (C.ordinate[m] < p) lo = m + 1; else hi = m; }
+    for (let i = lo; i < C.ordinate.length && C.ordinate[i].startsWith(p); i++) {
+      const w = C.ordinate[i];
+      add(w, cw * C.freq.get(w));
+    }
 
-    // Bonus di bigramma: se conosciamo la parola precedente, pesa molto.
-    if (prevWord) {
-      const pw = prevWord.toLowerCase();
+    // 2. Lessico personale: pesa tre volte il suo punteggio, perché una
+    //    parola usata davvero da Daniela vale più di una parola comune.
+    for (const [w, e] of this.words) add(w, 3 * this._score(e));
+
+    // 3. Parola precedente.
+    const w1 = S[S.length - 1];
+    const w2 = S[S.length - 2];
+    if (w1) {
       for (const [k, v] of this.bigrams) {
-        const [a, b] = k.split('\t');
-        if (a === pw) add(b, v * 3);
+        const t = k.indexOf('\t');
+        if (t > 0 && k.slice(0, t) === w1) add(k.slice(t + 1), 6 * num(v));
       }
       for (const [k, v] of Object.entries(SEED_BIGRAMS)) {
         const [a, b] = k.split(' ');
-        if (a === pw) add(b, v * cw * 2);
+        if (a === w1) add(b, v * cw * 2);
       }
     }
 
-    return [...cand.entries()]
-      .filter(([w]) => w !== p)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, n)
-      .map(([w]) => w);
+    // 4. Due parole precedenti.
+    if (w1 && w2) {
+      const pre = `${w2}\t${w1}\t`;
+      for (const [k, v] of this.trigrams) {
+        if (k.startsWith(pre)) add(k.slice(pre.length), 12 * num(v));
+      }
+    }
+
+    // 5. Argomento della frase.
+    const piene = [...new Set(S.filter(w => w.length >= 3 && !C.vuote.has(w)))];
+    if (piene.length) {
+      const bonus = new Map();
+      for (const [k, v] of this.cooc) {
+        const t = k.indexOf('\t');
+        const a = k.slice(0, t), b = k.slice(t + 1);
+        if (piene.includes(a) && b.startsWith(p)) bonus.set(b, (bonus.get(b) || 0) + num(v));
+        else if (piene.includes(b) && a.startsWith(p)) bonus.set(a, (bonus.get(a) || 0) + num(v));
+      }
+      // Un tetto: l'argomento orienta, non deve travolgere tutto il resto.
+      for (const [w, v] of bonus) add(w, Math.min(30, 1.5 * v));
+    }
+
+    // 6. Continuazione di una frase nota.
+    const kMax = Math.min(4, S.length);
+    for (const [T, peso] of this._frasiNote()) {
+      if (!S.length) {
+        // A inizio frase: le parole con cui Daniela comincia a parlare.
+        add(T[0], 3 * peso);
+        continue;
+      }
+      let trovata = false;
+      for (let k = kMax; k >= 1 && !trovata; k--) {
+        const coda = S.slice(S.length - k);
+        for (let j = 0; j + k < T.length; j++) {
+          let uguale = true;
+          for (let q = 0; q < k; q++) if (T[j + q] !== coda[q]) { uguale = false; break; }
+          if (!uguale) continue;
+          const w = T[j + k];
+          if (w !== p && w.startsWith(p)) { add(w, 8 * k * peso); trovata = true; break; }
+        }
+      }
+    }
+
+    const tutti = [...cand.entries()].sort((a, b) => b[1] - a[1]);
+    /* ⚠️ La sicurezza si misura fra le RIVALI VERE, le prime cinque.
+     *
+     * Sommando su tutto il dizionario, con due lettere ci sono migliaia
+     * di candidati e anche una parola ovvia risultava al 6%: "male"
+     * dopo "mi fa". Una persona che assiste non pensa a tutte le parole
+     * italiane, pensa a quelle due o tre che potrebbero essere: se una
+     * stacca nettamente le altre, la propone. */
+    const somma = tutti.slice(0, 5).reduce((s, [, v]) => s + v, 0) || 1;
+    const esito = tutti.slice(0, n).map(([parola, punteggio]) => ({
+      parola, punteggio, quota: punteggio / somma,
+    }));
+    this._cache = { chiave, esito };
+    return esito;
+  }
+
+  /**
+   * Le frasi conosciute, già spezzate in parole, con il loro peso.
+   *
+   * Due fonti: le frasi dette davvero (pesate sul loro uso) e quelle
+   * preparate dalla famiglia nei gruppi di frasi, che valgono come
+   * frasi già dette alcune volte. Ricalcolate solo quando cambiano.
+   */
+  _frasiNote() {
+    const gruppi = this.cfg.scan?.phraseGroups || [];
+    const firma = `${this._ver}|${JSON.stringify(gruppi)}`;
+    if (this._frasiCache?.firma === firma) return this._frasiCache.lista;
+    const lista = [];
+    const viste = new Set();
+    for (const [testo, e] of this.phrases) {
+      const T = token(testo);
+      const k = T.join(' ');
+      if (T.length < 2 || viste.has(k)) continue;
+      viste.add(k);
+      lista.push([T, 1 + this._score(e)]);
+    }
+    for (const g of gruppi) {
+      for (const f of g.phrases || []) {
+        const T = token(f);
+        const k = T.join(' ');
+        if (T.length < 2 || viste.has(k)) continue;
+        viste.add(k);
+        lista.push([T, 3]);
+      }
+    }
+    this._frasiCache = { firma, lista };
+    return lista;
   }
 
   /**
@@ -414,11 +731,13 @@ export class Predictor {
     const m = kind === 'phrase' ? this.phrases : this.words;
     const e = m.get(key);
     if (e) { e.pinned = value; m.set(key, e); }
+    this._ver++;
   }
 
   remove(kind, key) {
     const m = kind === 'phrase' ? this.phrases : this.words;
     m.delete(key);
+    this._ver++;
   }
 
   /** @param atTop true per metterla in cima, dove costa meno raggiungerla */
@@ -427,6 +746,7 @@ export class Predictor {
     if (!c) return false;
     this.phrases.set(c, { n: 5, last: Date.now(), pinned: true });
     this.learnSentenceSilent(c);
+    this._ver++;
     if (atTop) {
       const list = this.topPhrases(9999).filter(k => k !== c);
       [c, ...list].forEach((k, i) => {

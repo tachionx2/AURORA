@@ -310,6 +310,26 @@ export class DebugView {
         items.push([`${tag} ${arrow}`, `${c.n.toFixed(2)}σ${c.active ? ' ●' : ''}`]);
       }
     }
+    /* ⚠️ Apertura e soglia di CHIUSURA, affiancate, occhio per occhio.
+     *
+     * È il numero che spiega un occhio che non risulta mai chiuso: se
+     * l'apertura da occhio chiuso resta sopra la propria soglia, quel
+     * campione viene letto come "sguardo in basso" — cioè occhio
+     * aperto — e la banda nel grafico non si accende mai. Senza questi
+     * due valori sembra un guasto del rilevamento. */
+    for (const eye of ['left', 'right']) {
+      const b = ch[`${eye}.blink`];
+      if (!b || b.apertura == null) continue;
+      const tag = eye === 'left' ? 'SX' : 'DX';
+      items.push([`${tag} ap/chius.`,
+        `${b.apertura.toFixed(3)} / ${b.sogliaChiusura.toFixed(3)}${b.closed ? ' ●' : ''}`]);
+      /* Soglia del secondo criterio — il punto più stretto della rima.
+       * Compare solo quando è attivo e si è calibrato: è il numero che
+       * dice se l'occhio lontano ha una via per risultare chiuso. */
+      if (b.sogliaChiusuraMin != null) {
+        items.push([`${tag} soglia min`, b.sogliaChiusuraMin.toFixed(4)]);
+      }
+    }
     if (g.lastRejectReason) items.push(['Ultimo scarto', g.lastRejectReason]);
 
     const el = document.getElementById('counters');

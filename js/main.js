@@ -12,7 +12,7 @@ import { GestureEngine } from './signal/GestureEngine.js';
 import { analizza as analizzaSegnale } from './signal/AutoTune.js';
 import { SessionStats } from './signal/SessionStats.js';
 import { ScanEngine, DEFAULT_PHRASES } from './scan/ScanEngine.js';
-import { Predictor } from './lang/Predictor.js';
+import { Predictor, scegliSuggerimenti } from './lang/Predictor.js';
 import { Correttore } from './lang/AutoCorrect.js';
 import { invia as inviaEmail, verificaConfigurazione, indirizzoValido, ESEMPIO_NETLIFY } from './lang/Mailer.js';
 import { comanda as comandaCasa, verificaDomotica } from './device/HomeAssistant.js';
@@ -368,12 +368,14 @@ class App {
   /** Aggiorna suggerimenti e frasi che alimentano l'albero di scansione. */
   refreshContext() {
     const b = this.scan.buffer;
-    const prev = b.words[b.words.length - 1] || null;
-    const sugg = this.cfg.prediction.enabled
-      ? this.predictor.completions(b.letters, prev, this.cfg.scan.suggestionCount)
-      : [];
+    /* ⚠️ Si passa l'INTERA frase già scritta, non solo l'ultima parola:
+     * è ciò che permette ai suggerimenti di seguire l'argomento e di
+     * riconoscere una frase che Daniela ha già detto. Si ricalcola a
+     * ogni lettera: il campo si restringe e i suggerimenti cambiano. */
+    const { proposte, suggerimenti } = scegliSuggerimenti(this.predictor, b, this.cfg);
     this.scan.setContext({
-      suggestions: sugg,
+      suggestions: suggerimenti,
+      proposte,
       phrases: this.predictor.topPhrases(this.cfg.scan.phraseCount || 12),
       /* ⚠️ Anche la RADIO ha i suoi comandi.
        *

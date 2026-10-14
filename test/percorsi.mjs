@@ -103,7 +103,7 @@ function banco(opts = {}) {
   const b = banco();
   b.eng.loadText('caro marco ti penso ogni giorno', b.T);
   b.gesto('Scrivi'); b.gesto('AZIONI');
-  ok(b.gesto('RILEGGI'), '4a. può rileggere il testo (RILEGGI)');
+  ok(b.gesto('LEGGI'), '4a. può rileggere il testo (LEGGI, già RILEGGI)');
   ok(b.detto.some(t => t.includes('caro marco')), '4b. il testo viene letto');
   ok(b.eng.buffer.words.length > 0, '4c. rileggere NON cancella il testo');
 
@@ -219,7 +219,7 @@ function banco(opts = {}) {
   ok(b.eng.currentNode?.label === 'Vocali', '11a. dopo una LETTERA si riparte dai gruppi');
   b.gesto('Vocali'); b.gesto('␣');
   ok(b.eng.currentNode?.label === 'AZIONI', '11b. dopo uno SPAZIO si riparte dalle AZIONI');
-  b.gesto('AZIONI'); b.gesto('RILEGGI');
+  b.gesto('AZIONI'); b.gesto('LEGGI');
   ok(b.eng.currentNode?.label === 'AZIONI', '11c. dopo un AZIONE si riparte dalle AZIONI');
   // e da lì una seconda azione è immediata, senza aspettare il giro
   ok(b.gesto('AZIONI'), '11d. si può incatenare subito un altra azione');
@@ -488,9 +488,9 @@ function buildTreeFor(b){ return b.eng.tree; }
   // livello di scrittura posizionate su AZIONI.
   const c3 = banco();
   c3.eng.loadText('prova', c3.T);
-  c3.gesto('Scrivi'); c3.gesto('AZIONI'); c3.gesto('RILEGGI');
+  c3.gesto('Scrivi'); c3.gesto('AZIONI'); c3.gesto('LEGGI');
   ok(c3.eng.level.node.id === 'write' && c3.eng.currentNode?.label === 'AZIONI',
-     '21l. RILEGGI torna al livello scrittura su AZIONI, come prima');
+     '21l. LEGGI torna al livello scrittura su AZIONI, come prima');
 
   // Nessuna cancellazione su testo vuoto deve rompere qualcosa
   const c4 = banco();
@@ -1879,6 +1879,304 @@ function buildTreeFor(b){ return b.eng.tree; }
      'dopo un comando del riproduttore non si annuncia, se nel frattempo si è messa in pausa');
   ok(corpo.indexOf('if (this.paused) return;') < corpo.indexOf('_announceNow'),
      'e il controllo viene PRIMA dell annuncio, non dopo');
+}
+
+/* ═══ 70. L'ordine delle AZIONI, deciso sul campo ═══
+ *
+ * LEGGI, PARLA, SALVA, CHIEDI in testa: le cose che si fanno col testo
+ * appena scritto. SVUOTA in coda: cancella minuti di lavoro e non si
+ * annulla, quindi deve essere la più difficile da prendere per sbaglio. */
+{
+  const { buildTree: bt70 } = await import('../js/scan/ScanEngine.js');
+  const etichette = (mod) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    if (mod) mod(c);
+    const albero = bt70(c, { hasText: true, suggestions: [] });
+    const scrivi = albero.children.find(x => x.id === 'write');
+    const az = scrivi.children.find(x => x.id === 'act');
+    return az.children.map(x => x.label).filter(l => !/ESCI/.test(l));
+  };
+
+  const base = etichette();
+  ok(base.slice(0, 3).join(' ') === 'LEGGI PARLA SALVA',
+     `70a. in testa LEGGI, PARLA, SALVA, in quest ordine (${base.join(' · ')})`);
+  ok(base[base.length - 1] === 'SVUOTA',
+     '70b. SVUOTA è l ultima: la più difficile da selezionare per sbaglio');
+  ok(!base.includes('RILEGGI'),
+     '70c. RILEGGI non esiste più fra le azioni: si chiama LEGGI');
+
+  const conAi = etichette(c => { c.assistente.enabled = true; });
+  ok(conAi.slice(0, 4).join(' ') === 'LEGGI PARLA SALVA CHIEDI',
+     `70d. con l assistente acceso CHIEDI viene subito dopo SALVA (${conAi.join(' · ')})`);
+  ok(conAi[conAi.length - 1] === 'SVUOTA', '70e. e SVUOTA resta in fondo');
+
+  const conAnnulla = etichette(c => { c.prediction.autoCorrectUndo = true; });
+  ok(conAnnulla[conAnnulla.length - 1] === 'SVUOTA',
+     '70f. anche con ANNULLA CORREZIONE, SVUOTA resta l ultima');
+
+  // La voce cambia nome: deve cambiare anche nell elenco da registrare,
+  // altrimenti la voce guida cambierebbe timbro proprio su quella.
+  const { vocabolarioGuida } = await import('../js/audio/VoiceBank.js');
+  const daRegistrare = vocabolarioGuida(deepClone(DEFAULT_CONFIG)).map(v => v.testo);
+  ok(daRegistrare.includes('leggi'),
+     '70g. "leggi" è fra le parole da registrare con la voce dell assistente');
+}
+
+/* ══════ 71. SUGGERIMENTI DI PAROLA DALL'INTERA FRASE ══════
+ *
+ * Difetti misurati e corretti:
+ *   · il vocabolario dei suggerimenti era di 139 parole: con quattro o
+ *     cinque lettere quasi nessun prefisso trovava più nulla, e i
+ *     suggerimenti sparivano proprio quando la parola diventava
+ *     riconoscibile;
+ *   · il contesto era la sola parola precedente;
+ *   · l'"importa e unisci" delle statistiche perdeva tutte le coppie di
+ *     parole importate. */
+{
+  const { Predictor: P71, scegliSuggerimenti } = await import('../js/lang/Predictor.js');
+  const nuovo = (mod) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.prediction.minPrefixForWord = 2;
+    if (mod) mod(c);
+    return { c, p: new P71(c) };
+  };
+  const nomi = (r) => r.map(s => s.parola);
+
+  /* ── a. A OGNI lunghezza, non solo a tre lettere ── */
+  {
+    const { p } = nuovo();
+    const vuoti = [];
+    for (const pre of ['med', 'medi', 'medic', 'medici', 'medicin', 'tel', 'tele', 'telef', 'telefo', 'telefon',
+                       'cam', 'camm', 'cammi', 'cammin', 'ospe', 'ospeda', 'ospedal']) {
+      if (!p.suggerisci({ prefisso: pre, parole: [], n: 4 }).length) vuoti.push(pre);
+    }
+    ok(vuoti.length === 0,
+       `71a. suggerimenti a QUALUNQUE lunghezza del prefisso (vuoti: ${vuoti.join(', ') || 'nessuno'})`);
+    const r5 = nomi(p.suggerisci({ prefisso: 'telef', parole: [], n: 4 }));
+    ok(r5[0] === 'telefono', `71b. "telef" → telefono per primo (${r5.join(', ')})`);
+    // A ogni lettera il campo si restringe: i suggerimenti cambiano.
+    const r3 = nomi(p.suggerisci({ prefisso: 'tel', parole: [], n: 4 }));
+    ok(r3.join() !== r5.join(), '71c. con più lettere i suggerimenti cambiano, si rifiniscono');
+  }
+
+  /* ── b. ⚠️ Solo la parola in corso: niente dopo uno spazio ── */
+  {
+    const { p } = nuovo();
+    p.learnSentence('ho sete');
+    ok(p.suggerisci({ prefisso: '', parole: ['ho'], n: 4 }).length === 0,
+       '71d. dopo uno spazio nessun suggerimento: riguardano la parola in corso');
+    ok(p.suggerisci({ prefisso: 's', parole: ['ho'], n: 4 }).length === 0,
+       '71e. sotto il numero minimo di lettere, nulla');
+  }
+
+  /* ── c. Il contesto dell'intera frase ── */
+  {
+    const { p } = nuovo();
+    for (let i = 0; i < 4; i++) p.learnSentence('mi giri sul fianco sinistro per favore');
+    p.learnSentence('mi fa male la schiena');
+    p.learnSentence('mi fa male la testa');
+    p.learnSentence('vorrei un bicchiere di acqua fresca');
+    p.learnSentence('vorrei un bicchiere di acqua');
+
+    const ctx = p.suggerisci({ prefisso: 'si', parole: ['mi', 'giri', 'sul', 'fianco'], n: 4 });
+    const nudo = p.suggerisci({ prefisso: 'si', parole: [], n: 4 });
+    ok(ctx[0].parola === 'sinistro' && ctx[0].quota >= 0.6,
+       `71f. continuazione di una frase già detta: "sinistro" con sicurezza alta (${(ctx[0].quota*100).toFixed(0)}%)`);
+    ok(ctx[0].quota > nudo[0].quota * 2,
+       `71g. il contesto la rende molto più sicura che senza (${(nudo[0].quota*100).toFixed(0)}% → ${(ctx[0].quota*100).toFixed(0)}%)`);
+
+    const tri = nomi(p.suggerisci({ prefisso: 'ma', parole: ['mi', 'fa'], n: 4 }));
+    ok(tri[0] === 'male', `71h. le DUE parole precedenti: "mi fa" + ma → male (${tri.join(', ')})`);
+
+    const acq = nomi(p.suggerisci({ prefisso: 'ac', parole: ['vorrei', 'un', 'bicchiere', 'di'], n: 4 }));
+    ok(acq[0] === 'acqua', `71i. "un bicchiere di" + ac → acqua (${acq.join(', ')})`);
+  }
+
+  /* ── d. Le frasi preparate dalla famiglia contano come frasi dette ── */
+  {
+    const { p } = nuovo(c => {
+      c.scan.phraseGroups = [{ id: 'f', label: 'Famiglia', phrases: ['voglio vedere la nipotina Giulia'] }];
+    });
+    const r = nomi(p.suggerisci({ prefisso: 'ni', parole: ['voglio', 'vedere', 'la'], n: 4 }));
+    ok(r[0] === 'nipotina',
+       `71l. una frase dei gruppi preparati guida il suggerimento (${r.join(', ')})`);
+  }
+
+  /* ── e. Proposta diretta: quando, quante, e mai doppioni ── */
+  {
+    const { c, p } = nuovo(cc => { cc.scan.suggerimentiDiretti = true; });
+    for (let i = 0; i < 4; i++) p.learnSentence('mi giri sul fianco sinistro per favore');
+
+    const sicura = scegliSuggerimenti(p, { letters: 'SI', words: ['MI', 'GIRI', 'SUL', 'FIANCO'] }, c);
+    ok(sicura.proposte.length === 1 && sicura.proposte[0] === 'sinistro',
+       `71m. parola netta: proposta a voce (${sicura.proposte.join(', ')})`);
+    ok(!sicura.suggerimenti.includes('sinistro'),
+       '71n. e non ripetuta nel gruppo Suggerimenti');
+
+    const incerta = scegliSuggerimenti(p, { letters: 'ME', words: [] }, c);
+    ok(incerta.proposte.length === 0,
+       '71o. parola incerta: NESSUNA proposta — chi assiste non tira a indovinare');
+    ok(incerta.suggerimenti.length > 0, '71p. ma il gruppo Suggerimenti resta disponibile');
+
+    c.scan.suggerimentiDirettiSoglia = 0;
+    c.scan.suggerimentiDirettiN = 2;
+    const sempre = scegliSuggerimenti(p, { letters: 'ME', words: [] }, c);
+    ok(sempre.proposte.length === 2, '71q. con soglia 0 e due parole, ne propone sempre due');
+
+    c.scan.suggerimentiDiretti = false;
+    const spenta = scegliSuggerimenti(p, { letters: 'SI', words: ['MI', 'GIRI', 'SUL', 'FIANCO'] }, c);
+    ok(spenta.proposte.length === 0 && spenta.suggerimenti[0] === 'sinistro',
+       '71r. spenta: nessuna proposta, e tutto torna nel gruppo come prima');
+    ok(DEFAULT_CONFIG.scan.suggerimentiDiretti === false,
+       '71s. spenta di default: cambia ciò che si sente dopo ogni lettera, va scelta');
+  }
+
+  /* ── f. Nella scansione VERA: la voce la propone, un gesto la prende ── */
+  {
+    const cfg71 = deepClone(DEFAULT_CONFIG);
+    cfg71.scan.suggerimentiDiretti = true;
+    cfg71.prediction.minPrefixForWord = 2;
+    const p = new P71(cfg71);
+    for (let i = 0; i < 4; i++) p.learnSentence('mi giri sul fianco sinistro per favore');
+    const eng = new ScanEngine(cfg71, { onOutput: () => {} });
+    let T = 0;
+    const ctx = () => {
+      const { proposte, suggerimenti } = scegliSuggerimenti(p, eng.buffer, cfg71);
+      eng.setContext({ suggestions: suggerimenti, proposte, hasText: true });
+    };
+    eng.start(T); ctx();
+    const gesto = (lab) => {
+      for (let i = 0; i < 4000; i++) {
+        ctx();
+        if (eng.currentNode?.label === lab) { eng.select(T); ctx(); return true; }
+        T += 25; eng.tick(T);
+      }
+      return false;
+    };
+    const lettera = (ch) => {
+      const v = ch === ' ' ? '␣' : ch.toUpperCase();
+      const g = cfg71.scan.groups.find(x => x.items.includes(v));
+      return gesto(g.label) && gesto(v);
+    };
+    gesto('Scrivi');
+    for (const w of ['mi', 'giri', 'sul', 'fianco']) { for (const ch of w) lettera(ch); lettera(' '); }
+    lettera('s');
+    ok(eng.currentNode?.label !== '▸ sinistro',
+       '71t. con una lettera sola (sotto il minimo) nessuna proposta');
+    lettera('i');
+    ok(eng.currentNode?.label === '▸ sinistro',
+       `71u. dopo "si" la PRIMA voce annunciata è la parola proposta (${eng.currentNode?.label})`);
+    ok(eng.currentNode?.spoken === 'sinistro',
+       '71v. e la voce guida dice la parola, non un\'etichetta');
+
+    /* ⚠️ Daniela NON la prende: continua a scrivere. Alla lettera
+     * successiva la proposta si ricalcola. */
+    T += 25; eng.tick(T); T += 2500; eng.tick(T);     // la scansione va oltre
+    lettera('n');
+    ok(eng.buffer.letters === 'SIN',
+       '71z. ignorando la proposta si continua a scrivere lettera per lettera');
+    ok(eng.currentNode?.label === '▸ sinistro',
+       '71z1. e alla lettera successiva la proposta ricompare, ricalcolata');
+
+    ok(gesto('▸ sinistro'), '71z2. UN gesto la seleziona');
+    ok(eng.buffer.words[eng.buffer.words.length - 1] === 'SINISTRO',
+       `71z3. la parola è completata, con le maiuscole di ciò che era digitato (${eng.buffer.words.join(' ')})`);
+    ok(eng.buffer.letters === '' && !(eng.ctx.proposte || []).length,
+       '71z4. dopo la parola, nessuna proposta: con lo spazio si ricomincia');
+  }
+
+  /* ── g. ⚠️ L'importa-e-unisci delle statistiche non perde il contesto ── */
+  {
+    const { c } = nuovo();
+    const casa = new P71(c);
+    for (let i = 0; i < 3; i++) casa.learnSentence('ho sete');
+    const altro = new P71(c);
+    for (let i = 0; i < 5; i++) altro.learnSentence('voglio sedermi');
+    altro.learnSentence('ho sete');
+    // Una frase con tre parole e un argomento: produce trigrammi e
+    // compresenze, così si verifica che anche quelli vengano importati.
+    altro.learnSentence('vorrei un bicchiere di acqua fresca');
+    casa.merge(altro.serialize());
+    ok(casa.bigrams.get('voglio\tsedermi') === 5,
+       `71z5. una coppia importata resta un NUMERO (${JSON.stringify(casa.bigrams.get('voglio\tsedermi'))})`);
+    ok(casa.bigrams.get('ho\tsete') === 4, '71z6. e le coppie già presenti vengono sommate (3 + 1)');
+    ok(casa.trigrams.size > 0 && casa.cooc.size > 0, '71z7. anche il contesto lungo viene importato');
+
+    // Formato annidato, nel caso esista in file vecchi: accettato.
+    const vecchio = new P71(c);
+    vecchio.merge({ bigrams: { voglio: { dormire: 2 } } });
+    ok(vecchio.bigrams.get('voglio\tdormire') === 2, '71z8. il formato annidato vecchio è accettato');
+
+    // Statistiche salvate prima che esistesse il contesto lungo.
+    const antico = new P71(c, { words: { ciao: { n: 3, last: Date.now() } }, bigrams: {}, phrases: {}, letters: {} });
+    ok(antico.trigrams.size === 0 && nomi(antico.suggerisci({ prefisso: 'ci', parole: [], n: 3 })).includes('ciao'),
+       '71z9. statistiche salvate senza contesto lungo: si caricano e funzionano');
+
+    // Andata e ritorno.
+    const rt = new P71(c, JSON.parse(JSON.stringify(altro.serialize())));
+    ok(rt.trigrams.size === altro.trigrams.size && rt.cooc.size === altro.cooc.size,
+       '71z10. il contesto lungo si salva e si ricarica intatto');
+  }
+
+  /* ── h. Ciò che NON doveva cambiare ── */
+  {
+    const { p } = nuovo();
+    const lessico = p.lessicoPerCorrezione?.();
+    const dimensione = lessico?.size ?? lessico?.length ?? (lessico ? Object.keys(lessico).length : 0);
+    ok(dimensione > 0 && dimensione < 2000,
+       `71z11. l autocorrezione usa ANCORA il proprio vocabolario, non quello dei suggerimenti (${dimensione} voci)`);
+
+    // Volgarità: escluse dal corpus generale, ma se Daniela le usa
+    // il suo lessico le impara. Ciò che dice resta una scelta sua.
+    ok(!nomi(p.suggerisci({ prefisso: 'stron', parole: [], n: 8 })).includes('stronzo'),
+       '71z12. il corpus generale non suggerisce volgarità');
+    p.learnSentence('che stronzo');
+    ok(nomi(p.suggerisci({ prefisso: 'stron', parole: [], n: 8 })).includes('stronzo'),
+       '71z13. ma se Daniela le usa, il suo lessico le impara');
+
+    // Veloce: si ricalcola a ogni lettera.
+    p.suggerisci({ prefisso: 'ca', parole: [], n: 4 });
+    const t0 = performance.now();
+    for (const pre of ['a', 'ab', 'abi', 'c', 'ca', 'cas', 'me', 'med', 'te', 'tel']) {
+      p.suggerisci({ prefisso: pre + 'x'.slice(1), parole: ['vorrei', 'un'], n: 7 });
+    }
+    const ms = (performance.now() - t0) / 10;
+    ok(ms < 25, `71z14. un ricalcolo costa pochi millisecondi (${ms.toFixed(1)} ms)`);
+  }
+
+  /* ── h2. Le impostazioni: tutte in un posto, ognuna una volta sola ── */
+  {
+    const fsI = await import('node:fs');
+    const pathI = await import('node:path');
+    const quiI = pathI.dirname(import.meta.filename || process.argv[1]);
+    const sv = fsI.readFileSync(pathI.join(quiI, '..', 'js/ui/SettingsView.js'), 'utf8');
+    const conta = (k) => (sv.match(new RegExp(`this\\._(toggle|number|range)\\('${k.replace('.', '\\.')}'`, 'g')) || []).length;
+    const chiavi = ['prediction.minPrefixForWord', 'scan.showSuggestions', 'scan.suggestionCount',
+                    'scan.suggerimentiDiretti', 'scan.suggerimentiDirettiN', 'scan.suggerimentiDirettiSoglia'];
+    const sbagliate = chiavi.filter(k => conta(k) !== 1);
+    ok(sbagliate.length === 0,
+       `71z17. ogni impostazione dei suggerimenti ha UN controllo (${sbagliate.join(', ') || 'tutte'})`);
+    const iBlocco = sv.indexOf("'SUGGERIMENTI DI PAROLA'");
+    const iAuto = sv.indexOf("// ── Autocorrezione ──");
+    ok(iBlocco > 0 && chiavi.every(k => {
+      const i = sv.indexOf(`'${k}'`, iBlocco); return i > iBlocco && i < iAuto;
+    }), '71z18. tutte nel blocco SUGGERIMENTI DI PAROLA, prima dell autocorrezione');
+    ok(/INTERRUTTORI_CHE_APRONO[\s\S]{0,4000}'scan\.suggerimentiDiretti'/.test(sv),
+       '71z19. accendendo la proposta a voce, le sue opzioni compaiono subito');
+  }
+
+  /* ── i. Offline: il vocabolario è nella cache ── */
+  {
+    const fs71 = await import('node:fs');
+    const path71 = await import('node:path');
+    const qui71 = path71.dirname(import.meta.filename || process.argv[1]);
+    const sw = fs71.readFileSync(path71.join(qui71, '..', 'sw.js'), 'utf8');
+    ok(/'\.\/js\/lang\/vocabolario-it\.js'/.test(sw),
+       '71z15. il vocabolario è precaricato: offline i suggerimenti non tacciono');
+    const voc = fs71.readFileSync(path71.join(qui71, '..', 'js/lang/vocabolario-it.js'), 'utf8');
+    ok(/CC BY-SA 4\.0|Creative Commons Attribution-ShareAlike 4\.0/.test(voc) && /wordfreq/.test(voc),
+       '71z16. il file del vocabolario dichiara provenienza e licenza');
+  }
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

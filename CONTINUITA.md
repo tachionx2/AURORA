@@ -268,6 +268,35 @@ aggiungere una funzione che rischiare quella che già funziona.
 
 ---
 
+## SUGGERIMENTI DI PAROLA (dalla versione `20261014`)
+
+`Predictor.suggerisci()` guarda l'intera frase: frequenza dell'italiano,
+lessico personale, una e due parole precedenti, argomento della frase
+(compresenze), continuazione di frasi già dette o preparate dalla
+famiglia. La `quota` è misurata fra le **prime cinque** candidate, non su
+tutto il dizionario: sommando su tutto, anche una parola ovvia stava al 6%.
+
+La scelta fra proposta a voce e gruppo "Suggerimenti" sta in **una sola**
+funzione, `scegliSuggerimenti()`, usata dal programma e dai test. Non
+duplicarla.
+
+**Mai suggerimenti dopo uno spazio**: riguardano la parola in corso.
+Deciso con l'utente, non è una dimenticanza.
+
+### ⚠️ Licenza del vocabolario
+
+`js/lang/vocabolario-it.js` deriva dai dati di `wordfreq`, distribuiti
+sotto **CC BY-SA 4.0**. Quel file è quindi sotto CC BY-SA 4.0, NON sotto
+la licenza di Aurora, ed è incluso come opera separata. L'intestazione
+del file lo dichiara. Se un giorno si volesse un vocabolario sotto la
+stessa licenza di Aurora, va sostituito con dati di altra provenienza
+rigenerando il file (lo script è descritto nell'intestazione).
+
+L'**autocorrezione** NON usa questo vocabolario: ha il proprio
+(`lessicoPerCorrezione`), tarato a parte.
+
+---
+
 ## COSA RESTA APERTO
 
 - **Modalità infrarossa** e canale rosso del sensore RGB: da provare.

@@ -520,6 +520,32 @@ export class BlinkDetector {
     this._tVel = null;
     this.smentiti = 0;
     this.tSottoSoglia = null;        // da quando siamo sotto soglia
+    /* ── Secondo criterio di chiusura, dal punto più STRETTO della rima ──
+     *
+     * Serve all'occhio LONTANO quando la telecamera è di lato: visto
+     * di scorcio, alcune coppie di punti palpebrali vengono dedotte
+     * dal modello invece che viste e restano distanti, l'apertura
+     * misurata (che è il MASSIMO fra le coppie) non arriva mai a zero
+     * e quell'occhio non risulta mai chiuso — mentre il vicino si
+     * chiude benissimo.
+     *
+     * Il minimo fra le stesse coppie non ha quel difetto, ma ha una
+     * scala propria: gli serve un riferimento proprio. */
+    this.bufMin = [];
+    this.openRefMin = null;
+    this.calibratedMin = false;
+    this._tBassaDaMin = null;
+    /* Spegnibile: se in campo si rivelasse troppo sensibile, si torna
+     * al comportamento precedente senza toccare altro. */
+    this.usaMin = true;
+    /* Da quando l'apertura sta sotto la soglia, SENZA interpretazioni:
+     * serve a difendere il riferimento, e un giudizio lo azzererebbe. */
+    this._tBassaDa = null;
+    /* ⚠️ Oltre questo tempo la difesa del riferimento si arrende e
+     * ricomincia ad alimentarlo. Nessuna palpebra resta abbassata
+     * venti secondi; una telecamera spostata resta spostata, e un
+     * riferimento congelato in alto non si riprenderebbe più. */
+    this.riadattaDopoMs = 20000;
     // Soglia fissa, quando l'auto-calibrazione è spenta. La logica di
     // durata resta la STESSA: distinguere un ammiccamento da uno
     // sguardo in basso non ha nulla a che vedere con il modo in cui la
@@ -529,9 +555,13 @@ export class BlinkDetector {
   reset() {
     this.buf.length = 0; this.openRef = null; this.calibrated = false;
     this.tSottoSoglia = null;
+    this._tBassaDa = null;
+    this.bufMin.length = 0; this.openRefMin = null; this.calibratedMin = false;
+    this._tBassaDaMin = null;
   }
   configure(ratio, floor, discrimina, sustainedMs, sogliaFissa, ratioChiuso,
-            richiedeIride, sogliaIride, smentiSopra, smentiDopoMs) {
+            richiedeIride, sogliaIride, smentiSopra, smentiDopoMs, usaMin) {
+    if (usaMin !== undefined) this.usaMin = !!usaMin;
     if (richiedeIride !== undefined) this.richiedeIride = !!richiedeIride;
     if (sogliaIride !== undefined) this.sogliaIride = sogliaIride;
     if (smentiSopra !== undefined) this.smentiSopra = smentiSopra;
@@ -549,6 +579,15 @@ export class BlinkDetector {
     if (sustainedMs !== undefined) this.sustainedMs = sustainedMs;
     if (sogliaFissa !== undefined) this.sogliaFissa = sogliaFissa;
     if (ratioChiuso !== undefined) this.ratioChiuso = ratioChiuso;
+  }
+
+  /** Ultima apertura vista, per la diagnostica. */
+  get ultimaApertura() { return this._apPrec; }
+
+  /** Soglia del secondo criterio, per la diagnostica. `null` se inattivo. */
+  get sogliaChiusuraMin() {
+    return (this.usaMin && this.calibratedMin)
+      ? this.openRefMin * this.ratioChiuso : null;
   }
 
   /** Sotto questa apertura l'occhio è CHIUSO, non abbassato. */
@@ -572,11 +611,44 @@ export class BlinkDetector {
    * @param confidenza qualità del rilevamento dell'iride, 0..1.
    *        Serve a distinguere un ammiccamento vero da un'apertura che
    *        si stringe perché lo sguardo è andato in alto.
+   * @param opennessMin apertura al punto più STRETTO della rima.
+   *        Facoltativo: assente, tutto si comporta come prima. Serve
+   *        all'occhio lontano con la telecamera di lato.
    */
-  update(openness, t = 0, confidenza = null) {
+  update(openness, t = 0, confidenza = null, opennessMin = undefined) {
     if (!isFinite(openness) || openness <= 0) {
       return { closed: false, blink: false, parziale: false,
                openRef: this.openRef, threshold: this.threshold, calibrated: this.calibrated };
+    }
+    /* ══════════════════════════════════════════════════════════════
+     * SECONDO CRITERIO: IL PUNTO PIÙ STRETTO DELLA RIMA
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Ha un riferimento proprio, costruito come l'altro e difeso allo
+     * stesso modo: il minimo a occhio aperto vale molto meno del
+     * massimo, e riusare l'altra soglia non avrebbe senso.
+     */
+    const minValido = this.usaMin && Number.isFinite(opennessMin) && opennessMin > 0;
+    if (minValido) {
+      const thrMinPrec = this.calibratedMin ? this.openRefMin * this.ratio : Infinity;
+      if (!this.calibratedMin || opennessMin >= thrMinPrec) this._tBassaDaMin = null;
+      else if (this._tBassaDaMin === null) this._tBassaDaMin = t;
+      /* Stessa via d'uscita del riferimento principale, e per la stessa
+       * ragione: una difesa senza uscita diventa un blocco permanente
+       * se la telecamera viene spostata. */
+      const bassaDaTantoMin = this._tBassaDaMin !== null
+        && (t - this._tBassaDaMin) > this.sustainedMs
+        && (t - this._tBassaDaMin) < (this.riadattaDopoMs ?? 20000);
+      const chiusoMinOra = this.calibratedMin
+        && opennessMin < this.openRefMin * this.ratioChiuso;
+      if (!chiusoMinOra && !bassaDaTantoMin) {
+        this.bufMin.push(opennessMin);
+        if (this.bufMin.length > this.win) this.bufMin.shift();
+      }
+      if (this.bufMin.length >= 20) {
+        this.openRefMin = percentile(this.bufMin, 85);
+        this.calibratedMin = true;
+      }
     }
     // ⚠️ Il riferimento descrive l'occhio APERTO, e va difeso.
     //
@@ -625,7 +697,58 @@ export class BlinkDetector {
      * stringe; qui invece si difende un riferimento, e in caso di
      * dubbio conviene difenderlo. */
     const oraChiuso = giaGiudicabile && openness < this.sogliaChiusura;
-    if (!oraChiuso) {
+    /* ⚠️ IL RIFERIMENTO DESCRIVE L'OCCHIO APERTO, E VA DIFESO ANCHE
+     * DALLA PALPEBRA ABBASSATA A LUNGO.
+     *
+     * Difetto misurato: la protezione copriva solo l'occhio giudicato
+     * CHIUSO. Un occhio la cui apertura, da chiuso, resta appena sopra
+     * la soglia — succede quando la palpebra non arriva a coprire del
+     * tutto, o quando il rilevatore non fa collassare la misura —
+     * viene letto come "sguardo in basso" e i suoi campioni
+     * continuavano ad alimentare il riferimento. In sei secondi il
+     * riferimento scendeva da 0,300 a 0,085: la soglia di chiusura e
+     * quella di ammiccamento scendevano con lui, e quell'occhio non
+     * poteva PIÙ risultare chiuso né ammiccare. Un blocco che si
+     * autoalimenta, e che non si sblocca riaprendo l'occhio.
+     *
+     * Un campione con la palpebra giù da più di mezzo secondo non
+     * descrive un occhio aperto, qualunque sia la sua etichetta: fuori
+     * dal riferimento.
+     *
+     * ⚠️ Il conteggio del tempo è INDIPENDENTE dai verdetti.
+     *
+     * Primo tentativo: riusare `tSottoSoglia`. Non funziona, ed è
+     * istruttivo — quel timer viene azzerato dallo smentimento, che è
+     * proprio ciò che accade all'occhio in questione: apertura ridotta
+     * ma iride ancora visibile, dunque "non è un ammiccamento",
+     * dunque timer a zero, dunque riferimento libero di collassare.
+     * Qui serve un fatto grezzo, non un giudizio: da quanto tempo
+     * l'apertura sta sotto la soglia, qualunque sia l'interpretazione.
+     *
+     * ⚠️ Finché il riferimento non c'è ancora si accetta tutto,
+     * altrimenti un occhio che parte socchiuso non si calibrerebbe
+     * mai: senza riferimento non esiste soglia, e senza soglia non si
+     * potrebbe nemmeno giudicare. */
+    const thrPrec = this.threshold;
+    if (!giaGiudicabile || openness >= thrPrec) this._tBassaDa = null;
+    else if (this._tBassaDa === null) this._tBassaDa = t;
+    /* ⚠️ E una via d'uscita, obbligatoria.
+     *
+     * Senza, questa difesa diventa una trappola: se l'apertura di
+     * riposo cala per davvero e in modo permanente — la telecamera
+     * viene spostata o inclinata, la persona si allontana, la luce
+     * cambia — ogni campione resta sotto la soglia vecchia, il
+     * riferimento non viene più alimentato e resta congelato in alto
+     * PER SEMPRE. L'occhio risulterebbe perennemente socchiuso e non
+     * si riprenderebbe più, nemmeno riaprendolo.
+     *
+     * Oltre questo tempo si riprende ad alimentare: nessuna palpebra
+     * resta abbassata venti secondi, mentre una telecamera spostata
+     * resta spostata. In dubbio conviene ricalibrare. */
+    const bassaDaTanto = this._tBassaDa !== null
+      && (t - this._tBassaDa) > this.sustainedMs
+      && (t - this._tBassaDa) < (this.riadattaDopoMs ?? 20000);
+    if (!oraChiuso && !bassaDaTanto) {
       this.buf.push(openness);
       if (this.buf.length > this.win) this.buf.shift();
     }
@@ -647,6 +770,10 @@ export class BlinkDetector {
      * Un occhio che si stringe ma la cui iride si vede ancora NON è un
      * occhio chiuso. */
     let sottoSoglia = openness < thr;
+    /* ⚠️ Il fatto grezzo, prima di qualunque interpretazione: serve al
+     * secondo criterio, che deve poter contare su una concordanza del
+     * segnale principale senza ereditarne le smentite. */
+    const sottoSogliaGrezza = sottoSoglia;
     /* ⚠️ Lo smentimento vale SOLO nella zona intermedia.
      *
      * Il primo tentativo si basava sulla sola confidenza, e ha spento
@@ -708,6 +835,48 @@ export class BlinkDetector {
         && Number.isFinite(confidenza) && confidenza >= this.sogliaIride) {
       sottoSoglia = false;
       this.smentiti = (this.smentiti || 0) + 1;
+    }
+    /* ══════════════════════════════════════════════════════════════
+     * IL SECONDO CRITERIO DECIDE — e può solo AGGIUNGERE chiusure
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Dichiara chiuso un occhio il cui punto più STRETTO della rima è
+     * scceso sotto la propria soglia. Serve all'occhio lontano, che
+     * col massimo non ci arriva mai.
+     *
+     * ⚠️ TRE condizioni insieme, e nessuna è decorativa:
+     *
+     * 1. il minimo sotto la PROPRIA soglia relativa;
+     *
+     * 2. il segnale principale CONCORDA che la palpebra è giù, cioè è
+     *    sotto la soglia di ammiccamento. Senza questa, un solo punto
+     *    palpebrale mal stimato basterebbe a dichiarare chiuso un
+     *    occhio spalancato;
+     *
+     * 3. lo stesso smentimento dell'altro criterio: iride ancora ben
+     *    visibile E minimo non troppo basso ⇒ non è chiusura, è un
+     *    occhio che si stringe. ⚠️ Questa è la protezione del gesto SU
+     *    di Daniela: alzando molto lo sguardo la palpebra superiore
+     *    stringe la rima, e senza questa condizione il suo unico
+     *    comando verrebbe mascherato proprio mentre lo fa.
+     *
+     * Posizionato QUI, dopo l'uscita "aperto" dell'altro criterio e
+     * prima della logica di durata, può solo trasformare un "aperto"
+     * in "CHIUSO". Nessuna chiusura già riconosciuta oggi può essere
+     * tolta da questo codice. */
+    let chiusoDaMin = false;
+    if (minValido && this.calibratedMin && sottoSogliaGrezza
+        && opennessMin < this.openRefMin * this.ratioChiuso) {
+      const irideVisibile = this.richiedeIride
+        && Number.isFinite(confidenza) && confidenza >= this.sogliaIride
+        && opennessMin > this.smentiSopra * this.openRefMin;
+      chiusoDaMin = !irideVisibile;
+    }
+    if (chiusoDaMin) {
+      if (this.tSottoSoglia === null) this.tSottoSoglia = t;
+      return { closed: true, blink: (t - this.tSottoSoglia) < this.sustainedMs,
+               parziale: false, daMinimo: true,
+               openRef: this.openRef, threshold: thr, calibrated: this.calibrated };
     }
     if (!sottoSoglia) {
       this.tSottoSoglia = null;

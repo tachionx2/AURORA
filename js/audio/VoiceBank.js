@@ -219,7 +219,8 @@ export function vocabolarioGuida(cfg) {
 
   // Menu principale e comandi: sono i più frequenti in assoluto.
   for (const t of ['frasi', 'scrivi', 'miei testi', 'guarda', 'pausa', 'esci', 'menu',
-                   'azioni', 'parla', 'rileggi', 'salva', 'lettera', 'parola', 'svuota',
+                   'azioni', 'leggi', 'parla', 'rileggi', 'salva', 'chiedi',
+                   'lettera', 'parola', 'svuota',
                    'riprendo', 'annullato', 'niente da dire']) agg(t, 'comandi');
 
   // Nomi dei gruppi di lettere.

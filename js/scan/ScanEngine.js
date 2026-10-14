@@ -42,18 +42,31 @@ export function buildTree(cfg, ctx = {}) {
     kind: NodeKind.GROUP, id: 'act', label: 'AZIONI', spoken: 'azioni',
     children: [
       ...(showBack ? [back('act')] : []),
-      // PARLA e RILEGGI differiscono per UNA cosa sola: PARLA svuota il
-      // testo (il messaggio è stato consegnato), RILEGGI lo lascia
-      // (serve a riascoltare quello che si sta ancora scrivendo).
-      // Prima esisteva anche "LEGGI SENZA CANCELLARE", che faceva la
-      // stessa cosa di RILEGGI: era un doppione, ed è stato tolto.
+      /* ══ ORDINE DECISO SUL CAMPO ══
+       *
+       * LEGGI, PARLA, SALVA, CHIEDI: le quattro cose che si fanno col
+       * testo appena scritto, nell'ordine in cui servono più spesso.
+       * Ogni posizione in più costa un passo di scansione a ogni
+       * visita, quindi le più usate stanno in testa.
+       *
+       * ⚠️ LEGGI viene PRIMA di PARLA. Si rilegge molte volte mentre si
+       * scrive, si parla una volta sola alla fine — e LEGGI non
+       * cancella nulla, quindi selezionarlo per sbaglio non costa.
+       *
+       * LEGGI e PARLA differiscono per UNA cosa sola: PARLA svuota il
+       * testo (il messaggio è stato consegnato), LEGGI lo lascia.
+       * Si chiamava RILEGGI: "leggi" ha due sillabe invece di tre, e
+       * questa voce viene annunciata decine di volte al giorno.
+       *
+       * ⚠️ SVUOTA sta IN FONDO, e di proposito. Cancella tutto ciò che
+       * è stato scritto — minuti di lavoro — e non si annulla: in coda
+       * è la voce più difficile da selezionare per sbaglio. */
+      { kind: NodeKind.ACTION, id: 'a:repeat', label: 'LEGGI',    spoken: 'leggi',   action: 'SPEAK_KEEP' },
       { kind: NodeKind.ACTION, id: 'a:speak',  label: 'PARLA',    spoken: 'parla',   action: 'SPEAK' },
-      { kind: NodeKind.ACTION, id: 'a:repeat', label: 'RILEGGI',  spoken: 'rileggi', action: 'SPEAK_KEEP' },
       { kind: NodeKind.ACTION, id: 'a:save',   label: 'SALVA',    spoken: 'salva',   action: 'SAVE_DRAFT' },
       /* L'assistente compare solo se acceso in impostazioni: chi non
        * lo usa non deve trovarsi una voce in più nella scansione, che
-       * costa tempo a ogni giro. Sta qui, dopo RILEGGI, perché è
-       * un'altra cosa da fare con il testo appena scritto. */
+       * costa tempo a ogni giro. */
       ...(cfg?.assistente?.enabled
         ? [{ kind: NodeKind.ACTION, id: 'a:ai', label: 'CHIEDI',
              spoken: 'chiedi', action: 'ASK_AI' }]
@@ -62,13 +75,14 @@ export function buildTree(cfg, ctx = {}) {
       // passo di scansione viene troncato dall'annuncio successivo.
       { kind: NodeKind.ACTION, id: 'a:delc',   label: '⌫ lettera', spoken: 'lettera', action: 'DEL_CHAR' },
       { kind: NodeKind.ACTION, id: 'a:delw',   label: '⌫ parola',  spoken: 'parola',  action: 'DEL_WORD' },
-      { kind: NodeKind.ACTION, id: 'a:clear',  label: 'SVUOTA',    spoken: 'svuota',  action: 'CLEAR' },
       // Compare solo se richiesta esplicitamente: l'obiettivo è che la
       // correzione sia abbastanza affidabile da non doverla annullare.
       ...(cfg.prediction?.autoCorrectUndo
         ? [{ kind: NodeKind.ACTION, id: 'a:uncorr', label: 'ANNULLA CORREZIONE',
              spoken: 'annulla correzione', action: 'UNDO_CORRECT' }]
         : []),
+      // ⚠️ Ultima delle azioni: vedi sopra.
+      { kind: NodeKind.ACTION, id: 'a:clear',  label: 'SVUOTA',    spoken: 'svuota',  action: 'CLEAR' },
       // Niente PAUSA qui: ci sono già INDIETRO e MENU, e la pausa sta
       // nel menu principale dove si raggiunge in un passo.
       /* La voce MENU compare solo se richiesta.
@@ -89,9 +103,34 @@ export function buildTree(cfg, ctx = {}) {
     // due voci di servizio non vengono riascoltate a ogni carattere.
     if (showBack) kids.push(back('write'));
     kids.push(actionsNode());
+    /* ══════════════════════════════════════════════════════════════
+     * PROPOSTA DIRETTA DELLA PAROLA
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Ciò che fa chi assiste Daniela scorrendo i gruppi di lettere:
+     * quando intuisce la parola, la dice. Lei alza l'occhio e la parola
+     * è fatta.
+     *
+     * Le parole proposte stanno QUI, dove la scansione riparte dopo
+     * ogni lettera: la voce guida le dice per prime, e UN gesto basta a
+     * completarle — invece di due, entrare in "Suggerimenti" e poi
+     * scegliere. Se Daniela non le prende, la scansione prosegue sui
+     * gruppi di lettere come sempre, e alla lettera successiva la
+     * proposta si ricalcola.
+     *
+     * Compaiono solo quando una parola stacca nettamente le altre (la
+     * soglia è in impostazioni): una proposta sbagliata costa un passo
+     * di scansione a ogni lettera, e chi assiste non tira a indovinare.
+     * Mai dopo uno spazio: riguardano solo la parola in corso. */
+    const proposte = cfg.scan.suggerimentiDiretti ? (ctx.proposte || []) : [];
+    proposte.forEach((w, i) => kids.push({
+      kind: NodeKind.ACTION, id: `pw:${w}`, label: `▸ ${w}`, spoken: w,
+      action: 'WORD', payload: w, hot: i === 0,
+    }));
     if (cfg.scan.showSuggestions && ctx.suggestions?.length) {
       kids.push({
-        kind: NodeKind.GROUP, id: 'sugg', label: 'Suggerimenti', spoken: 'suggerimenti', hot: true,
+        kind: NodeKind.GROUP, id: 'sugg', label: 'Suggerimenti', spoken: 'suggerimenti',
+        hot: !proposte.length,
         children: [
           ...(showBack ? [back('sugg')] : []),
           ...ctx.suggestions.slice(0, cfg.scan.suggestionCount).map(w => ({
@@ -115,7 +154,8 @@ export function buildTree(cfg, ctx = {}) {
         : showBack ? [...letters, back(grp.id)] : letters;
       kids.push({
         kind: NodeKind.GROUP, id: grp.id, label: grp.label,
-        spoken: grp.spoken || grp.label, hot: !ctx.suggestions?.length && i === 0,
+        spoken: grp.spoken || grp.label,
+        hot: !(cfg.scan.showSuggestions && ctx.suggestions?.length) && !proposte.length && i === 0,
         children: kidsG,
       });
     });
@@ -466,7 +506,7 @@ export class ScanEngine {
       ...handlers,
     };
     this.timing = new AdaptiveTiming(cfg);
-    this.ctx = { suggestions: [], phrases: null };
+    this.ctx = { suggestions: [], proposte: [], phrases: null };
     this.tree = buildTree(cfg, this.ctx);
     this.stack = [];          // percorso: [{node, index}]
     this.paused = true;
@@ -503,7 +543,14 @@ export class ScanEngine {
    */
   setContext(ctx) {
     const next = { ...this.ctx, ...ctx };
-    const key = JSON.stringify([next.suggestions, next.phrases, next.mediaCommands, next.mediaLabel,
+    /* ⚠️ Le proposte dirette e i due interruttori dei suggerimenti
+     * fanno parte della chiave: altrimenti, cambiando solo la parola
+     * proposta, l'albero non verrebbe ricostruito e la voce guida
+     * continuerebbe a proporre la parola della lettera precedente. */
+    const key = JSON.stringify([next.suggestions, next.proposte || [],
+                                !!this.cfg.scan?.suggerimentiDiretti,
+                                this.cfg.scan?.showSuggestions !== false,
+                                next.phrases, next.mediaCommands, next.mediaLabel,
                                 (next.drafts || []).map(d => d.id + d.title), !!next.hasText,
                                 this.cfg.scan.phraseGroups,
                                 !!this.cfg.prediction?.autoCorrectUndo,
@@ -894,8 +941,17 @@ export class ScanEngine {
         break;
       case 'WORD': {
         // Il completamento sostituisce il prefisso già digitato.
+        /* ⚠️ Con le maiuscole di ciò che era stato digitato. Le lettere
+         * della scansione sono maiuscole, i suggerimenti arrivano dal
+         * lessico in minuscolo: senza questo, la frase diventava
+         * "MI GIRI SUL FIANCO sinistro" — a schermo, nei testi salvati
+         * e nelle lettere spedite. */
+        const digitato = this.buffer.letters.trim();
+        const tutteMaiuscole = digitato && digitato === digitato.toUpperCase()
+          && digitato !== digitato.toLowerCase();
+        const parola = tutteMaiuscole ? String(node.payload).toUpperCase() : node.payload;
         this.buffer.letters = '';
-        this.buffer.words.push(node.payload);
+        this.buffer.words.push(parola);
         this.stats.predictionHits++;
         this._afterCompose(now, true);
         break;

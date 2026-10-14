@@ -80,6 +80,8 @@ const INTERRUTTORI_CHE_APRONO = new Set([
   // Spegnendolo sparisce l'anteprima della lettera: senza ridisegno
   // resterebbe a schermo un esempio che non corrisponde più al vero.
   'email.formatta',
+  // Rivela il numero di parole proposte e la soglia di sicurezza.
+  'scan.suggerimentiDiretti',
   'radio.enabled',
   'domotica.enabled',
   'stampa.enabled',
@@ -639,6 +641,11 @@ export class SettingsView {
           P(['Oltre questo tempo non è un ammiccamento', 'Beyond this it is not a blink']),
           P(['Palpebra abbassata più a lungo di così: è sguardo in basso, non chiusura',
              'Lid held lower than this: it is looking down, not a closure']), 150, 2000, 50, ' ms'),
+        this._toggle('signal.blinkChiusuraMin',
+          P(['Riconosci la chiusura anche dal punto più stretto della rima',
+             'Also detect closure from the narrowest point of the lid opening']),
+          P(['⚠️ Serve con la TELECAMERA DI LATO. L\'apertura si misura come distanza MASSIMA fra tre coppie di punti palpebrali: è la scelta giusta per riconoscere l\'apertura, la peggiore per la chiusura, perché il massimo è dominato dalla coppia peggio stimata. Sull\'occhio LONTANO dalla telecamera, visto di scorcio e in parte coperto dal dorso del naso, alcune coppie vengono dedotte dal modello invece che viste e restano distanti: quell\'occhio non risulta mai chiuso da solo, mentre il vicino si chiude benissimo. Da qualunque lato stia la camera, soffre sempre l\'occhio lontano.\n\nAcceso, si guarda ANCHE il punto più stretto della rima, che ha un riferimento proprio. Può solo AGGIUNGERE chiusure, mai togliere. Spegnendolo si torna al comportamento precedente.',
+             '⚠️ Needed with a SIDE-MOUNTED camera. Openness is the MAXIMUM distance across three lid point pairs: right for detecting opening, worst for closure, because the maximum is dominated by the worst-estimated pair. On the eye FARTHER from the camera some pairs are inferred rather than seen and stay apart, so that eye never reads as closed on its own. On, the narrowest point is also considered, with its own reference. It can only ADD closures, never remove them.'])),
         this._range('signal.maxLatchMs',
           P(['Tempo massimo di aggancio', 'Maximum gesture latch time']),
           P(['Se un gesto resta attivo oltre questo tempo viene sciolto d\'ufficio, senza emettere nulla. Protegge dal caso in cui l\'occhio non torna del tutto al riposo: il segnale resterebbe sopra la soglia di rilascio per sempre e nessun gesto successivo verrebbe più riconosciuto. 0 = nessun limite.',
@@ -1101,7 +1108,7 @@ export class SettingsView {
        'For someone who communicates with a single movement, this is the difference between being able to SAY and being able to ASK.'])));
     righe.push(this._toggle('assistente.enabled',
       P(['Attiva l\'assistente', 'Enable the assistant']),
-      P(['Acceso, compare la voce CHIEDI fra le azioni della scrittura, dopo RILEGGI. ⚠️ Il testo NON viene svuotato dopo la domanda: se la risposta non arriva, chi ha impiegato minuti a scrivere non deve ricominciare.',
+      P(['Acceso, compare la voce CHIEDI fra le azioni della scrittura, dopo SALVA. ⚠️ Il testo NON viene svuotato dopo la domanda: se la risposta non arriva, chi ha impiegato minuti a scrivere non deve ricominciare.',
          'When on, a CHIEDI item appears among the writing actions.'])));
 
     if (cfg.assistente?.enabled) {
@@ -1748,9 +1755,9 @@ export class SettingsView {
            'Prevents "resuming" and the first item from overlapping']), 0, 3000, 100, ' ms'),
       this._number('scan.maxCycles', P(['Giri a vuoto', 'Empty cycles']),
         P(['Dopo N giri senza selezione il sistema va in pausa', 'After N cycles with no selection the system pauses']), 1, 10),
-      this._toggle('scan.showSuggestions', P(['Mostra suggerimenti', 'Show suggestions']),
-        P(['Completamenti come primo gruppo del ciclo', 'Completions as the first group of the cycle'])),
-      this._number('scan.suggestionCount', P(['Numero suggerimenti', 'Suggestion count']), null, 1, 8),
+      // I suggerimenti di parola stanno tutti insieme nella scheda
+      // "Predizione", sotto SUGGERIMENTI DI PAROLA: divisi fra due
+      // schede, chi installa non li trovava.
       this._number('scan.phraseCount', P(['Frasi rapide mostrate', 'Quick phrases shown']),
         P(['Meno frasi = ognuna si raggiunge prima', 'Fewer phrases = each is reached sooner']), 3, 30),
       this._number('scan.draftCount', P(['Testi nel menu', 'Texts in the menu']),
@@ -2171,6 +2178,41 @@ export class SettingsView {
       [
         this._toggle('prediction.enabled', P(['Predizione attiva', 'Prediction enabled']), null),
 
+        /* ══ SUGGERIMENTI DI PAROLA ══
+         * Tutti qui, in testa: prima erano divisi fra questa scheda e
+         * quella della scansione, e il numero di lettere stava in fondo,
+         * dopo otto controlli dell'autocorrezione. */
+        h('div', 'vb-testa', P(['SUGGERIMENTI DI PAROLA', 'WORD SUGGESTIONS'])),
+        h('p', 'sub', P(
+          ['Si ricalcolano a ogni lettera guardando TUTTA la frase già scritta: le parole che Daniela usa davvero, la parola e le due parole prima, l\'argomento della frase, e soprattutto le frasi che ha già detto o che la famiglia ha preparato — se ciò che sta scrivendo ne ricalca una, la parola che segue è la candidata più forte. Riguardano solo la parola in corso: dopo uno spazio non si propone nulla finché non comincia la parola nuova.',
+           'Recomputed at every letter from the WHOLE sentence written so far: the words Daniela actually uses, the previous one and two words, the topic of the sentence, and above all the sentences she has already said or the family has prepared. They only concern the word being written.'])),
+        this._number('prediction.minPrefixForWord',
+          P(['Lettere prima di suggerire', 'Letters before suggesting']),
+          P(['Da quante lettere della parola compaiono i suggerimenti. Poi continuano a ogni lettera in più — quarta, quinta, sesta — restringendosi. Con 2 si comincia presto ma le prime proposte sono più incerte; con 3 è più raro sbagliare.',
+             'From how many letters suggestions appear. They then continue at every additional letter, narrowing down.']), 1, 6),
+        this._toggle('scan.showSuggestions',
+          P(['Gruppo "Suggerimenti" nella scansione', '"Suggestions" group in scanning']),
+          P(['Un gruppo con le parole più probabili, subito dopo AZIONI. Due gesti: uno per entrare, uno per scegliere.',
+             'A group with the most likely words, right after ACTIONS. Two gestures: one to enter, one to choose.'])),
+        this._number('scan.suggestionCount',
+          P(['Parole nel gruppo', 'Words in the group']),
+          P(['Meno parole = ognuna si raggiunge prima.', 'Fewer words = each is reached sooner.']), 1, 8),
+        this._toggle('scan.suggerimentiDiretti',
+          P(['Proposta a voce della parola (un gesto solo)', 'Spoken word proposal (single gesture)']),
+          P(['Come fa chi assiste scorrendo le lettere: quando intuisce la parola, la dice. Dopo ogni lettera la voce guida pronuncia per prima la parola più probabile; se Daniela la seleziona la parola è completata, con UN gesto. Se non la prende, si prosegue sulle lettere come sempre, e alla lettera successiva la proposta si ricalcola. Compare solo quando una parola stacca nettamente le altre.',
+             'Like a helper scanning the letters: when they guess the word, they say it. After every letter the guide voice first speaks the most likely word; selecting it completes the word with ONE gesture. Otherwise scanning continues as usual and the proposal is recomputed at the next letter.'])),
+        ...(cfg.scan.suggerimentiDiretti ? [
+          this._number('scan.suggerimentiDirettiN',
+            P(['Parole proposte a voce', 'Words proposed aloud']),
+            P(['Ognuna costa un passo di scansione dopo ogni lettera. Una è quasi sempre la scelta giusta.',
+               'Each one costs a scan step after every letter. One is almost always right.']), 1, 3),
+          this._range('scan.suggerimentiDirettiSoglia',
+            P(['Sicurezza richiesta per proporre', 'Confidence required to propose']),
+            P(['Quanto la parola deve staccare le alternative. 0 = propone sempre, anche tirando a indovinare. 0,35 = solo quando è netta, come "sinistro" dopo "mi giri sul fianco" o "sete" dopo "ho". Più alta = proposte più rare e più sicure. Una proposta sbagliata costa un passo per ogni lettera; una mancata costa le lettere che restano.',
+               'How far the word must stand out from the alternatives. 0 = always propose. 0.35 = only when clear. Higher = rarer but safer proposals.']),
+            0, 0.9, 0.05),
+        ] : []),
+
         // ── Autocorrezione ──
         this._toggle('prediction.autoCorrect',
           P(['Autocorrezione', 'Autocorrection']),
@@ -2209,7 +2251,6 @@ export class SettingsView {
         this._range('prediction.corpusWeight', P(['Peso corpus generale', 'General corpus weight']), null, 0, 1, 0.05),
         this._number('prediction.recencyHalfLifeDays', P(['Emivita recenza', 'Recency half-life']),
           P(['Giorni dopo i quali un uso pesa la metà', 'Days after which one use counts half']), 1, 365),
-        this._number('prediction.minPrefixForWord', P(['Lettere prima di suggerire', 'Letters before suggesting']), null, 1, 6),
         this._toggle('prediction.reorderLetters', P(['Riordino dinamico', 'Dynamic reordering']),
           P(['Spento di default: riordinare a ogni lettera distrugge la memoria motoria costruita in mesi. Accenderlo solo con misure alla mano.',
              'Off by default: reordering on every letter destroys motor memory built over months. Turn it on only with measurements in hand.'])),

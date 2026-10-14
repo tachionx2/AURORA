@@ -310,15 +310,41 @@ export class RgbTracker {
        * alto. Se le coppie non ci sono, si ricade sulla misura di
        * sempre senza cambiare nulla. */
       let lidGap = Math.hypot(upper.x - lower.x, upper.y - lower.y);
+      /* ⚠️ E la distanza MINIMA fra le stesse coppie, per il solo
+       * riconoscimento della CHIUSURA. Due statistiche per due lavori
+       * diversi, dagli stessi tre punti e senza alcun costo in più.
+       *
+       * Il massimo è giusto per l'APERTURA — lo spiega il commento
+       * sopra — ed è la peggiore scelta possibile per la chiusura,
+       * perché è dominato dalla coppia peggio stimata: basta UNA
+       * coppia sbagliata perché l'apertura misurata non arrivi mai a
+       * zero, e l'occhio non risulti mai chiuso.
+       *
+       * È ciò che accade all'occhio LONTANO quando la telecamera è di
+       * lato: visto di scorcio e in parte coperto dal dorso del naso,
+       * alcune coppie vengono dedotte dal modello invece che viste, e
+       * restano distanti. L'occhio vicino si chiude benissimo, il
+       * lontano no — ed è sempre il lontano, da qualunque lato stia la
+       * telecamera.
+       *
+       * Il minimo non ha quel difetto: se la palpebra è davvero
+       * abbassata, il punto più stretto della rima lo è per primo.
+       *
+       * ⚠️ `openness` NON cambia. Chi la usa oggi — il canale di
+       * apertura, la taratura automatica, le statistiche — continua a
+       * ricevere esattamente lo stesso numero di prima. */
+      let lidMin = lidGap;
       if (Array.isArray(M.coppie)) {
         for (const [su, giu] of M.coppie) {
           const a2 = P(su), b2 = P(giu);
           if (!a2 || !b2) continue;
           const d2 = Math.hypot(a2.x - b2.x, a2.y - b2.y);
           if (d2 > lidGap) lidGap = d2;
+          if (d2 < lidMin) lidMin = d2;
         }
       }
       const openness = lidGap / eyeWidth;
+      const opennessMin = lidMin / eyeWidth;
 
       // Raggio dell'iride, dai soli punti del PERIMETRO.
       // ⚠️ Il primo indice (468 / 473) è il CENTRO dell'iride, non un
@@ -484,6 +510,10 @@ export class RgbTracker {
 
       out[side] = {
         x: nx, y: ny, openness, confidence,
+        /* Seconda statistica della rima, usata SOLO dal riconoscimento
+         * della chiusura. Vedi il commento sopra: `openness` resta la
+         * misura di sempre per tutto il resto. */
+        opennessMin,
         px: {
           iris: { x: ix, y: iy }, inner, outer, upper, lower,
           eyeWidth, irisRadius: rmax,

@@ -87,8 +87,20 @@ global.localStorage = { _d:{}, getItem(k){return this._d[k]??null}, setItem(k,v)
 Object.defineProperty(global,'navigator',{ value:{
   mediaDevices:{ enumerateDevices:async()=>[], getUserMedia:async()=>{throw new Error('nessuna camera')} },
 }, configurable:true });
-global.performance = { now: () => CLOCK };
+/* `markResourceTiming` è chiamato dall'implementazione interna di
+ * `fetch` di Node: senza, una richiesta che riceve risposta fa cadere
+ * l'intero processo invece di un singolo test. */
+global.performance = { now: () => CLOCK, markResourceTiming() {} };
 global.confirm = () => false;
+/* ⚠️ NESSUNA RETE REALE durante la simulazione.
+ *
+ * Il 14 ottobre questa suite ha smesso di funzionare senza che fosse
+ * cambiata una riga del programma: una richiesta di rete fatta durante
+ * il test, che prima falliva subito perché la rete non c'era, ha
+ * cominciato a ricevere risposta. Un test che dipende dalla rete del
+ * momento non dice nulla sul programma. Chi ha bisogno di una risposta
+ * sostituisce `fetch` con la propria, come già fanno i test della posta. */
+globalThis.fetch = async () => { throw new Error('rete assente nella simulazione'); };
 
 // In Node non si possono importare moduli via https: MediaPipe e pdf.js
 // falliscono, ed è atteso. Si registrano invece di far rumore, e si

@@ -3513,5 +3513,453 @@ function corri(mod, script) {
   ok(spento.length === 0, '65h. e a canale spento non emette nulla');
 }
 
+/* ══════════ 66. I DUE OCCHI SONO INDIPENDENTI ══════════
+ *
+ * ⚠️ Difetto misurato e corretto: un solo booleano `sostenuto`, acceso
+ * se UNO QUALUNQUE dei due occhi aveva la palpebra abbassata a lungo,
+ * annullava la raffica di ENTRAMBI. Abbassando la palpebra sinistra —
+ * uno sguardo in basso, cosa normalissima — l'ammiccamento appena
+ * fatto con l'occhio destro veniva cancellato, e il comando non
+ * usciva. Un occhio spegneva l'altro.
+ *
+ * Tutta l'architettura del motore tiene le due catene separate; quello
+ * era l'unico punto in cui i due occhi si parlavano. Questi test
+ * esistono perché non torni. */
+{
+  const oc = (ap, cf = 0.9) => ({ x: 0, y: 0, openness: ap, confidence: cf });
+  // Palpebra abbassata nella fascia ambigua, iride poco visibile: è la
+  // condizione che il motore legge come "sguardo in basso".
+  const GIU = oc(0.12, 0.45);
+
+  /* ── 66a-b. La banda del grafico, occhio per occhio ── */
+  const bande = (apSx, apDx, cfSx = 0.9, cfDx = 0.9) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    for (let i = 0; i < 120; i++) { t += 20; g.process(t, { left: oc(0.30), right: oc(0.30) }); }
+    for (let i = 0; i < 50; i++) {
+      t += 20;
+      g.process(t, { left: oc(apSx, cfSx), right: oc(apDx, cfDx) });
+    }
+    const ch = g.channels();
+    return { sx: !!ch['left.blink']?.closed, dx: !!ch['right.blink']?.closed };
+  };
+
+  const soloDx = bande(0.30, 0.02);
+  ok(soloDx.dx === true && soloDx.sx === false,
+     '66a. chiudendo il solo occhio DESTRO, solo il destro risulta chiuso');
+  const soloSx = bande(0.02, 0.30);
+  ok(soloSx.sx === true && soloSx.dx === false,
+     '66b. chiudendo il solo occhio SINISTRO, solo il sinistro risulta chiuso');
+
+  /* ⚠️ L'esperimento che ha fatto emergere il difetto: un occhio
+   * chiuso mentre l'altro si socchiude progressivamente. Il verdetto
+   * sull'occhio chiuso non deve dipendere dall'altro in NESSUN punto
+   * della discesa. */
+  const scala = [0.30, 0.22, 0.15, 0.12, 0.10, 0.085, 0.075, 0.04, 0.02];
+  const dipendenze = scala.filter(apSx => bande(apSx, 0.02).dx !== true);
+  ok(dipendenze.length === 0,
+     `66c. l occhio destro chiuso resta chiuso a qualunque apertura del sinistro`
+     + ` (falliti a: ${dipendenze.join(', ') || 'nessuno'})`);
+  const dipendenze2 = scala.filter(apDx => bande(0.02, apDx).sx !== true);
+  ok(dipendenze2.length === 0,
+     `66d. e viceversa (falliti a: ${dipendenze2.join(', ') || 'nessuno'})`);
+
+  /* ── 66e-g. L'ammiccamento di un occhio sopravvive alla palpebra
+   *          dell'altro ── */
+  const ammicca = (sinistroGiu) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.gestures.BLINK.enabled = true;
+    const ev = [];
+    const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const dai = (ms, L, R) => { for (let i = 0; i < ms; i += 20) { t += 20; g.process(t, { left: L, right: R }); } };
+    dai(2400, oc(0.30), oc(0.30));
+    const sx = sinistroGiu ? GIU : oc(0.30);
+    dai(200, sx, oc(0.30));
+    dai(160, sx, oc(0.02));      // il DESTRO ammicca
+    dai(1400, sx, oc(0.30));     // e nel frattempo il sinistro supera i 500 ms
+    return { single: g.burst.right.stats.single,
+             eventi: ev.filter(e => /BLINK/.test(e.channel)).length };
+  };
+  const libero = ammicca(false);
+  const conGiu = ammicca(true);
+  ok(libero.single === 1 && libero.eventi === 1,
+     '66e. l ammiccamento dell occhio destro viene contato ed emesso');
+  ok(conGiu.single === libero.single,
+     `66f. e NON sparisce se la palpebra sinistra è abbassata`
+     + ` (${libero.single} → ${conGiu.single})`);
+  ok(conGiu.eventi === libero.eventi,
+     `66g. il comando esce comunque: una palpebra non spegne l altro occhio`
+     + ` (${libero.eventi} → ${conGiu.eventi})`);
+
+  /* ── 66h. ⚠️ Ma la protezione ORIGINALE deve reggere ──
+   * Una palpebra che scende e RESTA giù non è un ammiccamento, e il
+   * suo impulso va annullato: sullo STESSO occhio. Rendere i due
+   * occhi indipendenti non deve aver spento questa difesa. */
+  const fantasma = (() => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.gestures.BLINK.enabled = true;
+    const ev = [];
+    const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const dai = (ms, L, R) => { for (let i = 0; i < ms; i += 20) { t += 20; g.process(t, { left: L, right: R }); } };
+    dai(2400, oc(0.30), oc(0.30));
+    dai(2000, oc(0.30), GIU);    // il DESTRO guarda in basso e ci resta
+    dai(600, oc(0.30), oc(0.30));
+    return { dx: g.burst.right.stats.single, sx: g.burst.left.stats.single,
+             annullate: g.counters.burstAborted,
+             eventi: ev.filter(e => /BLINK/.test(e.channel)).length };
+  })();
+  ok(fantasma.dx === 0 && fantasma.eventi === 0,
+     '66h. uno sguardo in basso non diventa un ammiccamento: la difesa regge');
+  ok(fantasma.annullate >= 1,
+     '66i. e l annullamento viene contato, così in diagnostica si capisce dov è finita');
+  ok(fantasma.sx === 0,
+     '66l. mentre l occhio sinistro, che non ha fatto nulla, resta a zero');
+
+  /* ── 66m. La chiusura prolungata di un occhio non cancella
+   *          l ammiccamento dell altro ── */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.gestures.BLINK.enabled = true;
+    c.gestures.LONG_CLOSE.enabled = true;
+    c.gestures.LONG_CLOSE.dwellMs = 600;
+    const ev = [];
+    const g = new GestureEngine(c, e => ev.push(e));
+    let t = 0;
+    const dai = (ms, L, R) => { for (let i = 0; i < ms; i += 20) { t += 20; g.process(t, { left: L, right: R }); } };
+    dai(2400, oc(0.30), oc(0.30));
+    // Il SINISTRO resta chiuso a lungo; il DESTRO ammicca nel mezzo.
+    dai(400, oc(0.02), oc(0.30));
+    dai(160, oc(0.02), oc(0.02));
+    dai(1400, oc(0.02), oc(0.30));
+    ok(g.burst.right.stats.single === 1,
+       `66m. l ammiccamento del destro sopravvive alla chiusura prolungata del sinistro`
+       + ` (contati ${g.burst.right.stats.single})`);
+  }
+
+  /* ── 66p. ⚠️ IL RIFERIMENTO NON DEVE COLLASSARE ──
+   *
+   * Difetto misurato: la protezione del riferimento copriva solo
+   * l'occhio giudicato CHIUSO. Un occhio la cui apertura, da chiuso,
+   * resta appena SOPRA la soglia veniva letto come "sguardo in basso"
+   * e i suoi campioni continuavano ad alimentare il riferimento: in
+   * sei secondi scendeva da 0,300 a 0,085, e con lui scendevano la
+   * soglia di chiusura E quella di ammiccamento. Quell'occhio non
+   * poteva più risultare chiuso né ammiccare — un blocco che si
+   * autoalimenta e che non si sblocca riaprendo l'occhio.
+   *
+   * ⚠️ Il timer che difende il riferimento deve essere INDIPENDENTE
+   * dai verdetti: riusare `tSottoSoglia` non funziona, perché lo
+   * smentimento lo azzera proprio nel caso che conta. */
+  {
+    const { BlinkDetector } = await import('../js/signal/filters.js');
+    const tieniChiuso = (apChiuso, secondi) => {
+      const d = new BlinkDetector(0.55, 0.08, 300);
+      let t = 0;
+      for (let i = 0; i < 200; i++) { t += 20; d.update(0.30, t, 0.9); }
+      const rifIniziale = d.openRef;
+      for (let s = 0; s < secondi; s++)
+        for (let i = 0; i < 50; i++) { t += 20; d.update(apChiuso, t, 0.9); }
+      return { rifIniziale, rifFinale: d.openRef, soglia: d.sogliaChiusura, d };
+    };
+
+    const a = tieniChiuso(0.085, 12);
+    ok(Math.abs(a.rifFinale - a.rifIniziale) < 0.01,
+       `66p. palpebra giù 12 s appena sopra la soglia: il riferimento NON collassa`
+       + ` (${a.rifIniziale.toFixed(3)} → ${a.rifFinale.toFixed(3)})`);
+    const b = tieniChiuso(0.110, 12);
+    ok(Math.abs(b.rifFinale - b.rifIniziale) < 0.01,
+       `66q. e nemmeno più in alto nella fascia (${b.rifIniziale.toFixed(3)} → ${b.rifFinale.toFixed(3)})`);
+    ok(b.soglia > 0.07,
+       `66r. quindi la soglia di chiusura resta utilizzabile (${b.soglia.toFixed(4)})`);
+
+    /* ⚠️ Ma un occhio DAVVERO chiuso deve restare chiuso per tutta la
+     * durata: è il difetto opposto, già corretto in passato, e non
+     * deve tornare. Tenere un occhio chiuso dieci secondi deve
+     * risultare dieci secondi, non mezzo. */
+    const c = tieniChiuso(0.02, 12);
+    let chiusoAllaFine = null;
+    { let t = 0; const d = c.d; chiusoAllaFine = d.update(0.02, 1e6, 0.9); }
+    ok(chiusoAllaFine.closed === true,
+       '66s. un occhio davvero chiuso resta chiuso anche dopo dodici secondi');
+    ok(Math.abs(c.rifFinale - c.rifIniziale) < 0.01,
+       '66t. e il suo riferimento resta ancorato a com era da aperto');
+
+    /* ⚠️ La calibrazione iniziale non deve essere bloccata dalla nuova
+     * difesa: un occhio che parte socchiuso deve comunque riuscire a
+     * costruirsi un riferimento, altrimenti non avrebbe mai una
+     * soglia e non potrebbe essere giudicato affatto. */
+    const stretto = new BlinkDetector(0.55, 0.08, 300);
+    let ts = 0;
+    for (let i = 0; i < 200; i++) { ts += 20; stretto.update(0.11, ts, 0.9); }
+    ok(stretto.calibrated && stretto.openRef > 0.10,
+       `66u. un occhio sempre socchiuso si calibra comunque (ref ${String(stretto.openRef?.toFixed(3))})`);
+  }
+
+  /* ── 66v. LA CATENA INTERA, ESEGUITA ──
+   *
+   * ⚠️ I test sopra provano il motore. Questo prova tutto il percorso
+   * che porta alla BANDA del grafico: motore → channels() → scelta
+   * delle bande → fotogramma che il grafico riceve. È lì che si
+   * sospettava una dipendenza fra i due occhi, e va verificata
+   * eseguendo, non leggendo. */
+  {
+    const { BLINK_STYLE } = await import('../js/vision/VisionPipeline.js');
+
+    /* Replica della scelta delle bande fatta da App.activeTraces(). */
+    const bandeScelte = (cfg) => {
+      const chosen = cfg.ui.plotTraces;
+      if (chosen && chosen.length) return chosen.filter(id => id in BLINK_STYLE);
+      const gg = cfg.gestures;
+      const act = cfg.detection.activeEye;
+      const eyes = act === 'both' ? ['left', 'right'] : [act];
+      const blinkOn = gg.BLINK?.enabled || gg.DOUBLE_BLINK?.enabled
+                   || gg.TRIPLE_BLINK?.enabled || gg.LONG_CLOSE?.enabled;
+      return blinkOn ? eyes.map(e => `${e}.blink`) : [];
+    };
+
+    const disegnate = (apSx, apDx) => {
+      const c = deepClone(DEFAULT_CONFIG);
+      c.gestures.LONG_CLOSE.enabled = true;
+      const g = new GestureEngine(c, () => {});
+      let t = 0;
+      for (let i = 0; i < 150; i++) { t += 20; g.process(t, { left: oc(0.30), right: oc(0.30) }); }
+      for (let i = 0; i < 100; i++) { t += 20; g.process(t, { left: oc(apSx), right: oc(apDx) }); }
+      // ⚠️ Esattamente ciò che main.js spinge nel grafico.
+      const ch = g.channels();
+      const blink = {};
+      for (const id of Object.keys(BLINK_STYLE)) blink[id] = !!ch[id]?.closed;
+      return bandeScelte(c).filter(id => blink[id]);
+    };
+
+    const soloD = disegnate(0.30, 0.02);
+    ok(soloD.length === 1 && soloD[0] === 'right.blink',
+       `66v. chiuso il solo DESTRO, il grafico accende solo la banda destra`
+       + ` (accese: ${soloD.join(', ') || 'nessuna'})`);
+    const soloS = disegnate(0.02, 0.30);
+    ok(soloS.length === 1 && soloS[0] === 'left.blink',
+       `66z. chiuso il solo SINISTRO, solo la banda sinistra`
+       + ` (accese: ${soloS.join(', ') || 'nessuna'})`);
+    const due = disegnate(0.02, 0.02);
+    ok(due.length === 2, '66z1. chiusi entrambi, entrambe le bande');
+
+    /* ⚠️ Dipendenza da CONFIGURAZIONE, non fra occhi, ma va saputa:
+     * a tutti i canali di palpebra spenti il grafico non chiede
+     * nessuna banda, e non se ne accende alcuna. */
+    const c2 = deepClone(DEFAULT_CONFIG);
+    ok(bandeScelte(c2).length === 0,
+       '66z2. a canali palpebra spenti non viene chiesta alcuna banda: è la configurazione, non gli occhi');
+    c2.gestures.LONG_CLOSE.enabled = true;
+    ok(bandeScelte(c2).length === 2,
+       '66z3. accendendone uno, vengono chieste entrambe le bande');
+  }
+
+  /* ══════ 67. TELECAMERA DI LATO: L'OCCHIO LONTANO ══════
+   *
+   * ⚠️ Difetto reale, osservato in campo. Con la telecamera DI LATO
+   * l'occhio vicino riconosce la chiusura perfettamente, il LONTANO
+   * no — e risulta chiuso solo chiudendo anche il vicino. Da
+   * qualunque lato stia la camera, soffre sempre il lontano.
+   *
+   * Causa: `openness` è la distanza MASSIMA fra tre coppie di punti
+   * palpebrali. Giusto per riconoscere l'APERTURA (lo dice il
+   * commento in RgbTracker), pessimo per la CHIUSURA, perché il
+   * massimo è dominato dalla coppia peggio stimata. Sull'occhio visto
+   * di scorcio e in parte coperto dal dorso del naso, alcune coppie
+   * vengono dedotte dal modello invece che viste e restano distanti:
+   * basta UNA coppia così perché l'apertura non arrivi mai a zero.
+   *
+   * Il legame con l'altro occhio sta nell'adattamento globale della
+   * maglia facciale di MediaPipe, non nel nostro codice (verificato:
+   * vedi la sezione 66).
+   *
+   * Rimedio: due statistiche per due lavori diversi. Il massimo
+   * continua a servire l'apertura, il minimo serve la chiusura. */
+  {
+    const { BlinkDetector } = await import('../js/signal/filters.js');
+
+    /* Occhio lontano: da aperto la rima misura 0.30 al punto largo e
+     * 0.18 al più stretto. Da chiuso il massimo resta inchiodato a
+     * 0.11 per una coppia dedotta male, il minimo collassa a 0.02. */
+    const lontano = (apChiuso, minChiuso, cf = 0.9, usaMin = true) => {
+      const d = new BlinkDetector(0.55, 0.08, 300);
+      d.usaMin = usaMin;
+      let t = 0;
+      for (let i = 0; i < 200; i++) { t += 20; d.update(0.30, t, 0.9, 0.18); }
+      let r = null;
+      for (let i = 0; i < 100; i++) { t += 20; r = d.update(apChiuso, t, cf, minChiuso); }
+      return { r, d };
+    };
+
+    ok(lontano(0.110, 0.020).r.closed === true,
+       '67a. occhio lontano chiuso: riconosciuto, anche se il massimo resta a 0.110');
+    ok(lontano(0.110, 0.020).r.daMinimo === true,
+       '67b. ed è il secondo criterio a riconoscerlo, non il primo');
+
+    /* ⚠️ LA PROVA CHE CONTA PIÙ DI TUTTE.
+     *
+     * Alzando molto lo sguardo la palpebra superiore stringe la rima.
+     * Se il secondo criterio dichiarasse chiusura, il campione
+     * verrebbe invalidato e l'UNICO comando di Daniela — occhio
+     * sinistro in alto — sparirebbe proprio mentre lo esegue.
+     *
+     * La difesa è la stessa dell'altro criterio: iride ancora ben
+     * visibile e minimo non troppo basso ⇒ non è chiusura. */
+    ok(lontano(0.150, 0.100, 0.97).r.closed === false,
+       '67c. ⚠️ sguardo in ALTO con iride visibile: NESSUNA chiusura');
+    ok(lontano(0.120, 0.080, 0.97).r.closed === false,
+       '67d. ⚠️ nemmeno con lo sguardo molto alzato: il gesto SU resta intatto');
+
+    /* ⚠️ Il secondo criterio richiede che il segnale PRINCIPALE
+     * concordi che la palpebra è giù. Senza questa condizione, un solo
+     * punto palpebrale mal stimato basterebbe a dichiarare chiuso un
+     * occhio spalancato — il difetto opposto, e peggiore. */
+    ok(lontano(0.300, 0.015).r.closed === false,
+       '67e. occhio SPALANCATO con un punto fasullo: nessuna chiusura inventata');
+
+    /* Additivo: ciò che funzionava continua a funzionare. */
+    ok(lontano(0.020, 0.010).r.closed === true,
+       '67f. una chiusura vera resta riconosciuta');
+    ok(lontano(0.110, undefined).r.closed === false,
+       '67g. senza il nuovo valore (infrarosso, profili vecchi) nulla cambia');
+    ok(lontano(0.110, 0.020, 0.9, false).r.closed === false,
+       '67h. e spegnendo l interruttore si torna al comportamento precedente');
+
+    /* Il riferimento del minimo è PROPRIO, non quello del massimo:
+     * riusare l altra soglia non avrebbe senso di scala. */
+    const { d } = lontano(0.110, 0.020);
+    ok(d.openRefMin > 0.15 && d.openRefMin < 0.21,
+       `67i. il minimo ha un riferimento proprio (${d.openRefMin?.toFixed(3)}, atteso ~0.18)`);
+    ok(d.openRef > 0.28,
+       `67l. e quello del massimo resta il suo (${d.openRef?.toFixed(3)}, atteso ~0.30)`);
+
+    /* ⚠️ E il riferimento del minimo va difeso come l altro: una
+     * chiusura prolungata non deve farlo collassare, altrimenti si
+     * ricrea il blocco corretto nella sezione 66p. */
+    const lungo = (() => {
+      const dd = new BlinkDetector(0.55, 0.08, 300);
+      let t = 0;
+      for (let i = 0; i < 200; i++) { t += 20; dd.update(0.30, t, 0.9, 0.18); }
+      const prima = dd.openRefMin;
+      for (let i = 0; i < 600; i++) { t += 20; dd.update(0.110, t, 0.9, 0.020); }
+      return { prima, dopo: dd.openRefMin, ultimo: dd.update(0.110, t + 20, 0.9, 0.020) };
+    })();
+    ok(Math.abs(lungo.dopo - lungo.prima) < 0.01,
+       `67m. chiusura di 12 s: il riferimento del minimo non collassa`
+       + ` (${lungo.prima?.toFixed(3)} → ${lungo.dopo?.toFixed(3)})`);
+    ok(lungo.ultimo.closed === true,
+       '67n. e dopo dodici secondi l occhio è ancora riconosciuto chiuso');
+
+    /* Default e diagnostica. */
+    ok(DEFAULT_CONFIG.signal.blinkChiusuraMin === true,
+       '67o. acceso di default: una camera davanti al volto coprirebbe lo schermo');
+    const g67 = new GestureEngine(deepClone(DEFAULT_CONFIG), () => {});
+    let t67 = 0;
+    for (let i = 0; i < 120; i++) {
+      t67 += 20;
+      g67.process(t67, {
+        left:  { x: 0, y: 0, openness: 0.30, confidence: 0.9, opennessMin: 0.18 },
+        right: { x: 0, y: 0, openness: 0.30, confidence: 0.9, opennessMin: 0.18 },
+      });
+    }
+    ok(g67.channels()['right.blink'].sogliaChiusuraMin != null,
+       '67p. la soglia del secondo criterio è visibile in diagnostica');
+
+    /* ⚠️ Indipendenza, di nuovo: il criterio nuovo non deve
+     * reintrodurre alcun legame fra i due occhi. */
+    const occhioMin = (ap, min) => ({ x: 0, y: 0, openness: ap, confidence: 0.9, opennessMin: min });
+    const bandeMin = (apSx, minSx, apDx, minDx) => {
+      const g = new GestureEngine(deepClone(DEFAULT_CONFIG), () => {});
+      let tt = 0;
+      for (let i = 0; i < 200; i++) { tt += 20; g.process(tt, { left: occhioMin(0.30, 0.18), right: occhioMin(0.30, 0.18) }); }
+      for (let i = 0; i < 100; i++) { tt += 20; g.process(tt, { left: occhioMin(apSx, minSx), right: occhioMin(apDx, minDx) }); }
+      const ch = g.channels();
+      return { sx: !!ch['left.blink'].closed, dx: !!ch['right.blink'].closed };
+    };
+    const soloLontano = bandeMin(0.30, 0.18, 0.110, 0.020);
+    ok(soloLontano.dx === true && soloLontano.sx === false,
+       '67q. chiuso il solo occhio lontano, risulta chiuso SOLO lui');
+    const soloVicino = bandeMin(0.020, 0.010, 0.30, 0.18);
+    ok(soloVicino.sx === true && soloVicino.dx === false,
+       '67r. e viceversa: nessun nuovo legame fra i due occhi');
+  }
+
+  /* ══════ 68. LE DIFESE NON DEVONO DIVENTARE TRAPPOLE ══════
+   *
+   * ⚠️ Autocritica messa in forma di test. La protezione del
+   * riferimento (sezione 66p) era stata scritta senza via d'uscita: se
+   * l'apertura di riposo cala per davvero e in modo PERMANENTE —
+   * telecamera spostata o inclinata, persona che si allontana, luce
+   * diversa — nessun campione viene più accettato, il riferimento
+   * resta congelato in alto PER SEMPRE e quell'occhio diventa
+   * inutilizzabile senza che nulla si possa fare.
+   *
+   * Una difesa senza uscita è un guasto peggiore di quello che evita. */
+  {
+    const { BlinkDetector } = await import('../js/signal/filters.js');
+
+    const spostaTelecamera = () => {
+      const d = new BlinkDetector(0.55, 0.08, 300);
+      let t = 0;
+      for (let i = 0; i < 200; i++) { t += 20; d.update(0.30, t, 0.9); }
+      const prima = d.openRef;
+      // La telecamera si sposta: da ora l'occhio APERTO misura 0.12.
+      for (let i = 0; i < 4000; i++) { t += 20; d.update(0.12, t, 0.9); }
+      return { prima, dopo: d.openRef };
+    };
+    const sp = spostaTelecamera();
+    ok(sp.dopo < 0.16,
+       `68a. telecamera spostata: il riferimento si RIADATTA invece di restare congelato`
+       + ` (${sp.prima.toFixed(3)} → ${sp.dopo.toFixed(3)})`);
+
+    /* ⚠️ Ma la protezione che conta resta assoluta: un occhio DAVVERO
+     * chiuso non deve mai collassare il proprio riferimento, per
+     * quanto a lungo resti chiuso. È il difetto originale, e la via
+     * d'uscita non deve averlo riaperto. */
+    const chiusoPerSempre = (() => {
+      const d = new BlinkDetector(0.55, 0.08, 300);
+      let t = 0;
+      for (let i = 0; i < 200; i++) { t += 20; d.update(0.30, t, 0.9); }
+      for (let i = 0; i < 3000; i++) { t += 20; d.update(0.02, t, 0.9); }   // 60 s
+      return { ref: d.openRef, r: d.update(0.02, t + 20, 0.9) };
+    })();
+    ok(chiusoPerSempre.ref > 0.28,
+       `68b. occhio chiuso per sessanta secondi: riferimento intatto`
+       + ` (${chiusoPerSempre.ref.toFixed(3)})`);
+    ok(chiusoPerSempre.r.closed === true,
+       '68c. e ancora riconosciuto chiuso: la via d uscita non riapre il difetto originale');
+
+    /* ⚠️ Seconda autocritica. Annullando su LONG_CLOSE solo gli occhi
+     * con `chiuso === true`, un occhio i cui campioni vengono scartati
+     * — cosa che accade tipicamente PROPRIO perché è chiuso e l'iride
+     * non si vede più — risultava `null`, non veniva annullato, e un
+     * impulso appartenente a quella stessa chiusura poteva uscire come
+     * ammiccamento subito dopo. In dubbio si annulla. */
+    const src68 = (await import('node:fs')).readFileSync(
+      (await import('node:path')).join(
+        (await import('node:path')).dirname(import.meta.filename || process.argv[1]),
+        '..', 'js/signal/GestureEngine.js'), 'utf8');
+    ok(/if \(chiuso\[e\] !== false\) this\.burst\[e\]\?\.annulla/.test(src68),
+       '68d. su chiusura prolungata si annulla anche l occhio di stato ignoto, non solo quello certo');
+  }
+
+  /* ── 66n. I numeri che spiegano il perché, in diagnostica ── */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const g = new GestureEngine(c, () => {});
+    let t = 0;
+    for (let i = 0; i < 120; i++) { t += 20; g.process(t, { left: oc(0.30), right: oc(0.22) }); }
+    const ch = g.channels();
+    const b = ch['right.blink'];
+    ok(typeof b.apertura === 'number' && typeof b.sogliaChiusura === 'number',
+       '66n. la diagnostica espone apertura e soglia di chiusura per ciascun occhio');
+    ok(ch['left.blink'].sogliaChiusura !== undefined
+       && ch['right.blink'].sogliaChiusura !== undefined,
+       '66o. per entrambi: è il confronto fra i due che spiega un occhio che non si chiude');
+  }
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

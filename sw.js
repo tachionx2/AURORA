@@ -15,7 +15,7 @@
  * inviati altrove.
  */
 
-const VERSION = 'aurora-20260918-1600';
+const VERSION = 'aurora-20261014-0900';
 const APP_CACHE = `${VERSION}-app`;
 const CDN_CACHE = `${VERSION}-cdn`;
 
@@ -32,6 +32,8 @@ const APP_SHELL = [
   './js/scan/ScanEngine.js',
   './js/lang/Predictor.js',
   './js/lang/seed-it.js',
+  // Vocabolario dei suggerimenti: senza, offline i suggerimenti tacciono.
+  './js/lang/vocabolario-it.js',
   './js/audio/AudioDirector.js',
   './js/vision/FrameSource.js',
   './js/vision/RgbTracker.js',

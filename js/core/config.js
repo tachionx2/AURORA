@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 45;
+export const CONFIG_VERSION = 46;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -602,6 +602,24 @@ export const DEFAULT_CONFIG = {
      * ammiccamento fantasma all'inizio di ogni gesto. */
     blinkSmentiVelocita: 1.8,
     blinkSustainedMs: 500,       // oltre: non è un ammiccamento
+    /* ── Secondo criterio di chiusura: il punto più STRETTO della rima ──
+     *
+     * ⚠️ Serve con la telecamera DI LATO. L'apertura palpebrale si
+     * misura come distanza MASSIMA fra tre coppie di punti: giusto per
+     * riconoscere l'apertura, pessimo per la chiusura, perché il
+     * massimo è dominato dalla coppia peggio stimata. Sull'occhio
+     * LONTANO, visto di scorcio e in parte coperto dal dorso del naso,
+     * alcune coppie vengono dedotte dal modello invece che viste e
+     * restano distanti: quell'occhio non risulta mai chiuso, mentre il
+     * vicino si chiude benissimo. Da qualunque lato stia la camera, è
+     * sempre l'occhio lontano a soffrirne.
+     *
+     * Acceso, si guarda ANCHE il punto più stretto della rima, che ha
+     * un riferimento proprio. Può solo AGGIUNGERE chiusure, mai
+     * togliere: nulla di ciò che funziona oggi cambia.
+     *
+     * Spegnendolo si torna esattamente al comportamento precedente. */
+    blinkChiusuraMin: true,
 
     // ── Soglie e guadagni PER DIREZIONE ──
     // null = eredita il valore globale. Servono perché le quattro
@@ -758,6 +776,18 @@ export const DEFAULT_CONFIG = {
     groups: DEFAULT_GROUPS,
     showSuggestions: true,
     suggestionCount: 4,
+    /* ── Proposta diretta della parola ──
+     * La voce guida dice la parola più probabile subito dopo ogni
+     * lettera, come farebbe chi assiste: un gesto la completa. Spenta
+     * di default: cambia ciò che si sente dopo ogni lettera, e chi è
+     * abituato al giro attuale deve sceglierla.
+     *   N      quante parole proporre (1–3): ognuna costa un passo.
+     *   soglia quanto la parola deve staccare le rivali per essere
+     *          proposta, fra 0 e 1. 0 = sempre; 0,35 = solo quando è
+     *          netta, come "sinistro" dopo "mi giri sul fianco". */
+    suggerimentiDiretti: false,
+    suggerimentiDirettiN: 1,
+    suggerimentiDirettiSoglia: 0.35,
     phraseCount: 12,
     // Gruppi di frasi. Vuoto = elenco unico, ordinato dalle statistiche.
     phraseGroups: DEFAULT_PHRASE_GROUPS,
@@ -1372,6 +1402,13 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 46 && c.signal && c.signal.blinkChiusuraMin === undefined) {
+    /* ⚠️ Acceso anche nei profili esistenti: può solo aggiungere
+     * chiusure, mai togliere, e serve a chi ha la telecamera di lato —
+     * cioè quasi tutti, perché una camera davanti al volto copre lo
+     * schermo. Resta un interruttore per tornare indietro. */
+    c.signal.blinkChiusuraMin = true;
+  }
   if (v < 45 && c.email && c.email.formatta === undefined) {
     /* ⚠️ Acceso anche nei profili esistenti: è ciò che chi usa Aurora
      * vuole quasi sempre, e resta un interruttore a portata di mano

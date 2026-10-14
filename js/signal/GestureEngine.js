@@ -516,7 +516,7 @@ export class GestureEngine {
         s.blinkRatio, s.blinkFloor, s.blinkDiscriminate, s.blinkSustainedMs,
         s.blinkAutoCalibrate ? null : s.blinkLidThreshold, s.blinkClosedRatio,
         s.blinkRichiedeIride, s.blinkSogliaIride, s.blinkSmentiSopra,
-        s.blinkSmentiVelocita);
+        s.blinkSmentiVelocita, s.blinkChiusuraMin);
     }
     for (const eye of ['left', 'right'])
       this.burst[eye].configure(g.blinkBurstMs, g.blinkMinPulseMs, g.blinkMaxPulseMs);
@@ -585,7 +585,19 @@ export class GestureEngine {
     // Contato una volta per FOTOGRAMMA, non una per occhio: con due
     // occhi la percentuale mostrata in diagnostica arrivava al 200%.
     let almenoUnoValido = false;
-    let sostenuto = false;
+    /* ⚠️ PER OCCHIO, non uno per tutti.
+     *
+     * Era un solo booleano, acceso se UNO QUALUNQUE dei due occhi
+     * aveva la palpebra abbassata a lungo — e annullava la raffica di
+     * ENTRAMBI. Conseguenza misurata: abbassando la palpebra sinistra
+     * (uno sguardo in basso, cosa normalissima), l'ammiccamento appena
+     * fatto con l'occhio destro veniva cancellato e il comando non
+     * usciva. Un occhio spegneva l'altro.
+     *
+     * Le due palpebre sono indipendenti e devono restare tali: tutta
+     * l'architettura del motore è costruita così, questo era l'unico
+     * punto in cui i due occhi si parlavano. */
+    const sostenuto = { left: false, right: false };
     // Stato per occhio. `null` significa "non so": campione assente o
     // scartato. Non è "aperto", e non deve chiudere un impulso in corso.
     const chiuso = { left: null, right: null };
@@ -620,9 +632,14 @@ export class GestureEngine {
       // ⚠️ La confidenza dice se l'iride si vede ancora: distingue un
       // ammiccamento vero da un'apertura che si stringe perché lo
       // sguardo è andato in alto.
-      const bstat = this.blink[eye].update(o.openness, t, o.confidence);
+      /* ⚠️ Il quarto valore è il punto più STRETTO della rima, usato
+       * solo per riconoscere la chiusura dell'occhio LONTANO quando la
+       * telecamera è di lato. Assente — modalità infrarossa, profili
+       * vecchi, rilevatore che non lo fornisce — tutto si comporta
+       * esattamente come prima. */
+      const bstat = this.blink[eye].update(o.openness, t, o.confidence, o.opennessMin);
       const closed = bstat.closed;
-      if (bstat.parziale) sostenuto = true;
+      if (bstat.parziale) sostenuto[eye] = true;
       if (eye === 'left') this.counters.validiLeft++; else this.counters.validiRight++;
       chiuso[eye] = closed;
       if (closed) {
@@ -1353,15 +1370,22 @@ export class GestureEngine {
    * @returns le raffiche completate in questo fotogramma, per occhio
    */
   _contaBlink(t, chiuso, sostenuto) {
-    // Un abbassamento sostenuto non è un ammiccamento: si annulla
-    // l'impulso in corso, ma solo sul FRONTE, altrimenti un occhio
-    // stabilmente nella fascia ambigua azzererebbe tutto a ogni
-    // fotogramma.
-    if (sostenuto && !this._sostenutoPrec) {
-      this.counters.burstAborted++;
-      for (const eye of ['left', 'right']) this.burst[eye].annulla();
+    /* Un abbassamento sostenuto non è un ammiccamento: si annulla
+     * l'impulso in corso, ma solo sul FRONTE, altrimenti un occhio
+     * stabilmente nella fascia ambigua azzererebbe tutto a ogni
+     * fotogramma.
+     *
+     * ⚠️ E si annulla SOLO l'occhio che ha la palpebra abbassata.
+     * Annullando entrambi, la palpebra di un occhio cancellava
+     * l'ammiccamento appena fatto con l'altro — comando compreso. */
+    this._sostenutoPrec = this._sostenutoPrec || { left: false, right: false };
+    for (const eye of ['left', 'right']) {
+      if (sostenuto[eye] && !this._sostenutoPrec[eye]) {
+        this.counters.burstAborted++;
+        this.burst[eye].annulla();
+      }
+      this._sostenutoPrec[eye] = sostenuto[eye];
     }
-    this._sostenutoPrec = sostenuto;
 
     const fatte = {};
     for (const eye of ['left', 'right']) {
@@ -1503,8 +1527,23 @@ export class GestureEngine {
     if (soloRisveglio && c.action !== 'WAKE' && c.action !== 'TOGGLE_PAUSE') return;
 
     this._cl.emesso = true;
-    /* L'ammiccamento non deve scattare per la stessa chiusura. */
-    for (const e of ['left', 'right']) this.burst[e]?.annulla?.();
+    /* L'ammiccamento non deve scattare per la stessa chiusura.
+     *
+     * ⚠️ Si annullano SOLO gli occhi che NON sono certamente aperti.
+     * Prima si annullavano entrambi: tenendo chiuso un occhio solo —
+     * che è il modo in cui questo canale viene usato — l'ammiccamento
+     * fatto nel frattempo con l'altro occhio spariva insieme al suo
+     * comando.
+     *
+     * ⚠️ `null` significa "non so": campione scartato, cosa che accade
+     * tipicamente PROPRIO perché l'occhio è chiuso e l'iride non si
+     * vede più. Trattarlo come aperto lascerebbe sopravvivere un
+     * impulso appartenente a questa stessa chiusura, che uscirebbe
+     * come ammiccamento subito dopo. In dubbio si annulla: è la
+     * prudenza che c'era prima, e la si conserva. */
+    for (const e of ['left', 'right']) {
+      if (chiuso[e] !== false) this.burst[e]?.annulla?.();
+    }
     this._emit(t, 'LONG_CLOSE', c.action, { durMs });
   }
 
@@ -1624,6 +1663,21 @@ export class GestureEngine {
         closed: !this.eyes[eye].y.valid,
         openRef: this.blink[eye].openRef,
         threshold: this.blink[eye].threshold,
+        /* ⚠️ Questi due numeri, affiancati, dicono in un colpo d'occhio
+         * PERCHÉ un occhio non risulta chiuso.
+         *
+         * Un occhio è dichiarato chiuso solo se l'apertura scende sotto
+         * la soglia di chiusura; fra quella soglia e la soglia di
+         * ammiccamento sta la fascia che viene letta come "sguardo in
+         * basso", cioè occhio APERTO. Un occhio che da chiuso misura
+         * ancora più della propria soglia resta lì per sempre, e dal
+         * grafico sembra un difetto del rilevamento mentre è solo una
+         * soglia troppo bassa per quell'occhio. */
+        apertura: this.blink[eye].ultimaApertura,
+        sogliaChiusura: this.blink[eye].sogliaChiusura,
+        /* Soglia del secondo criterio, quello del punto più stretto
+         * della rima: `null` quando è spento o non ancora calibrato. */
+        sogliaChiusuraMin: this.blink[eye].sogliaChiusuraMin,
       };
     }
     // Canali del viso: presenti solo se attivi, così il grafico non si
