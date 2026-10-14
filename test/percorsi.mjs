@@ -2013,9 +2013,17 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(!sicura.suggerimenti.includes('sinistro'),
        '71n. e non ripetuta nel gruppo Suggerimenti');
 
+    // Predefinito: si propone SEMPRE la migliore, appena c'è un
+    // suggerimento. Prima compariva "solo ogni tanto".
+    const sempreDefault = scegliSuggerimenti(p, { letters: 'ME', words: [] }, c);
+    ok(sempreDefault.proposte.length === 1,
+       '71o. di default la proposta a voce c è SEMPRE, appena ci sono suggerimenti');
+    ok(DEFAULT_CONFIG.scan.suggerimentiDirettiSoglia === 0, '71o2. soglia predefinita 0');
+    // Alzando la soglia si propone solo quando una parola è netta.
+    c.scan.suggerimentiDirettiSoglia = 0.35;
     const incerta = scegliSuggerimenti(p, { letters: 'ME', words: [] }, c);
     ok(incerta.proposte.length === 0,
-       '71o. parola incerta: NESSUNA proposta — chi assiste non tira a indovinare');
+       '71o3. con soglia alzata, parola incerta: nessuna proposta');
     ok(incerta.suggerimenti.length > 0, '71p. ma il gruppo Suggerimenti resta disponibile');
 
     c.scan.suggerimentiDirettiSoglia = 0;
@@ -2038,12 +2046,17 @@ function buildTreeFor(b){ return b.eng.tree; }
     cfg71.prediction.minPrefixForWord = 2;
     const p = new P71(cfg71);
     for (let i = 0; i < 4; i++) p.learnSentence('mi giri sul fianco sinistro per favore');
-    const eng = new ScanEngine(cfg71, { onOutput: () => {} });
+    const annunci = [];
+    /* ⚠️ Come nel programma: il contesto si aggiorna DENTRO la scelta
+     * della lettera (onBuffer), prima che la scansione si riposizioni. */
+    const eng = new ScanEngine(cfg71, {
+      onOutput: () => {}, onBuffer: () => ctx(), onAnnounce: (n) => annunci.push(n),
+    });
     let T = 0;
-    const ctx = () => {
+    function ctx() {
       const { proposte, suggerimenti } = scegliSuggerimenti(p, eng.buffer, cfg71);
       eng.setContext({ suggestions: suggerimenti, proposte, hasText: true });
-    };
+    }
     eng.start(T); ctx();
     const gesto = (lab) => {
       for (let i = 0; i < 4000; i++) {
@@ -2063,26 +2076,55 @@ function buildTreeFor(b){ return b.eng.tree; }
     lettera('s');
     ok(eng.currentNode?.label !== '▸ sinistro',
        '71t. con una lettera sola (sotto il minimo) nessuna proposta');
+    annunci.length = 0;
     lettera('i');
-    ok(eng.currentNode?.label === '▸ sinistro',
-       `71u. dopo "si" la PRIMA voce annunciata è la parola proposta (${eng.currentNode?.label})`);
-    ok(eng.currentNode?.spoken === 'sinistro',
-       '71v. e la voce guida dice la parola, non un\'etichetta');
+    ok(eng.currentNode?.label === '▸ sinistro' && eng.parolaProposta === 'sinistro',
+       `71u. dopo "si" la voce corrente è la parola proposta (${eng.currentNode?.label})`);
+    ok(annunci[annunci.length - 1]?.spoken === 'sinistro',
+       '71v. ed è ciò che la voce guida dice, subito dopo la lettera');
+    /* ⚠️ NON è una voce dell'elenco: è detta a voce e mostrata in
+     * corsivo nella barra, ma non occupa un posto nella sequenza. */
+    const elenco = eng.level.node.children.map(c => c.label);
+    ok(!elenco.some(l => /sinistro/.test(l)),
+       `71v2. la parola proposta non è nell elenco della sequenza (${elenco.join(' · ')})`);
+    ok(eng.snapshot().proposta === 'sinistro',
+       '71v3. lo stato per lo schermo la riporta, per il corsivo nella barra');
+    ok(eng.level.node.children[eng.level.index]?.label === 'Suggerimenti',
+       '71v4. e dietro la proposta la sequenza è già pronta su Suggerimenti');
 
-    /* ⚠️ Daniela NON la prende: continua a scrivere. Alla lettera
-     * successiva la proposta si ricalcola. */
-    T += 25; eng.tick(T); T += 2500; eng.tick(T);     // la scansione va oltre
+    /* ⚠️ Daniela NON la prende: dopo UN passo la proposta finisce e si
+     * prosegue da Suggerimenti (ci sono, visto che c'è una proposta). */
+    T += eng.stepCorrente + 10; eng.tick(T);
+    ok(!eng.parolaProposta && eng.currentNode?.label === 'Suggerimenti',
+       `71z. lasciata passare, dopo un passo si prosegue da SUGGERIMENTI (${eng.currentNode?.label})`);
+    ok(eng.snapshot().proposta === null, '71z0. e il corsivo sparisce');
+
     lettera('n');
     ok(eng.buffer.letters === 'SIN',
-       '71z. ignorando la proposta si continua a scrivere lettera per lettera');
-    ok(eng.currentNode?.label === '▸ sinistro',
-       '71z1. e alla lettera successiva la proposta ricompare, ricalcolata');
+       '71z1. ignorando la proposta si continua a scrivere lettera per lettera');
+    ok(eng.parolaProposta === 'sinistro',
+       '71z1b. e alla lettera successiva la proposta ricompare, ricalcolata');
 
-    ok(gesto('▸ sinistro'), '71z2. UN gesto la seleziona');
+    // Questa volta Daniela la prende, nel passo in cui viene detta.
+    eng.select(T); ctx();
     ok(eng.buffer.words[eng.buffer.words.length - 1] === 'SINISTRO',
-       `71z3. la parola è completata, con le maiuscole di ciò che era digitato (${eng.buffer.words.join(' ')})`);
-    ok(eng.buffer.letters === '' && !(eng.ctx.proposte || []).length,
-       '71z4. dopo la parola, nessuna proposta: con lo spazio si ricomincia');
+       `71z3. UN gesto la completa, con le maiuscole di ciò che era digitato (${eng.buffer.words.join(' ')})`);
+    ok(eng.buffer.letters === '' && !eng.parolaProposta,
+       '71z4. dopo la parola, nessuna proposta: si comincia la successiva');
+    ok(eng.currentNode?.label === 'AZIONI',
+       `71z4b. e la sequenza riparte dalle AZIONI, come dopo uno spazio (${eng.currentNode?.label})`);
+
+    // Il gesto "avanti" durante la proposta va a Suggerimenti, non oltre.
+    lettera('p'); lettera('e');
+    if (eng.parolaProposta) {
+      eng.handleAction('NEXT', T);
+      ok(!eng.parolaProposta && eng.currentNode?.label === 'Suggerimenti',
+         `71z4c. "avanti" sulla proposta porta a Suggerimenti, non lo salta (${eng.currentNode?.label})`);
+    } else ok(true, '71z4c. (nessuna proposta per "pe": nulla da verificare)');
+
+    // Mai dopo uno spazio.
+    lettera(' ');
+    ok(!eng.parolaProposta, '71z4d. dopo uno spazio nessuna proposta');
   }
 
   /* ── g. ⚠️ L'importa-e-unisci delle statistiche non perde il contesto ── */
@@ -2177,6 +2219,181 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(/CC BY-SA 4\.0|Creative Commons Attribution-ShareAlike 4\.0/.test(voc) && /wordfreq/.test(voc),
        '71z16. il file del vocabolario dichiara provenienza e licenza');
   }
+}
+
+/* ══════ 72. DA DOVE RIPARTE LA SEQUENZA, DENTRO SCRIVI ══════
+ *
+ * Deciso sul campo, caso per caso. Misurato prima della correzione:
+ * cinque casi su otto atterravano su "← ESCI" — due passi sprecati a
+ * ogni uscita, e il rischio di uscire da Scrivi per sbaglio — oppure su
+ * "Suggerimenti" o su AZIONI quando si stava scrivendo. */
+{
+  const { Predictor: P72, scegliSuggerimenti: sc72 } = await import('../js/lang/Predictor.js');
+  const banco72 = () => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.prediction.minPrefixForWord = 2;
+    const pred = new P72(c);
+    for (let i = 0; i < 3; i++) pred.learnSentence('ho sete per favore');
+    let eng;
+    // Come nel programma: il contesto si aggiorna DENTRO la scelta.
+    function ctx() {
+      const { proposte, suggerimenti } = sc72(pred, eng.buffer, c);
+      eng.setContext({ suggestions: suggerimenti, proposte,
+                       hasText: !!(eng.buffer.words.length || eng.buffer.letters) });
+    }
+    eng = new ScanEngine(c, { onOutput: () => {}, onBuffer: () => ctx() });
+    let T = 0;
+    eng.start(T); ctx();
+    const gesto = (lab) => {
+      for (let i = 0; i < 4000; i++) {
+        ctx();
+        if (eng.currentNode?.label === lab) { eng.select(T); ctx(); return true; }
+        T += 25; eng.tick(T);
+      }
+      return false;
+    };
+    return { eng, gesto };
+  };
+  const qui = (b) => b.eng.currentNode?.label;
+
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S');
+    ok(qui(b) === 'Vocali', `72a. lettera scelta → gruppo 1 (${qui(b)})`); }
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('← ESCI');
+    ok(qui(b) === 'Vocali', `72b. ESCI da un gruppo di lettere → gruppo 1, non ESCI (${qui(b)})`); }
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
+    ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === 'Suggerimenti',
+       `72c. lettera scelta CON suggerimenti presenti → Suggerimenti, per sceglierli subito (${qui(b)})`); }
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
+    b.gesto('R–Q'); b.gesto('← ESCI');
+    ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === 'Suggerimenti',
+       `72c2. ESCI da un gruppo di lettere CON suggerimenti → Suggerimenti (${qui(b)})`); }
+  { const b = banco72(); b.eng.loadText('ciao', 0); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('LEGGI');
+    ok(qui(b) === 'AZIONI', `72d. azione scelta → di nuovo AZIONI (${qui(b)})`); }
+  { const b = banco72(); b.eng.loadText('ciao', 0); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('← ESCI');
+    ok(qui(b) === 'AZIONI', `72e. ESCI da AZIONI → AZIONI, non ESCI (${qui(b)})`); }
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
+    b.gesto('Suggerimenti'); b.gesto('← ESCI');
+    ok(qui(b) === 'Suggerimenti', `72f. ESCI da Suggerimenti → di nuovo Suggerimenti, non ESCI (${qui(b)})`); }
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
+    b.gesto('Suggerimenti');
+    const w = b.eng.level.node.children.find(c => c.action === 'WORD')?.label;
+    b.gesto(w);
+    ok(qui(b) === 'AZIONI' && b.eng.buffer.letters === '',
+       `72g. parola scelta dai Suggerimenti → inserita, e AZIONI come dopo uno spazio (${qui(b)})`); }
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('␣');
+    ok(qui(b) === 'AZIONI', `72h. SPAZIO → AZIONI, come deciso in passato (${qui(b)})`); }
+
+  /* L'uscita automatica dopo i giri a vuoto segue la stessa regola. */
+  { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q');
+    let T = 1e6; for (let i = 0; i < 4000 && b.eng.level.node.id !== 'write'; i++) { T += 25; b.eng.tick(T); }
+    ok(qui(b) === 'Vocali', `72i. uscita automatica da un gruppo di lettere → gruppo 1 (${qui(b)})`); }
+
+  /* Nelle ALTRE sezioni non cambia nulla: si torna alla prima voce. */
+  { const b = banco72(); b.gesto('Frasi'); b.gesto('← ESCI');
+    ok(b.eng.level.node === b.eng.tree && b.eng.level.index === 0,
+       '72l. fuori da Scrivi l uscita resta quella di sempre'); }
+
+  /* ⚠️ La posizione si conserva per VOCE, non per numero: quando il
+   * gruppo Suggerimenti compare o sparisce il cursore non deve
+   * slittare sulla voce accanto. */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    const e = new ScanEngine(c, { onOutput: () => {} });
+    e.start(0); e.setContext({ suggestions: [], hasText: true });
+    const w = e.tree.children.findIndex(x => x.id === 'write');
+    e.stack.push({ node: e.tree.children[w], index: 0 });
+    e.level.index = e.level.node.children.findIndex(x => x.label === 'Vocali');
+    e.setContext({ suggestions: ['sete', 'sempre'], hasText: true });
+    const dopo1 = e.currentNode?.label;
+    e.setContext({ suggestions: [], hasText: true });
+    ok(dopo1 === 'Vocali' && e.currentNode?.label === 'Vocali',
+       `72m. compaiono o spariscono i suggerimenti: il cursore resta su Vocali (${dopo1}, ${e.currentNode?.label})`);
+  }
+
+  /* ── La finestra di grazia vale anche per la proposta a voce ── */
+  {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.prediction.minPrefixForWord = 2;
+    c.scan.suggerimentiDiretti = true;
+    c.scan.graceMs = 600;
+    const pred = new P72(c);
+    for (let i = 0; i < 4; i++) pred.learnSentence('mi giri sul fianco sinistro per favore');
+    let e;
+    function ctx() { const r = sc72(pred, e.buffer, c); e.setContext({ suggestions: r.suggerimenti, proposte: r.proposte, hasText: true }); }
+    e = new ScanEngine(c, { onOutput: () => {}, onBuffer: () => ctx() });
+    let T = 0; e.start(T); ctx();
+    e.loadText('mi giri sul fianco', T);
+    /* Con la finestra di grazia accesa, selezionare nell'istante in cui
+     * arriva una voce sceglierebbe la PRECEDENTE (è il suo scopo). Qui si
+     * seleziona dopo la finestra, come farebbe chi ha deciso con calma. */
+    const gesto = (lab) => { for (let i = 0; i < 4000; i++) { ctx(); if (e.currentNode?.label === lab) { T += c.scan.graceMs + 50; e.select(T); ctx(); return true; } T += 25; e.tick(T); } return false; };
+    gesto('Scrivi'); gesto('R–Q'); gesto('S'); gesto('Vocali'); gesto('I');
+    ok(e.parolaProposta === 'sinistro', '72n. proposta pronta');
+    T += e.stepCorrente + 10; e.tick(T);           // la proposta scade
+    ok(!e.parolaProposta && e.currentNode?.label === 'Suggerimenti',
+       `72o. scaduta, si prosegue da Suggerimenti (${e.currentNode?.label})`);
+    T += 200; e.select(T); ctx();                  // gesto appena dopo
+    ok(e.buffer.words.includes('SINISTRO'),
+       `72p. un gesto appena dopo la parola prende la PAROLA, non la voce dopo (${e.buffer.words.join(' ')})`);
+    ok(e.currentNode?.label === 'AZIONI',
+       `72q. parola presa dalla proposta a voce → AZIONI, come dopo uno spazio (${e.currentNode?.label})`);
+    /* Senza suggerimenti (prima delle lettere minime) si riparte dal gruppo 1. */
+    gesto('R–Q'); gesto('S');
+    ok(!e.parolaProposta && e.currentNode?.label === 'Vocali',
+       `72r. una sola lettera, nessun suggerimento → gruppo 1 (${e.currentNode?.label})`);
+  }
+}
+
+/* ══════ 73. ACCORDO GRAMMATICALE NEI SUGGERIMENTI ══════
+ *
+ * Prima il suggeritore ignorava la grammatica: "le ca…" proponeva
+ * "caldo", "dei fi…" proponeva "fine", sempre la stessa lista
+ * qualunque fosse l articolo. */
+{
+  const { Predictor: P73 } = await import('../js/lang/Predictor.js');
+  const c = deepClone(DEFAULT_CONFIG);
+  c.prediction.minPrefixForWord = 2;
+  const p = new P73(c);
+  const top = (prima, pre, n = 4) => p.suggerisci({ prefisso: pre, parole: [prima], n }).map(s => s.parola);
+
+  ok(top('la', 'ca')[0] === 'casa', `73a. "la ca…" → casa per prima (${top('la', 'ca').join(', ')})`);
+  ok(top('i', 'ca')[0] === 'casi', `73b. "i ca…" → casi (${top('i', 'ca').join(', ')})`);
+  ok(top('dei', 'fi')[0] === 'figli', `73c. "dei fi…" → figli (${top('dei', 'fi').join(', ')})`);
+  ok(top('un', 'bo')[0] === 'bordo' && top('una', 'bo')[0] === 'bocca',
+     '73d. "un bo…" → bordo, "una bo…" → bocca: il genere cambia la proposta');
+  ok(top('della', 'ma').slice(0, 2).includes('mamma'), '73e. "della ma…" → mamma fra le prime');
+  ok(top('noi', 'an').slice(0, 2).includes('andiamo'), '73f. "noi an…" → andiamo fra le prime');
+  // Eccezioni: non devono essere penalizzate.
+  ok(top('la', 'ra').includes('radio'), '73g. "la radio": femminile in -o, non penalizzato');
+  ok(top('il', 'pro').includes('problema'), '73h. "il problema": maschile in -a, non penalizzato');
+  // ⚠️ "la" è anche un pronome: "la voglio" deve restare possibile.
+  ok(top('la', 'vo').includes('voglio'), '73i. "la voglio": il pronome non viene penalizzato');
+  // Un articolo non introduce una preposizione.
+  ok(!top('questa', 'se').includes('senza'), '73l. "questa se…" non propone "senza"');
+  // Un infinito non è un femminile plurale.
+  ok(!top('delle', 'ca').slice(0, 2).some(w => /are$|ere$|ire$/.test(w)),
+     `73m. "delle ca…" non propone un infinito per primo (${top('delle', 'ca').join(', ')})`);
+
+  /* ⚠️ Ciò che Daniela dice davvero pesa più della grammatica: una sua
+   * coppia di parole non viene schiacciata dal fattore d accordo. */
+  for (let i = 0; i < 3; i++) p.learnSentence('mi giri sul fianco sinistro');
+  const ctx = p.suggerisci({ prefisso: 'si', parole: ['mi', 'giri', 'sul', 'fianco'], n: 1 })[0];
+  ok(ctx?.parola === 'sinistro', '73n. il contesto personale resta più forte dell accordo');
+}
+
+/* ══════ 74. MIGRAZIONE DELLA SOGLIA DI PROPOSTA ══════ */
+{
+  const { migrateConfig } = await import('../js/core/config.js');
+  const vecchio = deepClone(DEFAULT_CONFIG);
+  vecchio.version = 46;
+  vecchio.scan.suggerimentiDirettiSoglia = 0.35;
+  ok(migrateConfig(vecchio).scan.suggerimentiDirettiSoglia === 0,
+     '74a. chi aveva il vecchio valore predefinito passa a "proponi sempre"');
+  const scelto = deepClone(DEFAULT_CONFIG);
+  scelto.version = 46;
+  scelto.scan.suggerimentiDirettiSoglia = 0.5;
+  ok(migrateConfig(scelto).scan.suggerimentiDirettiSoglia === 0.5,
+     '74b. una soglia scelta a mano resta com era');
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

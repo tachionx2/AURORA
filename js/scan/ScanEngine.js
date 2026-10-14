@@ -103,34 +103,18 @@ export function buildTree(cfg, ctx = {}) {
     // due voci di servizio non vengono riascoltate a ogni carattere.
     if (showBack) kids.push(back('write'));
     kids.push(actionsNode());
-    /* ══════════════════════════════════════════════════════════════
-     * PROPOSTA DIRETTA DELLA PAROLA
-     * ══════════════════════════════════════════════════════════════
+    /* ⚠️ La proposta a voce della parola NON è una voce di questo
+     * elenco: è un passo a sé, gestito dal motore (vedi `proposta`),
+     * detto a voce e mostrato in corsivo nella barra di scrittura.
      *
-     * Ciò che fa chi assiste Daniela scorrendo i gruppi di lettere:
-     * quando intuisce la parola, la dice. Lei alza l'occhio e la parola
-     * è fatta.
-     *
-     * Le parole proposte stanno QUI, dove la scansione riparte dopo
-     * ogni lettera: la voce guida le dice per prime, e UN gesto basta a
-     * completarle — invece di due, entrare in "Suggerimenti" e poi
-     * scegliere. Se Daniela non le prende, la scansione prosegue sui
-     * gruppi di lettere come sempre, e alla lettera successiva la
-     * proposta si ricalcola.
-     *
-     * Compaiono solo quando una parola stacca nettamente le altre (la
-     * soglia è in impostazioni): una proposta sbagliata costa un passo
-     * di scansione a ogni lettera, e chi assiste non tira a indovinare.
-     * Mai dopo uno spazio: riguardano solo la parola in corso. */
-    const proposte = cfg.scan.suggerimentiDiretti ? (ctx.proposte || []) : [];
-    proposte.forEach((w, i) => kids.push({
-      kind: NodeKind.ACTION, id: `pw:${w}`, label: `▸ ${w}`, spoken: w,
-      action: 'WORD', payload: w, hot: i === 0,
-    }));
+     * ⚠️ Quando ci sono, "Suggerimenti" È il punto di ripartenza dopo
+     * una lettera (`hot`, e viene prima del gruppo 1): così si possono
+     * scegliere subito. Senza suggerimenti si riparte dal gruppo 1.
+     * Deciso sul campo. */
     if (cfg.scan.showSuggestions && ctx.suggestions?.length) {
       kids.push({
         kind: NodeKind.GROUP, id: 'sugg', label: 'Suggerimenti', spoken: 'suggerimenti',
-        hot: !proposte.length,
+        hot: true,
         children: [
           ...(showBack ? [back('sugg')] : []),
           ...ctx.suggestions.slice(0, cfg.scan.suggestionCount).map(w => ({
@@ -155,7 +139,7 @@ export function buildTree(cfg, ctx = {}) {
       kids.push({
         kind: NodeKind.GROUP, id: grp.id, label: grp.label,
         spoken: grp.spoken || grp.label,
-        hot: !(cfg.scan.showSuggestions && ctx.suggestions?.length) && !proposte.length && i === 0,
+        hot: i === 0,
         children: kidsG,
       });
     });
@@ -543,10 +527,10 @@ export class ScanEngine {
    */
   setContext(ctx) {
     const next = { ...this.ctx, ...ctx };
-    /* ⚠️ Le proposte dirette e i due interruttori dei suggerimenti
-     * fanno parte della chiave: altrimenti, cambiando solo la parola
-     * proposta, l'albero non verrebbe ricostruito e la voce guida
-     * continuerebbe a proporre la parola della lettera precedente. */
+    /* ⚠️ Le proposte a voce fanno parte della chiave pur non stando
+     * nell'elenco: se cambiasse solo la parola proposta e non il resto,
+     * il contesto non verrebbe aggiornato e la voce guida proporrebbe
+     * la parola della lettera precedente. */
     const key = JSON.stringify([next.suggestions, next.proposte || [],
                                 !!this.cfg.scan?.suggerimentiDiretti,
                                 this.cfg.scan?.showSuggestions !== false,
@@ -581,7 +565,15 @@ export class ScanEngine {
 
   /** Ricostruisce l'albero preservando percorso e posizione correnti. */
   rebuild() {
-    const frames = this.stack.map(f => ({ id: f.node.id, index: f.index, label: f.node.label }));
+    /* ⚠️ Si ricorda QUALE voce era sotto il cursore, non solo il suo
+     * numero. Quando il gruppo "Suggerimenti" compare o sparisce, i
+     * numeri delle voci successive cambiano: conservando il numero, il
+     * cursore slittava sulla voce accanto — da "Vocali" a "R–Q" dopo un
+     * annulla — senza che nessuno l'avesse chiesto. */
+    const frames = this.stack.map(f => ({
+      id: f.node.id, index: f.index, label: f.node.label,
+      corrente: f.node.children?.[f.index]?.id ?? null,
+    }));
     this.tree = buildTree(this.cfg, this.ctx);
     const newStack = [{ node: this.tree, index: 0 }];
     for (let i = 1; i < frames.length; i++) {
@@ -593,8 +585,13 @@ export class ScanEngine {
     // Ripristina gli indici, limitandoli alla nuova dimensione del livello:
     // il gruppo suggerimenti può comparire o sparire e cambiare i conteggi.
     for (let i = 0; i < newStack.length; i++) {
-      const n = newStack[i].node.children?.length || 0;
-      if (n > 0) newStack[i].index = Math.min(frames[i]?.index ?? 0, n - 1);
+      const figli = newStack[i].node.children || [];
+      const n = figli.length;
+      if (n === 0) continue;
+      // Prima la stessa voce, ovunque sia finita; se non esiste più, il
+      // numero di prima, limitato alla nuova lunghezza.
+      const j = frames[i]?.corrente != null ? figli.findIndex(c => c.id === frames[i].corrente) : -1;
+      newStack[i].index = j >= 0 ? j : Math.min(frames[i]?.index ?? 0, n - 1);
     }
     this.stack = newStack;
   }
@@ -633,8 +630,59 @@ export class ScanEngine {
     return this.cfg.scan.enterDelayMs || 0;
   }
   get currentNode() {
+    /* ══════════════════════════════════════════════════════════════
+     * LA PROPOSTA A VOCE È UNA VOCE SENZA POSTO NELL'ELENCO
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Per un passo di scansione la voce corrente è la parola proposta:
+     * la voce guida la dice, lo schermo la mostra in corsivo nella
+     * barra di scrittura, e un gesto la completa — esattamente come
+     * qualunque altra voce, con la stessa finestra di grazia e la
+     * stessa durata. Ma non occupa una posizione nell'elenco: allo
+     * scadere del passo la scansione prosegue dal punto di ripartenza
+     * (Suggerimenti, o il gruppo 1 se non ce ne sono) come se la
+     * proposta non ci fosse stata.
+     *
+     * Costruita qui, e non come figlio dell'albero, perché è ciò che
+     * fa chi assiste: dice la parola, non la aggiunge alla lista. */
+    const pr = this.proposta;
+    if (pr && pr.lista[pr.i]) {
+      const w = pr.lista[pr.i];
+      return { kind: NodeKind.ACTION, id: `proposta:${w}`, label: `▸ ${w}`,
+               spoken: w, action: 'WORD', payload: w, proposta: true };
+    }
     const l = this.level;
     return l?.node.children?.[l.index] ?? null;
+  }
+
+  /** Parola proposta in questo momento, o null. Per lo schermo. */
+  get parolaProposta() {
+    const pr = this.proposta;
+    return pr && pr.lista[pr.i] ? pr.lista[pr.i] : null;
+  }
+
+  /** Chiude la proposta senza annunciare nulla. */
+  _chiudiProposta() { this.proposta = null; }
+
+  /**
+   * Passa alla proposta successiva, o al punto di ripartenza
+   * (Suggerimenti, o il gruppo 1) se erano finite.
+   *
+   * Chiamato allo scadere del passo e dal gesto "avanti". Registra il
+   * passaggio come un avanzamento, così la finestra di grazia vale
+   * anche qui: chi alza l'occhio un attimo dopo che la parola è stata
+   * detta, sceglie la parola e non la voce successiva.
+   */
+  _avanzaProposta(now) {
+    const pr = this.proposta;
+    if (!pr) return;
+    this._propostaPrecedente = pr.lista[pr.i];
+    this._tFineProposta = now;
+    pr.i++;
+    if (pr.i >= pr.lista.length) this.proposta = null;
+    this.lastStepAt = now;
+    this._announce(now);
+    this._pushState();
   }
   get depth() { return this.stack.length; }
 
@@ -647,8 +695,11 @@ export class ScanEngine {
       path: this.stack.map(f => f.node.label),
       levelLabel: l?.node.label ?? '',
       items: l?.node.children?.map(c => c.label) ?? [],
+      // Durante la proposta `index` è la voce che verrà DOPO (il punto di
+      // ripartenza): chi disegna l'elenco la mostra come "prossima".
       index: l?.index ?? 0,
       current: this.currentNode?.label ?? '',
+      proposta: this.parolaProposta,
       buffer: { ...this.buffer },
       stepMs: this.stepCorrente,
       progress: this._progress(),
@@ -665,6 +716,7 @@ export class ScanEngine {
   /* ----------------------------- Controllo ---------------------------- */
 
   start(now) {
+    this.proposta = null;
     this.paused = false;
     this.stack = [{ node: this.tree, index: 0 }];
     this.emptyCycles = 0;
@@ -677,6 +729,7 @@ export class ScanEngine {
   }
 
   pause(now) {
+    this.proposta = null;
     this.paused = true;
     this.attesaFino = 0;
     this.pausedAt = now;
@@ -750,6 +803,8 @@ export class ScanEngine {
     }
 
     if (now - this.lastStepAt >= this.stepCorrente) {
+      // La proposta dura un passo, poi si prosegue dal punto di ripartenza.
+      if (this.proposta) { this._avanzaProposta(now); return; }
       this._advance(now);
     }
   }
@@ -792,10 +847,46 @@ export class ScanEngine {
   }
 
   _up(now) {
-    if (this.stack.length > 1) this.stack.pop();
-    this.level.index = 0;
+    this.proposta = null;
+    const lasciato = this.stack.length > 1 ? this.stack.pop() : null;
+    this.level.index = this._dopoUscita(lasciato?.node);
     this.emptyCycles = 0;
     this._entraConAttesa(now);
+  }
+
+  /**
+   * Dove atterrare uscendo da un sottomenu — con ESCI o da soli, dopo i
+   * giri a vuoto.
+   *
+   * ⚠️ Dentro SCRIVI, deciso sul campo:
+   *   · da un GRUPPO DI LETTERE → il punto di ripartenza: Suggerimenti
+   *     se ci sono, altrimenti il primo gruppo di lettere. Chi esce da
+   *     lì sta scrivendo, non vuole riascoltare ESCI e AZIONI;
+   *   · da SUGGERIMENTI → di nuovo su Suggerimenti (se ci sono ancora);
+   *   · da AZIONI → di nuovo su AZIONI, pronte per un'altra azione.
+   *
+   * Prima si atterrava sempre sulla prima voce, cioè su ESCI: due
+   * passi sprecati a ogni uscita, e il rischio di uscire da Scrivi
+   * per sbaglio.
+   *
+   * In tutte le altre sezioni resta com'era: la prima voce.
+   */
+  _dopoUscita(lasciato) {
+    const padre = this.level?.node;
+    if (!lasciato || padre?.id !== 'write') return 0;
+    const figli = padre.children || [];
+    if (lasciato.id === 'act') {
+      const i = figli.findIndex(c => c.id === 'act');
+      return i >= 0 ? i : 0;
+    }
+    const gruppi = (this.cfg.scan.groups || []).map(g => g.id);
+    if (lasciato.id === 'sugg') {
+      const i = figli.findIndex(c => c.id === 'sugg');
+      if (i >= 0) return i;
+      return this._hotIndex(padre);
+    }
+    if (gruppi.includes(lasciato.id)) return this._hotIndex(padre);
+    return 0;
   }
 
   /**
@@ -849,8 +940,10 @@ export class ScanEngine {
       case 'PAUSE':        return this.paused ? undefined : this.pause(now);
       case 'TOGGLE_PAUSE': return this.paused ? this.resume(now) : this.pause(now);
       case 'SPEAK':  return this._speakSentence();
-      case 'BACK':   return this._up(now);
-      case 'NEXT':   return this._advance(now);
+      case 'BACK':   this._chiudiProposta(); return this._up(now);
+      // "Avanti" durante la proposta la scarta e va al punto di
+      // ripartenza: non deve saltare anche quello.
+      case 'NEXT':   return this.proposta ? this._avanzaProposta(now) : this._advance(now);
       default: return;
     }
   }
@@ -905,7 +998,17 @@ export class ScanEngine {
      * A 0 (predefinito) il comportamento è quello di sempre.
      */
     const grazia = this.cfg.scan?.graceMs || 0;
-    if (grazia > 0 && this._tAvanzamento != null
+    /* La grazia vale anche per la proposta a voce: chi alza l'occhio
+     * appena dopo aver sentito la parola vuole la parola, non il
+     * la voce annunciata subito dopo. */
+    if (grazia > 0 && !this.proposta && this._propostaPrecedente
+        && this._tFineProposta != null && (now - this._tFineProposta) < grazia) {
+      this.proposta = { lista: [this._propostaPrecedente], i: 0 };
+      this.stats.graziaUsata = (this.stats.graziaUsata || 0) + 1;
+    }
+    this._propostaPrecedente = null;
+    this._tFineProposta = null;
+    if (grazia > 0 && !this.proposta && this._tAvanzamento != null
         && (now - this._tAvanzamento) < grazia
         && this._vocePrecedente != null
         && this._vocePrecedente !== this.level.index) {
@@ -915,6 +1018,8 @@ export class ScanEngine {
     this._tAvanzamento = null;
 
     const node = this.currentNode;
+    // Qualunque cosa si sia scelta, la proposta in corso è chiusa.
+    this._chiudiProposta();
     if (!node) return;
 
     this.stats.selections++;
@@ -1020,7 +1125,7 @@ export class ScanEngine {
         if (this.cfg.prediction?.autoCorrectMode === 'frase') this._correggiFrase();
         const text = this._composedText();
         if (!text) { this._hold(this.h.onOutput('menu', 'niente da leggere'), now); return; }
-        const p = this.h.onOutput('speech', text, { keep: true });
+        const p = this.h.onOutput('speech', text, { keep: true, rilettura: true });
         this._backToWrite(now, true, 'azioni');
         if (!this._hold(p, now)) this._announceNow(now);
         return;
@@ -1165,13 +1270,22 @@ export class ScanEngine {
     }
 
     // Dopo una lettera si torna al livello di scrittura, non alla radice,
-    // e si riparte dal primo gruppo utile saltando ESCI e AZIONI.
-    // Dopo uno SPAZIO o una cancellazione si riparte invece dalle
+    // e si riparte da SUGGERIMENTI (se ci sono) o dal PRIMO GRUPPO DI
+    // LETTERE, saltando ESCI e AZIONI.
+    // Dopo uno SPAZIO, una PAROLA COMPLETATA (dai suggerimenti o dalla
+    // proposta a voce) o una cancellazione si riparte invece dalle
     // AZIONI: la parola è finita, o si sta correggendo, e in entrambi
-    // i casi il passo successivo probabile è un'azione.
+    // i casi il passo successivo probabile è un'azione. Deciso sul campo.
     const daAzioni = node.action !== 'CHAR' || node.payload === ' ';
     if (this.stack.some(f => f.node.id === 'write')) {
       this._backToWrite(now, true, daAzioni ? 'azioni' : 'gruppi');
+      /* ══ PROPOSTA A VOCE, subito dopo una lettera ══
+       * Solo dopo una LETTERA della parola in corso: mai dopo uno
+       * spazio, mai dopo una parola appena completata. */
+      const lettera = node.action === 'CHAR' && node.payload !== ' ';
+      const proposte = (this.cfg.scan?.suggerimentiDiretti && lettera)
+        ? (this.ctx.proposte || []).filter(Boolean) : [];
+      this.proposta = proposte.length ? { lista: proposte, i: 0 } : null;
       this._announce(now);
       this._pushState();
     } else {
@@ -1321,6 +1435,7 @@ export class ScanEngine {
    * e spesso è il momento di far parlare o rileggere.
    */
   _backToWrite(now, silent, dove = 'gruppi') {
+    this.proposta = null;
     const wl = this.stack.findIndex(f => f.node.id === 'write');
     if (wl < 0) { this._resetToRoot(now, silent); return; }
     this.stack = this.stack.slice(0, wl + 1);
@@ -1336,6 +1451,7 @@ export class ScanEngine {
   _announceNow(now) { this._announce(now); this._pushState(); }
 
   _resetToRoot(now, silent = false) {
+    this.proposta = null;
     this.stack = [{ node: this.tree, index: 0 }];
     this.emptyCycles = 0;
     this.lastStepAt = now;
@@ -1357,6 +1473,7 @@ export class ScanEngine {
    * non navigare.
    */
   undo(now) {
+    this.proposta = null;
     this.stats.undos++;
     const homeDepth = this._homeDepth();
     if (this.stack.length > homeDepth) { this._up(now); return; }

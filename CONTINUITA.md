@@ -283,6 +283,26 @@ duplicarla.
 **Mai suggerimenti dopo uno spazio**: riguardano la parola in corso.
 Deciso con l'utente, non è una dimenticanza.
 
+**Proposta a voce** (`scan.suggerimentiDiretti`): NON è una voce
+dell'albero. È `ScanEngine.proposta`, restituita da `currentNode` per un
+passo dopo ogni lettera, detta a voce e mostrata in corsivo nella barra
+(`_mostraParolaInCorso`). Scaduto il passo si prosegue dal punto di
+ripartenza (Suggerimenti se ci sono, altrimenti gruppo 1).
+
+**Ripartenze dentro Scrivi** (decise sul campo il 14/10, seconda
+correzione dell'utente; test sezioni 71 e 72):
+- lettera scelta o ESCI da un gruppo di lettere → **Suggerimenti** se
+  ci sono (gruppo `hot`), altrimenti gruppo 1;
+- ESCI da Suggerimenti → di nuovo **Suggerimenti**;
+- parola scelta (da Suggerimenti o dalla proposta a voce) → **AZIONI**,
+  come dopo uno spazio;
+- azione o ESCI da AZIONI → AZIONI; spazio → AZIONI.
+`rebuild()` conserva la posizione per VOCE, non per numero.
+
+**LEGGI non insegna** (`rilettura: true`): rileggere una frase a metà la
+insegnava come frase detta. ⚠️ NON usare `keep` per questo: lo usano
+anche le frasi rapide di PUNTA, che vanno imparate.
+
 ### ⚠️ Licenza del vocabolario
 
 `js/lang/vocabolario-it.js` deriva dai dati di `wordfreq`, distribuiti

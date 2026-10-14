@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 46;
+export const CONFIG_VERSION = 47;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -776,18 +776,20 @@ export const DEFAULT_CONFIG = {
     groups: DEFAULT_GROUPS,
     showSuggestions: true,
     suggestionCount: 4,
-    /* ── Proposta diretta della parola ──
-     * La voce guida dice la parola più probabile subito dopo ogni
-     * lettera, come farebbe chi assiste: un gesto la completa. Spenta
-     * di default: cambia ciò che si sente dopo ogni lettera, e chi è
-     * abituato al giro attuale deve sceglierla.
+    /* ── Proposta a voce della parola ──
+     * Dopo ogni lettera la voce guida dice la parola più probabile,
+     * come farebbe chi assiste; la parte mancante compare in corsivo
+     * nella barra di scrittura. Dura UN passo e non è una voce
+     * dell'elenco: un gesto la completa, altrimenti si prosegue dal
+     * gruppo 1. Spenta di default: cambia ciò che si sente dopo ogni
+     * lettera, e chi è abituato al giro attuale deve sceglierla.
      *   N      quante parole proporre (1–3): ognuna costa un passo.
      *   soglia quanto la parola deve staccare le rivali per essere
-     *          proposta, fra 0 e 1. 0 = sempre; 0,35 = solo quando è
-     *          netta, come "sinistro" dopo "mi giri sul fianco". */
+     *          proposta, fra 0 e 1. 0 (predefinito) = sempre, quando
+     *          c'è un suggerimento; più alta = solo quando è netta. */
     suggerimentiDiretti: false,
     suggerimentiDirettiN: 1,
-    suggerimentiDirettiSoglia: 0.35,
+    suggerimentiDirettiSoglia: 0,
     phraseCount: 12,
     // Gruppi di frasi. Vuoto = elenco unico, ordinato dalle statistiche.
     phraseGroups: DEFAULT_PHRASE_GROUPS,
@@ -1280,6 +1282,15 @@ export const DEFAULT_CONFIG = {
   },
 
   media: {
+    /* ── Volume dei contenuti mentre la voce guida è attiva ──
+     * Frazione del volume scelto per radio, video e audio, finché la
+     * scansione è attiva. Era 0,18 e non bastava: radio e video sono
+     * masterizzati molto più forti di una voce sintetica, e la guida
+     * diventava difficile da seguire proprio quando serviva per dare un
+     * comando. 0,06 è circa un quindicesimo: il contenuto resta
+     * udibile come sottofondo, la guida domina. Quando la guida va in
+     * pausa il volume torna quello scelto. */
+    volumeSottoGuida: 0.06,
     seekSeconds: 15,
     autoScanOnOpen: true,        // apre subito i comandi in scansione
     readAloudEnabled: true,
@@ -1402,6 +1413,13 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 47 && c.scan && c.scan.suggerimentiDirettiSoglia === 0.35) {
+    /* La proposta a voce compariva "solo ogni tanto": il vecchio valore
+     * predefinito la filtrava. Ora che occupa un passo e non un posto
+     * nell'elenco, si propone sempre. Solo chi aveva il valore
+     * PREDEFINITO viene aggiornato: una scelta fatta a mano resta. */
+    c.scan.suggerimentiDirettiSoglia = 0;
+  }
   if (v < 46 && c.signal && c.signal.blinkChiusuraMin === undefined) {
     /* ⚠️ Acceso anche nei profili esistenti: può solo aggiungere
      * chiusure, mai togliere, e serve a chi ha la telecamera di lato —

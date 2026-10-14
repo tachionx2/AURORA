@@ -254,8 +254,21 @@ ok(validateConfig(bad2).length>0, 'permanenza assurda rifiutata');
    * strade che fanno la stessa cosa col tempo divergono. */
   ok(/this\.chiediAssistente\(testo\)/.test(main),
      '17. chiedi usa la stessa funzione della scansione, non una copia');
-  ok(/this\.onOutput\('speech', testo, \{ keep: true \}\)/.test(main),
+  ok(/this\.onOutput\('speech', testo, \{ keep: true, rilettura: true \}\)/.test(main),
      '18. e rileggi usa la stessa uscita audio');
+  /* ⚠️ Una rilettura non insegna nulla al modello: rileggere cinque
+   * volte una frase a metà la insegnava cinque volte come frase detta. */
+  ok(/if \(!opt\?\.rilettura\) this\.predictor\.learnSentence\(text\)/.test(main),
+     '18b. e una rilettura non viene imparata come frase detta');
+  /* ⚠️ Ma le FRASI RAPIDE di Punta sono frasi dette davvero: usano
+   * `keep` per non toccare il testo in composizione, e devono
+   * continuare a essere imparate. */
+  {
+    const pv = (await import('node:fs')).readFileSync(
+      (await import('node:path')).join((await import('node:path')).dirname(import.meta.filename || process.argv[1]), '..', 'js/ui/PointerView.js'), 'utf8');
+    ok(/onOutput\('speech', frase, \{ keep: true \}\)/.test(pv) && !/frase, \{[^}]*rilettura/.test(pv),
+       '18c. le frasi rapide di Punta continuano a essere imparate');
+  }
 }
 
 /* ══════ Frasi pronte nella scheda Punta ══════

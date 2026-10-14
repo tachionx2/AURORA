@@ -2925,8 +2925,13 @@ app.goto('parla');
    * del menu proprio per poter chiudere. */
   ok(/this\.media\?\.riduciVolume\?\.\(guidaAttiva\)/.test(mainB),
      'video e audio si abbassano con la voce guida attiva');
-  ok(/guidaAttiva \? 0\.18 : 1/.test(mainB),
-     'e la radio con loro, alla stessa quota');
+  /* ⚠️ Alla STESSA quota, letta da un solo posto della configurazione.
+   * Era 0,18 scritto in due posti, e non bastava: radio e video sono
+   * registrati molto più forti di una voce sintetica. */
+  ok(/guidaAttiva \? fattore : 1/.test(mainB) && /cfg\.media\?\.volumeSottoGuida/.test(mainB),
+     'e la radio con loro, alla stessa quota, presa dalla configurazione');
+  ok(/this\.cfg\?\.media\?\.volumeSottoGuida/.test(mpB) && !/0\.18/.test(mainB + mpB),
+     'video e audio leggono la stessa quota, e il vecchio 0,18 non esiste più da nessuna parte');
 }
 
 /* ═══ Il servizio di invio posta, provato davvero ═══
@@ -3063,6 +3068,57 @@ app.goto('parla');
     ok(g.pronto === true && g.ambienteConfigurato === false,
        'posta: aperto nel browser si dichiara pronto anche senza variabili d ambiente');
   }
+}
+
+/* ═══ La proposta a voce, in CORSIVO nella barra della parola ═══ */
+{
+  const el = document.getElementById('composeLetters');
+  app._propostaMostrata = 'sinistro';
+  app._mostraParolaInCorso('SI');
+  ok(/^SI<i class="compose-proposta">NISTRO<\/i>$/.test(el.innerHTML),
+     `barra: le lettere digitate normali, la parte proposta in corsivo (${el.innerHTML})`);
+  app._propostaMostrata = 'sinistro';
+  app._mostraParolaInCorso('si');
+  ok(/^si<i class="compose-proposta">nistro<\/i>$/.test(el.innerHTML),
+     'barra: con le maiuscole di ciò che è stato digitato');
+  app._propostaMostrata = null;
+  app._mostraParolaInCorso('SI');
+  ok(el.textContent === 'SI' || el.innerHTML === 'SI', 'barra: senza proposta, solo le lettere');
+  app._propostaMostrata = 'casa';
+  app._mostraParolaInCorso('SI');
+  ok(!/compose-proposta/.test(el.innerHTML || ''),
+     'barra: una proposta che non comincia con le lettere digitate non viene mostrata');
+  app._propostaMostrata = null;
+}
+
+/* ═══ Volume dei contenuti sotto la voce guida ═══ */
+{
+  const { MediaPlayer: MP } = await import('../js/media/MediaPlayer.js');
+  const cfgV = JSON.parse(JSON.stringify(app.cfg));
+  const mp = new MP(cfgV, () => {});
+  mp.el = { volume: 1 };
+  mp.setVolumeVoluto(1);
+  mp.riduciVolume(true);
+  ok(Math.abs(mp.el.volume - 0.06) < 1e-9,
+     `volume: con la guida attiva il contenuto scende al 6% (${mp.el.volume})`);
+  cfgV.media.volumeSottoGuida = 0.02;
+  mp.updateConfig(cfgV); mp._applicaVolume();
+  ok(Math.abs(mp.el.volume - 0.02) < 1e-9, 'volume: la quota si regola dalle impostazioni');
+  mp.riduciVolume(false);
+  ok(mp.el.volume === 1, 'volume: con la guida in pausa torna quello scelto');
+  ok(app.cfg.media.volumeSottoGuida === 0.06, 'volume: predefinito 0,06');
+  /* ⚠️ I due buchi: il video YouTube appena pronto e il file appena
+   * aperto nascevano al volume pieno sopra la voce guida. */
+  const fsV = await import('node:fs');
+  const pathV = await import('node:path');
+  const quiV = pathV.dirname(import.meta.filename || process.argv[1]);
+  const srcMP = fsV.readFileSync(pathV.join(quiV, '..', 'js/media/MediaPlayer.js'), 'utf8');
+  const iReady = srcMP.indexOf('onReady: () => {');
+  ok(iReady > 0 && srcMP.slice(iReady, iReady + 600).includes('this._applicaVolume()'),
+     'volume: YouTube riapplica la riduzione quando il riproduttore è pronto');
+  const iTraccia = srcMP.indexOf('  _caricaTraccia() {');
+  ok(iTraccia > 0 && srcMP.slice(iTraccia, iTraccia + 600).includes('this._applicaVolume()'),
+     'volume: ogni file aperto riapplica la riduzione');
 }
 
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);

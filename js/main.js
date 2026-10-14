@@ -309,6 +309,9 @@ class App {
     this.stripe.updateConfig(this.cfg);
     this.device.updateConfig(this.cfg);
     this.media.updateConfig(this.cfg);
+    // Spostando il cursore del volume sotto la guida, l'effetto si
+    // sente subito sul contenuto che sta suonando.
+    this._safe('volumi media', () => this.allineaVolumiMedia());
     this.applyUiConfig();
     this.refreshContext();
     this.scheduleFit();
@@ -396,6 +399,11 @@ class App {
   onAnnounce(node, meta) { this.audio.announce(node, meta); }
 
   onScanState(s) {
+    // La parola proposta compare e sparisce con lo stato della scansione.
+    if ((s.proposta || null) !== (this._propostaMostrata || null)) {
+      this._propostaMostrata = s.proposta || null;
+      this._mostraParolaInCorso(this.scan.buffer.letters);
+    }
     document.getElementById('stagePath').textContent = s.path.join(' › ') || 'menu';
     const cur = document.getElementById('stageCurrent');
     cur.textContent = s.paused ? '⏸' : (s.speaking ? '🔊' : (s.current || '—'));
@@ -425,7 +433,12 @@ class App {
     const pezzi = [];
     if (da > 0) pezzi.push(`<span class="sib sib-more">…</span>`);
     for (let i = da; i < a; i++) {
-      const cls = i === s.index ? 'is-current' : (i === (s.index + 1) % n ? 'is-next' : '');
+      /* Durante la proposta a voce nessuna voce dell'elenco è quella
+       * corrente: la voce corrente è la parola, in corsivo nella barra
+       * di scrittura. Il gruppo da cui si ripartirà è "prossima". */
+      const cls = s.proposta
+        ? (i === s.index ? 'is-next' : '')
+        : (i === s.index ? 'is-current' : (i === (s.index + 1) % n ? 'is-next' : ''));
       pezzi.push(`<span class="sib ${cls}">${this._esc(s.items[i])}</span>`);
     }
     if (a < n) pezzi.push(`<span class="sib sib-more">…</span>`);
@@ -436,11 +449,41 @@ class App {
     chip.dataset.state = s.paused ? 'paused' : 'running';
   }
 
+  /**
+   * La parola in corso nella barra di scrittura, con la proposta a voce
+   * in CORSIVO.
+   *
+   * Le lettere digitate restano normali; la parte che la proposta
+   * aggiungerebbe è in corsivo, così si vede subito cosa succede
+   * accettandola. Accettata, la parola entra nella frase in carattere
+   * normale; lasciata passare, il corsivo sparisce.
+   *
+   * Con le maiuscole di ciò che è stato digitato, come farà la parola
+   * se viene accettata: ciò che si vede è ciò che si otterrà.
+   */
+  _mostraParolaInCorso(lettere) {
+    const el = document.getElementById('composeLetters');
+    if (!el) return;
+    const digitato = String(lettere || '');
+    const prop = this._propostaMostrata;
+    if (!prop || !prop.toLowerCase().startsWith(digitato.trim().toLowerCase())) {
+      // Sempre per la stessa via, protetta: così il corsivo di prima non
+      // può restare appeso.
+      el.innerHTML = this._esc(digitato);
+      return;
+    }
+    const t0 = digitato.trim();
+    const maiuscole = t0 && t0 === t0.toUpperCase() && t0 !== t0.toLowerCase();
+    const resto = prop.slice(t0.length);
+    el.innerHTML = this._esc(digitato)
+      + `<i class="compose-proposta">${this._esc(maiuscole ? resto.toUpperCase() : resto)}</i>`;
+  }
+
   onBuffer(b) {
     const sentence = document.getElementById('composeSentence');
     const text = [...b.words].join(' ');
     sentence.innerHTML = text ? this._esc(text) : '<span class="placeholder">…</span>';
-    document.getElementById('composeLetters').textContent = b.letters;
+    this._mostraParolaInCorso(b.letters);
     // La scheda Punta mostra lo stesso testo: è lo stesso buffer.
     this.pointerView?.renderCompose(b);
     // Salvataggio automatico: un'ora di composizione persa per una
@@ -489,7 +532,18 @@ class App {
    */
   onOutput(kind, text, opt = {}) {
     if (kind === 'speech') {
-      this.predictor.learnSentence(text);
+      /* ⚠️ Una RILETTURA non insegna nulla al modello.
+       *
+       * Rileggere (LEGGI) serve a riascoltare un testo ANCORA IN
+       * COMPOSIZIONE: rileggendo cinque volte una frase a metà, la si
+       * insegnava cinque volte come frase detta — e i suggerimenti poi
+       * continuavano frasi incomplete, invece di quelle che Daniela dice
+       * davvero. Impara PARLA, che è la frase consegnata.
+       *
+       * ⚠️ Opzione propria, NON `keep`: `keep` vuol dire soltanto "non
+       * toccare il testo in composizione", e lo usano anche le frasi
+       * rapide di PUNTA — che sono frasi dette davvero, e vanno imparate. */
+      if (!opt?.rilettura) this.predictor.learnSentence(text);
       appendLog({ t: Date.now(), text });
       this.persist();
       this.statsView.render();
@@ -1058,7 +1112,10 @@ class App {
     try { this.media?.riduciVolume?.(guidaAttiva); } catch {}
     if (this.radioEl) {
       if (this._volRadioVoluto == null) this._volRadioVoluto = this.radioEl.volume ?? 1;
-      const v = this._volRadioVoluto * (guidaAttiva ? 0.18 : 1);
+      // La stessa riduzione dei video e degli audio, letta da un solo posto.
+      const f = Number(this.cfg.media?.volumeSottoGuida);
+      const fattore = Number.isFinite(f) ? Math.max(0, Math.min(1, f)) : 0.06;
+      const v = this._volRadioVoluto * (guidaAttiva ? fattore : 1);
       try { this.radioEl.volume = Math.max(0, Math.min(1, v)); } catch {}
     }
   }
@@ -4315,7 +4372,7 @@ class App {
     ptBtn('ptReread', () => {
       const testo = [...this.scan.buffer.words, this.scan.buffer.letters].join(' ').trim();
       if (!testo) { this.toast('Non c\'è ancora niente da rileggere', true); return; }
-      this.onOutput('speech', testo, { keep: true });
+      this.onOutput('speech', testo, { keep: true, rilettura: true });
     });
     ptBtn('ptAsk', () => {
       const testo = [...this.scan.buffer.words, this.scan.buffer.letters].join(' ').trim();

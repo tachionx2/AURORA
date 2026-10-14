@@ -182,6 +182,9 @@ body.is-speaking .stage-current{color:var(--accent2)}
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .compose-letters{letter-spacing:.06em;font-weight:700}
+/* Proposta a voce: la parte che verrebbe aggiunta, in corsivo e più
+   tenue. Accettata, entra nella frase in carattere normale. */
+.compose-proposta{font-style:italic;font-weight:500;opacity:.6}
 .caret{
   display:inline-block;width:.6ch;height:1em;background:var(--accent);
   vertical-align:text-bottom;animation:blink 1.1s steps(2) infinite;

@@ -72,6 +72,113 @@ function token(testo) {
 /** Un conteggio, oppure zero: protegge da valori corrotti nei dati salvati. */
 const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : 0);
 
+/* ══════════════════════════════════════════════════════════════════
+ * ACCORDO GRAMMATICALE
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * L'italiano dice molto con la parola precedente: dopo "la" viene
+ * quasi sempre un femminile singolare, dopo "dei" un maschile plurale,
+ * dopo "io" un verbo in -o. Prima i suggerimenti lo ignoravano del
+ * tutto: "le ca…" proponeva "caldo", "dei fi…" proponeva "fine".
+ *
+ * Un fattore, non un filtro: la parola che concorda sale, quella che
+ * stride scende un po', ma nessuna sparisce — l'italiano ha eccezioni,
+ * e ciò che Daniela dice davvero (le sue frasi, le sue coppie di
+ * parole) pesa comunque di più.
+ *
+ * ⚠️ "la", "lo", "le", "gli" sono anche PRONOMI davanti a un verbo —
+ * "la vedo", "lo so", "gli dico". Per quelle si favorisce la forma che
+ * concorda ma non si penalizza nulla: penalizzare "voglio" dopo "la"
+ * renderebbe più difficile "la voglio".
+ */
+const DETERMINANTI = (() => {
+  const m = new Map();
+  const metti = (lista, tipo, sicuro) => {
+    for (const w of lista.split(' ')) m.set(w, { tipo, sicuro });
+  };
+  metti('una della alla dalla nella sulla questa quella mia tua sua nostra vostra nessuna alcuna ogni', 'fs', true);
+  metti('la', 'fs', false);
+  metti('il un uno del dello al allo dal dallo nel nello sul sullo questo quello quel mio tuo suo nostro vostro nessun nessuno alcun', 'ms', true);
+  metti('lo', 'ms', false);
+  metti('delle alle dalle nelle sulle queste quelle mie tue sue nostre vostre alcune', 'fp', true);
+  metti('le', 'fp', false);
+  metti('i dei degli ai agli dai dagli nei negli sui sugli questi quelli quei quegli miei tuoi suoi nostri vostri alcuni', 'mp', true);
+  metti('gli', 'mp', false);
+  // "ogni" vuole il singolare ma non il genere: si tratta a parte.
+  m.delete('ogni');
+  return m;
+})();
+// Eccezioni frequenti: femminili in -o, maschili in -a, plurali irregolari.
+const FEMMINILI_IN_O = new Set('mano radio foto moto auto eco dinamo'.split(' '));
+const MASCHILI_IN_A = new Set('problema problemi sistema sistemi programma programmi tema temi schema dramma clima cinema pigiama papà pianeta poeta diploma'.split(' '));
+const PLURALI_IRREGOLARI_F = new Set('mani radio foto moto auto'.split(' '));
+/* Soggetto → desinenza del verbo, con la forza che merita: -iamo dopo
+ * "noi" è quasi una certezza, -o dopo "io" lo è molto meno (tantissime
+ * parole finiscono in -o). */
+const SOGGETTI = new Map([
+  ['io', [/o$/, 1.4]], ['tu', [/i$/, 1.4]],
+  ['noi', [/iamo$/, 2.0]], ['voi', [/(ate|ete|ite)$/, 1.8]],
+]);
+// Un infinito finisce in -e ma non è un femminile plurale.
+const INFINITO = /(are|ere|ire)$/;
+/* Parole che non sono MAI un nome né un aggettivo: dopo un articolo
+ * sono impossibili. Volutamente esclusi "tanto", "poco", "solo",
+ * "proprio", "tutto", "altro", "prima": dopo un articolo possono
+ * esserci ("il solo", "la prima"). */
+const NON_NOMI = new Set(('senza sopra sotto dentro fuori contro verso dopo durante mentre '
+  + 'sempre anche ancora ora allora ecco come dove quando perché quindi poi già più meno '
+  + 'molto troppo forse mai ormai appena oppure però infatti inoltre circa quasi insieme '
+  + 'subito presto tardi spesso adesso oggi ieri domani qui qua lì là così cioè anzi '
+  + 'neanche nemmeno neppure tuttavia comunque eppure finché siccome sebbene affinché '
+  + 'oltre tranne fra tra per con della delle degli dello sul sulla nel nella non che '
+  + 'ma se anzitutto altrimenti benché nonché ovvero ossia purché qualora').split(' '));
+
+/**
+ * Quanto la parola `w` concorda con la parola che la precede.
+ * @param vuote parole funzionali (di, senza, anche…): dopo un articolo
+ *        non vengono mai, quindi non ricevono alcun favore.
+ * @returns un fattore: 1 = nessuna informazione, >1 concorda, <1 stride.
+ */
+function fattoreAccordo(prima, w, vuote) {
+  if (!prima || !w) return 1;
+  const sogg = SOGGETTI.get(prima);
+  if (sogg) return sogg[0].test(w) ? sogg[1] : 1;
+  const d = DETERMINANTI.get(prima);
+  if (!d) return 1;
+  /* "questa senza", "la anche": un articolo non introduce mai una
+   * preposizione, una congiunzione o un avverbio.
+   *
+   * ⚠️ Serve un ELENCO, non la frequenza: fra le parole più frequenti
+   * ci sono anche nomi come "casa" e "vita", e "senza" finisce in -a
+   * proprio come "casa". Con il primo tentativo — escludere le parole
+   * più frequenti — "la ca…" aveva smesso di proporre "casa". */
+  if (NON_NOMI.has(w)) return d.sicuro ? 0.5 : 1;
+  const fine = w[w.length - 1];
+  let concorda = false, stride = false;
+  switch (d.tipo) {
+    case 'fs':
+      concorda = fine === 'a' || FEMMINILI_IN_O.has(w);
+      stride = (fine === 'o' && !FEMMINILI_IN_O.has(w)) || fine === 'i';
+      break;
+    case 'ms':
+      concorda = fine === 'o' || MASCHILI_IN_A.has(w);
+      stride = (fine === 'a' && !MASCHILI_IN_A.has(w)) || fine === 'i';
+      break;
+    case 'fp':
+      concorda = (fine === 'e' && !INFINITO.test(w)) || PLURALI_IRREGOLARI_F.has(w);
+      stride = ((fine === 'o' || fine === 'a' || fine === 'i') && !PLURALI_IRREGOLARI_F.has(w))
+        || INFINITO.test(w);
+      break;
+    case 'mp':
+      concorda = fine === 'i';
+      stride = fine === 'o' || fine === 'a';
+      break;
+  }
+  if (concorda) return 1.4;
+  if (stride && d.sicuro) return 0.7;
+  return 1;
+}
+
 /**
  * Cosa mettere nella scansione per la parola in corso.
  *
@@ -574,6 +681,14 @@ export class Predictor {
           const w = T[j + k];
           if (w !== p && w.startsWith(p)) { add(w, 8 * k * peso); trovata = true; break; }
         }
+      }
+    }
+
+    // 7. Accordo con la parola precedente: articolo → nome, soggetto → verbo.
+    if (w1) {
+      for (const [w, s] of cand) {
+        const f = fattoreAccordo(w1, w, C.vuote);
+        if (f !== 1) cand.set(w, s * f);
       }
     }
 

@@ -2073,6 +2073,13 @@ export class SettingsView {
         this._range('audio.menuRate', P(['Velocità annunci', 'Announcement rate']), null, 0.5, 3, 0.05, '×'),
         this._range('audio.menuPitch', P(['Tono annunci', 'Announcement pitch']), null, 0.5, 2, 0.05),
         this._range('audio.menuVolume', P(['Volume annunci', 'Announcement volume']), null, 0, 1, 0.05),
+        /* ⚠️ La voce guida deve SEMPRE dominare: chi comanda con un gesto
+         * solo deve capire ogni annuncio, anche con la radio accesa. */
+        this._range('media.volumeSottoGuida',
+          P(['Volume di radio e video mentre parla la guida', 'Radio and video volume while the guide speaks']),
+          P(['Quanto resta del volume di radio, video e audio finché la scansione è attiva. 0,06 (predefinito) è circa un quindicesimo: il contenuto resta come sottofondo e la voce guida domina nettamente. Radio e video sono registrati molto più forti di una voce sintetica: se la guida si sente ancora poco, abbassalo; a 0 il contenuto tace finché la guida è attiva. Quando la guida va in pausa, il volume torna quello scelto.',
+             'How much of the radio, video and audio volume remains while scanning is active. 0.06 (default) is about one fifteenth: the content stays as background and the guide clearly dominates. At 0 the content is silent while the guide is active.']),
+          0, 0.5, 0.01),
         diagnostica(),
         mkSink('audio.menuSinkId', P(['Uscita annunci', 'Announcement output']),
           P(['Dove escono gli annunci', 'Where announcements come out'])),
@@ -2199,8 +2206,8 @@ export class SettingsView {
           P(['Meno parole = ognuna si raggiunge prima.', 'Fewer words = each is reached sooner.']), 1, 8),
         this._toggle('scan.suggerimentiDiretti',
           P(['Proposta a voce della parola (un gesto solo)', 'Spoken word proposal (single gesture)']),
-          P(['Come fa chi assiste scorrendo le lettere: quando intuisce la parola, la dice. Dopo ogni lettera la voce guida pronuncia per prima la parola più probabile; se Daniela la seleziona la parola è completata, con UN gesto. Se non la prende, si prosegue sulle lettere come sempre, e alla lettera successiva la proposta si ricalcola. Compare solo quando una parola stacca nettamente le altre.',
-             'Like a helper scanning the letters: when they guess the word, they say it. After every letter the guide voice first speaks the most likely word; selecting it completes the word with ONE gesture. Otherwise scanning continues as usual and the proposal is recomputed at the next letter.'])),
+          P(['Come fa chi assiste scorrendo le lettere: quando intuisce la parola, la dice. Dopo ogni lettera la voce guida pronuncia la parola più probabile, e la parte mancante compare in CORSIVO nella barra di scrittura. Non è una voce dell\'elenco: dura un passo. Se Daniela la seleziona in quel passo, la parola è completata con UN gesto e si riparte dalle AZIONI, come dopo uno spazio. Se la lascia passare, il corsivo sparisce e si prosegue come sempre (da Suggerimenti, o dal gruppo 1 se non ce ne sono); alla lettera successiva la proposta si ricalcola. Mai dopo uno spazio.',
+             'Like a helper scanning the letters: when they guess the word, they say it. After every letter the guide voice speaks the most likely word and the missing part appears in ITALICS in the writing bar. It is not a list item: it lasts one step. Selecting it completes the word with ONE gesture; otherwise scanning continues from group 1.'])),
         ...(cfg.scan.suggerimentiDiretti ? [
           this._number('scan.suggerimentiDirettiN',
             P(['Parole proposte a voce', 'Words proposed aloud']),
@@ -2208,8 +2215,8 @@ export class SettingsView {
                'Each one costs a scan step after every letter. One is almost always right.']), 1, 3),
           this._range('scan.suggerimentiDirettiSoglia',
             P(['Sicurezza richiesta per proporre', 'Confidence required to propose']),
-            P(['Quanto la parola deve staccare le alternative. 0 = propone sempre, anche tirando a indovinare. 0,35 = solo quando è netta, come "sinistro" dopo "mi giri sul fianco" o "sete" dopo "ho". Più alta = proposte più rare e più sicure. Una proposta sbagliata costa un passo per ogni lettera; una mancata costa le lettere che restano.',
-               'How far the word must stand out from the alternatives. 0 = always propose. 0.35 = only when clear. Higher = rarer but safer proposals.']),
+            P(['0 (predefinito) = propone SEMPRE la parola migliore, appena ci sono suggerimenti. Alzandola propone solo quando una parola stacca nettamente le alternative — a 0,35, per esempio, "sinistro" dopo "mi giri sul fianco" sì, una parola qualunque dopo due lettere no. Ogni proposta costa un passo dopo ogni lettera; una mancata costa le lettere che restano.',
+               '0 (default) = ALWAYS propose the best word as soon as there are suggestions. Higher = only when one word clearly stands out.']),
             0, 0.9, 0.05),
         ] : []),
 

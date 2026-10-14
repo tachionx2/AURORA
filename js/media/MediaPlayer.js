@@ -291,8 +291,14 @@ export class MediaPlayer {
     this._applicaVolume();
   }
 
+  /** Quanto resta del volume mentre la voce guida è attiva. */
+  get fattoreSottoGuida() {
+    const f = Number(this.cfg?.media?.volumeSottoGuida);
+    return Number.isFinite(f) ? Math.max(0, Math.min(1, f)) : 0.06;
+  }
+
   _applicaVolume() {
-    const v = this.volumeVoluto * (this._ridotto ? 0.18 : 1);
+    const v = this.volumeVoluto * (this._ridotto ? this.fattoreSottoGuida : 1);
     if (this.el) { try { this.el.volume = Math.max(0, Math.min(1, v)); } catch {} }
     if (this.yt?.setVolume) {
       try { this.yt.setVolume(Math.round(Math.max(0, Math.min(1, v)) * 100)); } catch {}
@@ -357,6 +363,11 @@ export class MediaPlayer {
       events: {
         onReady: () => {
           this.ytReady = true;
+          /* ⚠️ La riduzione va RIAPPLICATA qui. Chiesta mentre il
+           * riproduttore si preparava, YouTube la ignorava in silenzio:
+           * il video partiva al volume pieno sopra la voce guida e ci
+           * restava finché la scansione non veniva fermata e ripresa. */
+          this._applicaVolume();
           /* ⚠️ Alcuni browser ignorano l'avvio automatico dichiarato
            * fra i parametri: lo si chiede anche qui, dove il
            * riproduttore è pronto e la richiesta arriva da un gesto
@@ -376,6 +387,9 @@ export class MediaPlayer {
           this._emit('ready');
         },
         onStateChange: (e) => {
+          // Alcune versioni del riproduttore ripristinano il volume
+          // all'avvio della riproduzione: lo si riallinea.
+          if (e.data === 1) this._applicaVolume();
           this._emit('state', { playing: e.data === 1 });
           // Fine video: passa al successivo, così una lista si guarda
           // senza dover intervenire a ogni brano.
@@ -512,6 +526,9 @@ export class MediaPlayer {
     const it = this.playlist[this.playlistIndex];
     if (!it || !this.el) return;
     this.el.src = it.url;
+    /* ⚠️ Ogni file apre un elemento audio o video NUOVO, che nasce al
+     * volume pieno: senza riallinearlo qui partiva sopra la voce guida. */
+    this._applicaVolume();
     this.el.play().catch(() => {});
     const now = document.getElementById('mediaNow');
     if (now) now.textContent = it.name;
