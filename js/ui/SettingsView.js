@@ -2193,6 +2193,10 @@ export class SettingsView {
         h('p', 'sub', P(
           ['Si ricalcolano a ogni lettera guardando TUTTA la frase già scritta: le parole che Daniela usa davvero, la parola e le due parole prima, l\'argomento della frase, e soprattutto le frasi che ha già detto o che la famiglia ha preparato — se ciò che sta scrivendo ne ricalca una, la parola che segue è la candidata più forte. Riguardano solo la parola in corso: dopo uno spazio non si propone nulla finché non comincia la parola nuova.',
            'Recomputed at every letter from the WHOLE sentence written so far: the words Daniela actually uses, the previous one and two words, the topic of the sentence, and above all the sentences she has already said or the family has prepared. They only concern the word being written.'])),
+        this._toggle('prediction.contestoFrase',
+          P(['Suggerimenti che capiscono la frase', 'Suggestions that understand the sentence']),
+          P(['Come chi assiste, che dopo "sono andata in chiesa a pr…" pensa a "pregare". Tre conoscenze dell\'italiano, tutte sul dispositivo e senza internet: la GRAMMATICA (dopo "in" viene un nome, dopo "io" un verbo in -o: "in ba…" → bagno, non "basta"), il SIGNIFICATO (in una frase sul dottore "terapia" sale) e le ESPRESSIONI dell\'italiano reale ("mal di…" → testa). Non sostituiscono ciò che Daniela dice davvero: le sue parole e le sue frasi restano le più forti. Spento, i suggerimenti tornano esattamente come prima.',
+             'Like a helper who, after "I went to church to pr…", thinks "pray". Three kinds of knowledge of Italian, all on the device and offline: GRAMMAR, MEANING and real-world EXPRESSIONS. Daniela\'s own words and sentences still come first. Off = suggestions exactly as before.'])),
         this._number('prediction.minPrefixForWord',
           P(['Lettere prima di suggerire', 'Letters before suggesting']),
           P(['Da quante lettere della parola compaiono i suggerimenti. Poi continuano a ogni lettera in più — quarta, quinta, sesta — restringendosi. Con 2 si comincia presto ma le prime proposte sono più incerte; con 3 è più raro sbagliare.',
@@ -2207,7 +2211,7 @@ export class SettingsView {
         this._toggle('scan.suggerimentiDiretti',
           P(['Proposta a voce della parola (un gesto solo)', 'Spoken word proposal (single gesture)']),
           P(['Come fa chi assiste scorrendo le lettere: quando intuisce la parola, la dice. Dopo ogni lettera la voce guida pronuncia la parola più probabile, e la parte mancante compare in CORSIVO nella barra di scrittura. Non è una voce dell\'elenco: dura un passo. Se Daniela la seleziona in quel passo, la parola è completata con UN gesto e si riparte dalle AZIONI, come dopo uno spazio. Se la lascia passare, il corsivo sparisce e si prosegue come sempre (da Suggerimenti, o dal gruppo 1 se non ce ne sono); alla lettera successiva la proposta si ricalcola. Mai dopo uno spazio.',
-             'Like a helper scanning the letters: when they guess the word, they say it. After every letter the guide voice speaks the most likely word and the missing part appears in ITALICS in the writing bar. It is not a list item: it lasts one step. Selecting it completes the word with ONE gesture; otherwise scanning continues from group 1.'])),
+             'Like a helper scanning the letters: when they guess the word, they say it. After every letter the guide voice speaks the most likely word and the missing part appears in ITALICS in the writing bar. It is not a list item: it lasts one step. Selecting it completes the word with ONE gesture and scanning restarts from ACTIONS; otherwise it continues from Suggestions (or group 1).'])),
         ...(cfg.scan.suggerimentiDiretti ? [
           this._number('scan.suggerimentiDirettiN',
             P(['Parole proposte a voce', 'Words proposed aloud']),

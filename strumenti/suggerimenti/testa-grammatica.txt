@@ -1,0 +1,33 @@
+/**
+ * grammatica-it.js — CHE TIPO DI PAROLA PUÒ VENIRE ADESSO.  (generato)
+ *
+ * Dopo "chiesa a…" viene quasi sempre un infinito ("pregare",
+ * "prendere"), quasi mai un avverbio ("prima"); dopo "io…" un verbo in
+ * prima persona ("voglio", "vado"), non "va" o "siamo". Questo file
+ * contiene:
+ *   · LESSICO   — per ogni parola del vocabolario, le categorie
+ *                 grammaticali che può avere, con la loro probabilità
+ *                 (nome femminile singolare, infinito, avverbio…);
+ *   · CONTESTI  — dopo una o due parole (le grammaticali come parole,
+ *                 le altre come categoria), la probabilità di ogni
+ *                 categoria successiva;
+ *   · PRIORI    — la frequenza generale di ogni categoria.
+ *
+ * Provenienza, solo fonti libere:
+ *   · conteggi da Universal Dependencies, treebank italiani
+ *     MarkIT (CC BY 4.0), TWITTIRO (CC BY-SA 4.0), PUD (CC BY-SA 3.0),
+ *     ParlaMint (CC BY-SA 4.0) — https://universaldependencies.org;
+ *   · categorie delle parole non presenti nei treebank stimate da un
+ *     classificatore sui vettori fastText di Explosion (CC0) e sulle
+ *     desinenze.
+ * Come richiesto dalle licenze CC BY-SA, QUESTO FILE è distribuito
+ * sotto Creative Commons Attribution-ShareAlike 4.0
+ * (https://creativecommons.org/licenses/by-sa/4.0/). Il resto di Aurora
+ * resta sotto la propria licenza.
+ *
+ * Codifica: ogni categoria è una lettera (indice in TAGS) seguita dalla
+ * probabilità — 2 cifre in centesimi nel LESSICO, 4 cifre in decimillesimi
+ * nei CONTESTI.
+ *
+ * ⚠️ Non modificare a mano: si rigenera dallo script di costruzione.
+ */

@@ -15,7 +15,7 @@
  * inviati altrove.
  */
 
-const VERSION = 'aurora-20261014-1330';
+const VERSION = 'aurora-20261014-1500';
 const APP_CACHE = `${VERSION}-app`;
 const CDN_CACHE = `${VERSION}-cdn`;
 
@@ -34,6 +34,15 @@ const APP_SHELL = [
   './js/lang/seed-it.js',
   // Vocabolario dei suggerimenti: senza, offline i suggerimenti tacciono.
   './js/lang/vocabolario-it.js',
+  // Suggerimenti che capiscono la frase: grammatica, significato,
+  // espressioni. Senza, offline i suggerimenti tornerebbero quelli di
+  // prima (funzionano comunque, ma capiscono meno).
+  './js/lang/Senso.js',
+  './js/lang/semantica-it.js',
+  './js/lang/Grammatica.js',
+  './js/lang/grammatica-it.js',
+  './js/lang/Coppie.js',
+  './js/lang/coppie-it.js',
   './js/audio/AudioDirector.js',
   './js/vision/FrameSource.js',
   './js/vision/RgbTracker.js',

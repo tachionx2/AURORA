@@ -886,6 +886,11 @@ export const DEFAULT_CONFIG = {
     corpusWeight: 0.2,
     recencyHalfLifeDays: 30,
     minPrefixForWord: 2,
+    /* Suggerimenti che CAPISCONO la frase: grammatica (che tipo di parola
+     * può venire adesso), significato (di cosa si sta parlando) ed
+     * espressioni dell'italiano reale ("a pregare", "mal di testa").
+     * Spegnendolo i suggerimenti tornano esattamente come prima. */
+    contestoFrase: true,
     reorderLetters: false,       // riordino dinamico: spento di default,
                                  // distrugge la memoria motoria acquisita
     reorderStrength: 0.0,

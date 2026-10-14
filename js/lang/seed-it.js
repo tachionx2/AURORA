@@ -65,6 +65,49 @@ export const SEED_BIGRAMS = {
   'cambia posizione': 28, 'un momento': 24,
 };
 
+/**
+ * Il parlato di chi è assistito, in prima persona.
+ *
+ * Usate SOLO quando i suggerimenti leggono grammatica e significato
+ * (`prediction.contestoFrase`): ne sono il contrappeso. Spento quello,
+ * i suggerimenti tornano esattamente come prima, anche in questo.
+ */
+export const SEED_BIGRAMS_PARLATO = {
+  /* ── Il parlato di chi è assistito, in prima persona ──
+   * Aggiunte quando i suggerimenti hanno cominciato a leggere grammatica
+   * e significato dai testi SCRITTI: lì "sono" è quasi sempre "sono
+   * stati", "hai" quasi sempre "hai fatto", "per" quasi sempre "per
+   * fare". Queste coppie ricordano il registro di Daniela, che parla di
+   * sé, dei propri bisogni e a chi le sta accanto. */
+  'sono stanca': 30, 'sono stanco': 28, 'sono contenta': 26, 'sono contento': 24,
+  'sono triste': 24, 'sono felice': 22, 'sono arrabbiata': 22, 'sono preoccupata': 20,
+  'sono qui': 20, 'sono pronta': 20, 'sono sveglia': 20, 'sono scomoda': 22,
+  'sei stanco': 20, 'sei stanca': 20, 'sei bravo': 20, 'sei brava': 20, 'sei gentile': 22,
+  'hai ragione': 28, 'hai capito': 24, 'hai mangiato': 22, 'hai fatto': 22, 'hai sentito': 20,
+  'ho capito': 28, 'ho finito': 26, 'ho sbagliato': 24, 'ho dormito': 24, 'ho mangiato': 22,
+  'ho voglia': 26, 'ho la': 20, 'ho mal': 26, 'mal di': 30,
+  'lasciami sola': 24, 'lasciami stare': 26, 'lasciami dormire': 22,
+  'parla piano': 22, 'più piano': 26, 'più forte': 26, 'più tardi': 24, 'più vicino': 22,
+  'mi giri': 30, 'mi alzi': 26, 'mi metti': 26, 'mi dai': 28, 'mi porti': 26, 'mi aiuti': 26,
+  'mi manca': 24, 'mi manchi': 24, 'mi piace': 30, 'mi prude': 22, 'mi brucia': 22,
+  'mi serve': 26, 'mi scappa': 22, 'mi chiami': 24, 'mi leggi': 22, 'mi senti': 22,
+  'puoi chiamare': 24, 'puoi aprire': 22, 'puoi chiudere': 22, 'puoi darmi': 26,
+  'puoi aiutarmi': 26, 'puoi venire': 22, 'puoi spegnere': 22, 'puoi accendere': 22,
+  'vorrei bere': 26, 'vorrei mangiare': 26, 'vorrei dormire': 26, 'vorrei riposare': 24,
+  'vorrei vedere': 24, 'vorrei uscire': 22, 'vorrei parlare': 24, 'vorrei andare': 24,
+  'voglio andare': 24, 'voglio vedere': 24, 'voglio uscire': 20, 'voglio stare': 20,
+  'non ho': 28, 'non so': 28, 'non posso': 26, 'non mi': 26, 'non è': 24, 'non lo': 24,
+  'non ce': 20, 'non vedo': 22, 'non respiro': 24, 'non preoccuparti': 24,
+  'grazie mille': 26, 'grazie di': 22, 'ti amo': 30, 'ti prego': 24, 'ti ringrazio': 22,
+  'come stai': 30, 'come va': 26, 'che ore': 26, 'che cosa': 26, 'che fai': 22,
+  'a casa': 26, 'a letto': 26, 'in bagno': 28, 'in giardino': 20, 'al bagno': 22,
+  'buona notte': 24, 'buona giornata': 22, 'buon appetito': 24, 'buon compleanno': 26,
+  'un bacio': 26, 'un abbraccio': 24, 'un po': 30, 'un bicchiere': 26, 'di acqua': 24,
+  'la mano': 24, 'la testa': 30, 'la schiena': 26, 'la pancia': 24, 'la gamba': 22,
+  'il braccio': 22, 'il piede': 22, 'il dottore': 26, 'il telefono': 24, 'il medico': 24,
+  'le gambe': 24, 'le braccia': 22, 'gli occhi': 26, 'le medicine': 24, 'la coperta': 24,
+};
+
 /** Frequenze delle lettere nell'italiano scritto (%). */
 export const LETTER_FREQ_IT = {
   'E': 11.8, 'A': 11.7, 'I': 11.3, 'O': 9.8, 'N': 6.9, 'L': 6.5, 'R': 6.4,

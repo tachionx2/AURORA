@@ -237,6 +237,13 @@ class App {
     // dimensioni: si rimisura appena sono pronti.
     if (document.fonts?.ready) document.fonts.ready.then(() => this.scheduleFit());
     setTimeout(() => this.fitSpeakPanel(), 120);
+    /* Suggerimenti che capiscono la frase: i loro dati (qualche MB, tutti
+     * locali) si leggono A RIPOSO, qualche secondo dopo l'avvio, così il
+     * primo suggerimento della giornata non li aspetta. Se il caricamento
+     * fallisse, i suggerimenti restano semplicemente quelli di sempre. */
+    setTimeout(() => this._safe('contesto frase', () => {
+      if (this.cfg.prediction?.contestoFrase !== false) this.predictor?.preparaContesto?.();
+    }), 4000);
   }
 
   /**

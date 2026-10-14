@@ -303,6 +303,58 @@ correzione dell'utente; test sezioni 71 e 72):
 insegnava come frase detta. ⚠️ NON usare `keep` per questo: lo usano
 anche le frasi rapide di PUNTA, che vanno imparate.
 
+### Suggerimenti che capiscono la frase (dal 14/10, `prediction.contestoFrase`)
+
+Tre fonti in più in `suggerisci()`, dopo le sette di sempre (che NON sono
+cambiate di una virgola):
+- **8. significato** (`Senso.js` + `semantica-it.js`): affinità di ogni
+  candidata con le parole piene della frase, pesate per vicinanza e per
+  quanto sono NOMI ("chiesa" porta l'argomento, "andata" no). Conta lo
+  scarto rispetto alle RIVALI (stesse lettere), non il valore assoluto;
+  spinta extra per i legami netti (oltre 3 scarti).
+- **9. grammatica** (`Grammatica.js` + `grammatica-it.js`): categoria
+  attesa dopo le due parole precedenti. ASIMMETRICA: penalizza fino a
+  e⁻³ ciò che è impossibile ("in basta"), favorisce al massimo e^1,5 ciò
+  che è tipico. Si ASTIENE dopo "la/lo/le/gli/l'", che sono anche
+  pronomi ("la voglio"): lì decide l'accordo (fonte 7).
+- **10. coppie** (`Coppie.js` + `coppie-it.js`): espressioni dell'italiano
+  reale ("mal di testa"), solo legami POSITIVI.
+
+⚠️ Tre regole imparate misurando, da NON rompere:
+1. Le tre fonti danno PUNTI DI FREQUENZA che si SOMMANO e si applicano una
+   volta sola. La frequenza è logaritmica ("per" 90, "petto" 29, ma diecimila
+   volte più frequente): moltiplicare, o applicare le fonti una sopra
+   l'altra, faceva proporre "cornea" per "coperta".
+2. I punti toccano SOLO la parte generica del punteggio (la frequenza).
+   Lessico e frasi di Daniela e coppie di assistenza restano intatti:
+   altrimenti l'italiano scritto travolgeva "per favore", "sono stanca".
+3. Le coppie del parlato (`SEED_BIGRAMS_PARLATO`, "sono stanca", "hai
+   ragione") sono il contrappeso dei testi scritti e valgono SOLO con
+   `contestoFrase` acceso.
+
+Spento `contestoFrase`, i suggerimenti sono IDENTICI alla versione
+precedente (verificato su 30.029 suggerimenti, con lessico personale).
+I dati si caricano a riposo 4 s dopo l'avvio (`main.js`), in modo
+asincrono e senza rete; finché non ci sono, o se il caricamento fallisce,
+i suggerimenti sono quelli di prima. Memoria: circa 21 MB (niente indici:
+ricerche binarie su testo ordinato). Circa 2 ms a suggerimento.
+
+Fonti, licenze e lo script che rigenera i tre file (identici byte per
+byte): `strumenti/suggerimenti/`. Test: `percorsi` sezione 75.
+⚠️ `test/percorsi.mjs` aspetta il caricamento all'inizio: senza, i test
+girerebbero a volte prima e a volte dopo, con risultati diversi.
+
+**Limite noto**: "sono andata in chiesa a pr…" propone *prendere* e mette
+*pregare* terzo, nel gruppo. I vettori non distinguono abbastanza
+"pregare" da "preghiera" e "predicare". Dopo che Daniela l'avrà usata una
+volta, il suo lessico la porta in cima.
+
+### ⚠️ Licenze dei dati linguistici
+
+`semantica-it.js` e `coppie-it.js` derivano da dati in pubblico dominio
+(CC0). `grammatica-it.js` è sotto **CC BY-SA 4.0** (treebank UD), come
+opera separata, al pari del vocabolario qui sotto.
+
 ### ⚠️ Licenza del vocabolario
 
 `js/lang/vocabolario-it.js` deriva dai dati di `wordfreq`, distribuiti

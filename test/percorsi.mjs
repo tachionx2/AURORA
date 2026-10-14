@@ -15,6 +15,13 @@ import { GestureEngine } from '../js/signal/GestureEngine.js';
 
 let pass=0, fail=0;
 const ok=(c,m)=>{ if(c) pass++; else {fail++; console.log('  ✗ '+m);} };
+
+/* ⚠️ Grammatica, significato e coppie dell'italiano si caricano in modo
+ * asincrono, al primo uso. Senza aspettarli qui, un test girerebbe a
+ * volte prima e a volte dopo il caricamento, con risultati diversi.
+ * Si aspettano subito: è lo stato reale del programma, che li legge a
+ * riposo pochi secondi dopo l'avvio. */
+await new Predictor(deepClone(DEFAULT_CONFIG)).preparaContesto();
 const cfg = deepClone(DEFAULT_CONFIG);
 
 /** Un banco che simula ESATTAMENTE l'unico gesto disponibile. */
@@ -2394,6 +2401,112 @@ function buildTreeFor(b){ return b.eng.tree; }
   scelto.scan.suggerimentiDirettiSoglia = 0.5;
   ok(migrateConfig(scelto).scan.suggerimentiDirettiSoglia === 0.5,
      '74b. una soglia scelta a mano resta com era');
+}
+
+/* ══════ 75. SUGGERIMENTI CHE CAPISCONO LA FRASE ══════
+ *
+ * Grammatica (che tipo di parola può venire adesso), significato (di
+ * cosa si sta parlando) ed espressioni dell'italiano reale. Misurato su
+ * frasi di assistenza e su testi italiani veri: le parole piene giuste
+ * al primo colpo dopo due lettere sono passate dal 18% al 42% (frasi di
+ * assistenza) e dall'8% al 24% (testi veri). Qui si fissano i casi che
+ * contano, e soprattutto ciò che NON deve peggiorare. */
+{
+  const { Predictor: P75, scegliSuggerimenti: sc75 } = await import('../js/lang/Predictor.js');
+  const { caricaSenso } = await import('../js/lang/Senso.js');
+  const { caricaGrammatica } = await import('../js/lang/Grammatica.js');
+  const { caricaCoppie } = await import('../js/lang/Coppie.js');
+  const [Ms, Mg, Mc] = await Promise.all([caricaSenso(), caricaGrammatica(), caricaCoppie()]);
+  ok(Ms && Mg && Mc, '75a. i tre modelli si caricano, senza rete');
+
+  const nuovo = (mod) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.prediction.minPrefixForWord = 2;
+    if (mod) mod(c);
+    return new P75(c);
+  };
+  const p = nuovo();
+  const top = (frase, pre, n = 4, q = p) =>
+    q.suggerisci({ prefisso: pre, parole: frase ? frase.split(' ') : [], n }).map(s => s.parola);
+
+  // ── Grammatica ──
+  ok(top('ho bisogno di andare in', 'ba')[0] === 'bagno',
+     `75b. "andare in ba…" → bagno, non "basta" (${top('ho bisogno di andare in', 'ba').join(', ')})`);
+  ok(top('io', 'vo', 2).some(w => w === 'voglio' || w === 'vado'),
+     `75c. "io vo…" → un verbo in prima persona (${top('io', 'vo').join(', ')})`);
+  // ── Significato e espressioni ──
+  ok(top('sono andata in chiesa a', 'pr').includes('pregare'),
+     `75d. "chiesa a pr…" → pregare nel gruppo (${top('sono andata in chiesa a', 'pr').join(', ')})`);
+  ok(top('il dottore ha cambiato la', 'te').includes('terapia'),
+     `75e. "il dottore ha cambiato la te…" → terapia nel gruppo (${top('il dottore ha cambiato la', 'te').join(', ')})`);
+  ok(top('ho mal di', 'te')[0] === 'testa',
+     `75f. "mal di te…" → testa per prima (${top('ho mal di', 'te').join(', ')})`);
+  ok(top('devo prendere le', 'me')[0] === 'medicine',
+     `75g. "devo prendere le me…" → medicine (${top('devo prendere le', 'me').join(', ')})`);
+
+  /* ── Ciò che NON deve peggiorare ──
+   * Grammatica e significato vengono da testi SCRITTI: lì "per" porta a
+   * "fare", "sono" a "stati", "hai" a "fatto". Il parlato di Daniela
+   * deve restare al suo posto. */
+  ok(top('abbassa il letto per', 'fa')[0] === 'favore',
+     `75h. "per fa…" → favore, non "fare" (${top('abbassa il letto per', 'fa').join(', ')})`);
+  ok(top('sono', 'st').some(w => w === 'stanca' || w === 'stanco'),
+     `75i. "sono st…" → stanca/stanco nel gruppo (${top('sono', 'st').join(', ')})`);
+  ok(top('hai', 'ra').includes('ragione'),
+     `75l. "hai ra…" → ragione nel gruppo (${top('hai', 'ra').join(', ')})`);
+  ok(top('la', 'vo').includes('voglio'),
+     `75m. "la vo…" → voglio resta possibile: "la" è anche pronome (${top('la', 'vo').join(', ')})`);
+  ok(top('ho', 'se')[0] === 'sete' && top('ho', 'fa')[0] === 'fame',
+     '75n. "ho se…" → sete, "ho fa…" → fame: il registro di assistenza resta');
+  // Le frasi di Daniela restano le più forti di tutte.
+  const pp = nuovo();
+  for (let i = 0; i < 3; i++) pp.learnSentence('portami il plaid di lana grigia');
+  ok(top('portami il', 'pl', 1, pp)[0] === 'plaid',
+     '75o. una parola sua, rara nell italiano, vince comunque');
+  for (let i = 0; i < 3; i++) pp.learnSentence('mi giri sul fianco sinistro');
+  ok(top('mi giri sul fianco', 'si', 1, pp)[0] === 'sinistro',
+     '75p. una sua frase continua come sempre');
+
+  /* ── Non toglie mai nulla: cambia solo l'ordine ── */
+  const spento = nuovo(c => { c.prediction.contestoFrase = false; });
+  const tutte = (q) => new Set(q.suggerisci({ prefisso: 'pr', parole: ['sono', 'andata', 'in', 'chiesa', 'a'], n: 100000 }).map(s => s.parola));
+  const A = tutte(p), B = tutte(spento);
+  ok([...B].every(w => A.has(w)), `75q. nessuna parola sparisce dalle candidate (${[...B].filter(w => !A.has(w)).slice(0, 5).join(', ')})`);
+
+  /* ── Spento, è esattamente la versione di prima ──
+   * (verificato a parte su trentamila suggerimenti; qui i casi tipici) */
+  ok(top('ho bisogno di andare in', 'ba', 4, spento)[0] === 'basta',
+     '75r. spento, "in ba…" torna a proporre "basta" come prima: il cambiamento è tutto qui dentro');
+  ok(DEFAULT_CONFIG.prediction.contestoFrase === true, '75s. acceso di default');
+
+  // ── Veloce: si ricalcola a ogni lettera ──
+  const fr = 'il dottore ha detto che domani mattina devo fare gli esami del sangue'.split(' ');
+  const t0 = performance.now(); let n = 0;
+  for (let k = 0; k < fr.length; k++) for (let L = 2; L < fr[k].length; L++) {
+    p.suggerisci({ prefisso: fr[k].slice(0, L), parole: fr.slice(0, k), n: 7 }); n++;
+  }
+  const ms = (performance.now() - t0) / n;
+  ok(ms < 25, `75t. un suggerimento costa ${ms.toFixed(1)} ms (limite 25)`);
+
+  // ── La proposta a voce usa la stessa scelta ──
+  const cfgV = deepClone(DEFAULT_CONFIG); cfgV.prediction.minPrefixForWord = 2; cfgV.scan.suggerimentiDiretti = true;
+  const pv = new P75(cfgV);
+  ok(sc75(pv, { letters: 'ba', words: ['ho', 'bisogno', 'di', 'andare', 'in'] }, cfgV).proposte[0] === 'bagno',
+     '75u. la proposta a voce in corsivo segue gli stessi suggerimenti');
+
+  // ── Provenienza e licenze dichiarate nei file di dati ──
+  const fs75 = await import('node:fs');
+  const R75 = (f) => fs75.readFileSync(new URL('../js/lang/' + f, import.meta.url), 'utf8').slice(0, 3000);
+  ok(/CC0/.test(R75('semantica-it.js')) && /Explosion|fastText/.test(R75('semantica-it.js')),
+     '75v. semantica-it.js dichiara provenienza (vettori fastText di Explosion) e licenza (CC0)');
+  ok(/Universal Dependencies|universaldependencies/.test(R75('grammatica-it.js')) && /CC BY-SA 4\.0|ShareAlike 4\.0/.test(R75('grammatica-it.js')),
+     '75w. grammatica-it.js dichiara provenienza (treebank UD) e licenza (CC BY-SA 4.0)');
+  ok(/Common Voice/.test(R75('coppie-it.js')) && /CC0/.test(R75('coppie-it.js')),
+     '75x. coppie-it.js dichiara provenienza (Mozilla Common Voice) e licenza (CC0)');
+  const sw75 = fs75.readFileSync(new URL('../sw.js', import.meta.url), 'utf8');
+  ok(['Senso.js', 'semantica-it.js', 'Grammatica.js', 'grammatica-it.js', 'Coppie.js', 'coppie-it.js']
+       .every(f => sw75.includes(`'./js/lang/${f}'`)),
+     '75y. i sei file sono precaricati: offline i suggerimenti capiscono la frase');
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

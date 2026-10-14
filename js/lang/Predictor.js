@@ -14,8 +14,11 @@
  * corpus generico, perché segue la vita attuale della persona.
  */
 
-import { SEED_WORDS, SEED_BIGRAMS, LETTER_FREQ_IT, VOCABOLARIO_IT, FREQ_FASCIA, FREQ_BASE } from './seed-it.js';
+import { SEED_WORDS, SEED_BIGRAMS, SEED_BIGRAMS_PARLATO, LETTER_FREQ_IT, VOCABOLARIO_IT, FREQ_FASCIA, FREQ_BASE } from './seed-it.js';
 import { VOCABOLARIO_FREQ_IT } from './vocabolario-it.js';
+import { senso, caricaSenso, contestoDi, affinita } from './Senso.js';
+import { grammatica, caricaGrammatica, attese, fattoreGrammatica, quantoNome } from './Grammatica.js';
+import { coppie, caricaCoppie, legami } from './Coppie.js';
 
 const DAY_MS = 86400000;
 
@@ -593,6 +596,9 @@ export class Predictor {
    *          misura quanto il suggerimento è sicuro, ed è ciò che
    *          decide se vale la pena proporlo a voce.
    */
+  /** Carica il significato delle parole; per chi vuole aspettarlo (test). */
+  preparaContesto() { return Promise.all([caricaSenso(), caricaGrammatica(), caricaCoppie()]); }
+
   suggerisci({ prefisso = '', parole = [], n = 4 } = {}) {
     const P = this.cfg.prediction;
     if (!P?.enabled) return [];
@@ -603,8 +609,15 @@ export class Predictor {
     if (!p || p.length < Math.max(1, P.minPrefixForWord || 1)) return [];
 
     const S = (parole || []).flatMap(w => token(w));
+    /* Grammatica, significato e coppie dell'italiano, se già caricati
+     * (altrimenti il caricamento parte ora e intanto si fa senza).
+     * Spegnendo `contestoFrase` i suggerimenti sono quelli di prima. */
+    const ctxOn = P.contestoFrase !== false;
+    const M = ctxOn && P.significato !== false ? senso() : null;
+    const Gm = ctxOn && P.grammatica !== false ? grammatica() : null;
+    const Cp = ctxOn && P.coppie !== false ? coppie() : null;
     // Stessa domanda, stesse statistiche: stessa risposta, senza ricalcolare.
-    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}`;
+    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}|${M ? 1 : 0}|${Gm ? 1 : 0}|${Cp ? 1 : 0}|${P.coppieK}|${P.coppieK3}|${P.puntiMin}|${P.gramMax}|${P.sensoBeta}|${P.sensoSoglia}|${P.sensoMax}|${P.gramK}|${P.sensoNomi}|${P.sensoForte}|${P.sensoZForte}`;
     if (this._cache?.chiave === chiave) return this._cache.esito;
 
     const C = corpus();
@@ -616,11 +629,15 @@ export class Predictor {
 
     // 1. Frequenza dell'italiano — ricerca binaria sul prefisso.
     const cw = P.corpusWeight ?? 0.2;
+    // La parte "italiano generico" di ogni punteggio, tenuta a parte:
+    // è la sola che significato, grammatica e coppie possono affinare.
+    const generico = new Map();
     let lo = 0, hi = C.ordinate.length;
     while (lo < hi) { const m = (lo + hi) >> 1; if (C.ordinate[m] < p) lo = m + 1; else hi = m; }
     for (let i = lo; i < C.ordinate.length && C.ordinate[i].startsWith(p); i++) {
       const w = C.ordinate[i];
       add(w, cw * C.freq.get(w));
+      if (w !== p) generico.set(w, cw * C.freq.get(w));
     }
 
     // 2. Lessico personale: pesa tre volte il suo punteggio, perché una
@@ -638,6 +655,14 @@ export class Predictor {
       for (const [k, v] of Object.entries(SEED_BIGRAMS)) {
         const [a, b] = k.split(' ');
         if (a === w1) add(b, v * cw * 2);
+      }
+      // Il parlato in prima persona: contrappeso di grammatica e
+      // significato, che vengono da testi scritti. Solo insieme a loro.
+      if (ctxOn) {
+        for (const [k, v] of Object.entries(SEED_BIGRAMS_PARLATO)) {
+          const [a, b] = k.split(' ');
+          if (a === w1) add(b, v * cw * 2);
+        }
       }
     }
 
@@ -684,12 +709,130 @@ export class Predictor {
       }
     }
 
+    const prima7 = new Map(cand);
     // 7. Accordo con la parola precedente: articolo → nome, soggetto → verbo.
     if (w1) {
       for (const [w, s] of cand) {
         const f = fattoreAccordo(w1, w, C.vuote);
         if (f !== 1) cand.set(w, s * f);
       }
+    }
+
+    /* ══ Fonti 8-10: significato, grammatica, coppie dell'italiano ══
+     *
+     * ⚠️ Ognuna aggiunge PUNTI DI FREQUENZA alla parola, e i punti si
+     * SOMMANO, applicati una volta sola alla fine. La frequenza è su
+     * scala logaritmica: sommare punti lì equivale a moltiplicare la
+     * probabilità reale, ed è il modo giusto di combinare indizi.
+     * Il primo tentativo applicava le tre fonti una sopra l'altra: per
+     * una parola rara come "cornea" tre spinte moderate diventavano
+     * enormi, e "ho freddo mettimi la co…" proponeva "cornea" invece di
+     * "coperta". */
+    const punti = new Map();
+    const piu = (w, b) => { if (b) punti.set(w, (punti.get(w) || 0) + b); };
+
+    // 8. Argomento della frase, dal SIGNIFICATO delle parole.
+    if (M) {
+      const piene = S.filter(w => w.length >= 3 && !C.vuote.has(w));
+      /* L'argomento lo portano soprattutto i NOMI: "sono andata in
+       * chiesa" parla di chiesa, non di andare. Senza questo peso
+       * "andata" attirava altri verbi di movimento. */
+      const pn = P.sensoNomi ?? 0.8;
+      const pesoParola = Gm ? (w) => { const q = quantoNome(Gm, w); return q == null ? 1 : (1 - pn) + pn * q; } : null;
+      const Cx = contestoDi(M, piene, 0.85, pesoParola);
+      if (Cx) {
+        // Affinità di ogni candidata con la frase…
+        const aff = [];
+        for (const w of cand.keys()) {
+          if (C.vuote.has(w)) continue;
+          const a = affinita(Cx, w);
+          if (a != null) aff.push([w, a]);
+        }
+        // …confrontata con quella delle rivali: conta chi si distingue.
+        if (aff.length >= 3) {
+          let m = 0; for (const [, a] of aff) m += a; m /= aff.length;
+          let v = 0; for (const [, a] of aff) v += (a - m) ** 2;
+          const ds = Math.sqrt(v / aff.length) || 1;
+          /* ⚠️ Il significato si SOMMA sulla scala della frequenza, non
+           * la moltiplica. Quella scala è logaritmica: "per" vale 90 e
+           * "petto" 29, ma "per" è diecimila volte più frequente. Un
+           * moltiplicatore 4 su quella scala equivale a ×10000 nella
+           * realtà: il primo tentativo faceva perdere il primo posto a
+           * "per", "con", "che", "non". Misurato, e corretto così: ogni
+           * scarto di affinità vale `kappa` punti di frequenza. */
+          const kappa = P.sensoBeta ?? 4, zMin = P.sensoSoglia ?? -2, zMax = P.sensoMax ?? 3;
+          /* Un legame NETTO con l'argomento — "chiesa" e "pregare",
+           * "dottore" e "terapia" — vale più della somma dei legami
+           * deboli: chi assiste, in quei casi, pensa subito a quella
+           * parola. La spinta in più scatta solo oltre `zForte` scarti. */
+          const k2 = P.sensoForte ?? 25, zf = P.sensoZForte ?? 3;
+          for (const [w, a] of aff) {
+            const zr = (a - m) / ds;
+            const z = Math.min(zMax, Math.max(zMin, zr));
+            const extra = k2 * Math.max(0, Math.min(5, zr) - zf);
+            piu(w, kappa * z + extra);
+          }
+        }
+      }
+    }
+
+    // 9. Che tipo di parola può venire adesso, dalle due precedenti.
+    /* ⚠️ "la", "lo", "le", "gli" sono anche PRONOMI: "la voglio", "lo
+     * so", "gli dico". Nei testi scritti sono quasi sempre articoli, e la
+     * grammatica spingeva i nomi fino a far sparire "voglio" dopo "la".
+     * Lì decide l'accordo (fonte 7), che è stato tarato apposta su
+     * questa ambiguità: la grammatica si astiene. */
+    const ultima = S[S.length - 1];
+    const astieni = DETERMINANTI.get(ultima)?.sicuro === false || ultima === 'l';
+    if (Gm && !astieni) {
+      const d = attese(Gm, S);
+      if (d) {
+        const kg = P.gramK ?? 10;
+        for (const w of cand.keys()) {
+          const g = fattoreGrammatica(Gm, d, w);
+          if (g === 1) continue;
+          /* ⚠️ Asimmetrico: ciò che la grammatica dice IMPOSSIBILE ("in
+           * basta") scende fino a e⁻³; ciò che dice TIPICO sale al massimo
+           * di e^1,5. I testi da cui viene sono scritti, e lì "sono" è
+           * quasi sempre "sono stati", "hai" quasi sempre "hai fatto":
+           * spinte più forti travolgevano "sono stanca", "hai ragione". */
+          const lg = Math.min(P.gramMax ?? 1.5, Math.max(-3, Math.log(g)));
+          piu(w, kg * lg);
+        }
+      }
+    }
+
+    // 10. Parole che nell'italiano reale vanno insieme a quelle appena scritte.
+    if (Cp && S.length) {
+      const { d1, d2 } = legami(Cp, S);
+      if (d1 || d2) {
+        const kb = P.coppieK ?? 7, kt = P.coppieK3 ?? 18;
+        for (const w of cand.keys()) {
+          piu(w, kb * (d1?.get(w) || 0) + kt * (d2?.get(w) || 0));
+        }
+      }
+    }
+
+    /* I punti raccolti, applicati una volta sola — e SOLO alla parte
+     * generica del punteggio.
+     *
+     * ⚠️ Significato, grammatica e coppie vengono da testi scritti, dove
+     * "per" è seguito quasi sempre da un infinito e "sono" da "stato".
+     * Applicati a tutto il punteggio, travolgevano le prove più preziose
+     * — il lessico e le frasi di Daniela, le coppie dell'assistenza:
+     * "per fa…" proponeva "fare" invece di "favore", "sono st…" perdeva
+     * "stanca". Ciò che Daniela dice davvero resta com'è: l'italiano
+     * generico affina solo ciò che è generico. */
+    const fMin = P.puntiMin ?? 0.15;
+    for (const [w, b] of punti) {
+      const F = Math.max(5, C.freq.get(w) || 0);
+      const f = Math.max(fMin, (F + b) / F);
+      const tot = cand.get(w);
+      // La parte generica ha già subito l'accordo (fonte 7) insieme al resto.
+      const g0 = generico.get(w) || 0;
+      const quota = Math.min(1, g0 / (prima7.get(w) || tot || 1));
+      const g = tot * quota;
+      cand.set(w, (tot - g) + g * f);
     }
 
     const tutti = [...cand.entries()].sort((a, b) => b[1] - a[1]);

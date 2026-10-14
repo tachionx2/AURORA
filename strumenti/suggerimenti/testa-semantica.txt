@@ -1,0 +1,21 @@
+/**
+ * semantica-it.js — IL SIGNIFICATO DELLE PAROLE, IN NUMERI.  (generato)
+ *
+ * Per ognuna delle parole del vocabolario dei suggerimenti, 64 numeri
+ * che ne descrivono il significato: parole di argomento vicino hanno
+ * numeri simili. "chiesa" è vicina a "pregare", "preghiera", "messa";
+ * lontana da "presidente" o "prendere". Serve ai suggerimenti per
+ * capire DI COSA si sta parlando nella frase.
+ *
+ * Provenienza: vettori fastText per l'italiano di Explosion (spaCy,
+ * it_core_news_lg 3.7.0; addestrati su OSCAR Common Crawl + Wikipedia),
+ * rilasciati in PUBBLICO DOMINIO (CC0). Ridotti da 300 a 64 dimensioni
+ * (analisi delle componenti principali, centrati) e quantizzati a un
+ * byte: conservano circa il 98% della struttura originale.
+ *
+ * Formato: SEMANTICA_IT.parole = parole separate da "\n", in ORDINE
+ * ALFABETICO (si cercano con una ricerca binaria), nell'ordine delle righe; SEMANTICA_IT.dati = base64 di parole×D byte con segno
+ * (vettori di norma 1 × 127).
+ *
+ * ⚠️ Non modificare a mano: si rigenera dallo script di costruzione.
+ */

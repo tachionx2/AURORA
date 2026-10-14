@@ -1,0 +1,24 @@
+/**
+ * coppie-it.js — QUALI PAROLE VANNO INSIEME, NELL'ITALIANO REALE.  (generato)
+ *
+ * "a pregare", "mal di testa", "in bagno": coppie e terne di parole che
+ * nell'italiano compaiono insieme molto più spesso del caso. Per ogni
+ * parola (o coppia di parole) precedente, le parole che la seguono
+ * nettamente più spesso del normale, con la forza del legame.
+ *
+ * Provenienza: le frasi italiane di Mozilla Common Voice
+ * (https://github.com/common-voice/common-voice, cartella server/data/it),
+ * circa nove milioni di parole, rilasciate in PUBBLICO DOMINIO (CC0).
+ * Tenute solo le coppie viste almeno {MINC} volte e almeno {RMIN} volte più
+ * frequenti del caso.
+ *
+ * Le righe sono in ORDINE ALFABETICO del contesto (si cercano con una
+ * ricerca binaria, senza costruire indici in memoria).
+ *
+ * Codifica: una riga per contesto — "parola" o "parola parola" — poi,
+ * per ogni parola che segue, 3 caratteri (la sua posizione nel
+ * vocabolario, in base 36) e una cifra (la forza del legame: ln del
+ * rapporto ÷ 0,5).
+ *
+ * ⚠️ Non modificare a mano: si rigenera dallo script di costruzione.
+ */
