@@ -2509,5 +2509,41 @@ function buildTreeFor(b){ return b.eng.tree; }
      '75y. i sei file sono precaricati: offline i suggerimenti capiscono la frase');
 }
 
+/* ══════ 76. IL SINGOLARE PRIMA DEL PLURALE ══════
+ *
+ * Nel parlato il singolare è il caso normale. Prima di questa correzione
+ * "sono andat…" proponeva "andate, andati" prima di "andata": i testi
+ * scritti da cui vengono grammatica ed espressioni leggono "sono" come
+ * "loro sono", per Daniela è "io sono". Il plurale viene prima solo se
+ * il contesto lo chiede. */
+{
+  const { Predictor: P76 } = await import('../js/lang/Predictor.js');
+  const c = deepClone(DEFAULT_CONFIG);
+  c.prediction.minPrefixForWord = 2;
+  const p = new P76(c);
+  const ordine = (frase, pre) => p.suggerisci({ prefisso: pre, parole: frase ? frase.split(' ') : [], n: 30 }).map(s => s.parola);
+  const prima = (frase, pre, a, b) => { const r = ordine(frase, pre); const i = r.indexOf(a), j = r.indexOf(b); return i >= 0 && (j < 0 || i < j); };
+  const S = [['', 'andat', 'andato', 'andati'], ['sono', 'andat', 'andata', 'andate'], ['ieri sono', 'andat', 'andata', 'andati'],
+             ['sono', 'stat', 'stata', 'state'], ['sono', 'stanc', 'stanca', 'stanche'], ['', 'montagn', 'montagna', 'montagne'],
+             ['', 'amic', 'amico', 'amici'], ['', 'bambin', 'bambino', 'bambini'], ['mi fa male la', 'gamb', 'gamba', 'gambe'],
+             ['', 'giorn', 'giorno', 'giorni'], ['', 'bicchier', 'bicchiere', 'bicchieri']];
+  for (const [f, pre, sg, pl] of S) {
+    ok(prima(f, pre, sg, pl), `76. "${f} ${pre}…" → ${sg} prima di ${pl} (${ordine(f, pre).slice(0, 4).join(', ')})`);
+  }
+  // Il plurale resta primo quando il contesto lo chiede.
+  const P = [['i', 'bambin', 'bambini', 'bambino'], ['mi fanno male le', 'gamb', 'gambe', 'gamba'],
+             ['devo prendere le', 'medicin', 'medicine', 'medicina'], ['tanti', 'amic', 'amici', 'amico'],
+             ['due', 'giorn', 'giorni', 'giorno'], ['noi siamo', 'andat', 'andati', 'andata'],
+             ['questi', 'giorn', 'giorni', 'giorno']];
+  for (const [f, pre, pl, sg] of P) {
+    ok(prima(f, pre, pl, sg), `76. "${f} ${pre}…" → ${pl} prima di ${sg}: il contesto vuole il plurale (${ordine(f, pre).slice(0, 4).join(', ')})`);
+  }
+  // "sono" non è il plurale di nulla, "auguri" non scende sotto "auguro".
+  ok(ordine('', 'so')[0] === 'sono', `76. "so…" → sono resta primo (${ordine('', 'so').slice(0, 3).join(', ')})`);
+  const spenta = deepClone(c); spenta.prediction.contestoFrase = false;
+  ok(new P76(spenta).suggerisci({ prefisso: 'andat', parole: ['sono'], n: 4 }).length > 0,
+     '76. con "Suggerimenti che capiscono la frase" spento la regola non interviene e tutto funziona');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 process.exit(fail?1:0);

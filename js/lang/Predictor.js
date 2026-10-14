@@ -17,7 +17,7 @@
 import { SEED_WORDS, SEED_BIGRAMS, SEED_BIGRAMS_PARLATO, LETTER_FREQ_IT, VOCABOLARIO_IT, FREQ_FASCIA, FREQ_BASE } from './seed-it.js';
 import { VOCABOLARIO_FREQ_IT } from './vocabolario-it.js';
 import { senso, caricaSenso, contestoDi, affinita } from './Senso.js';
-import { grammatica, caricaGrammatica, attese, fattoreGrammatica, quantoNome } from './Grammatica.js';
+import { grammatica, caricaGrammatica, attese, fattoreGrammatica, quantoNome, numeroNominale } from './Grammatica.js';
 import { coppie, caricaCoppie, legami } from './Coppie.js';
 
 const DAY_MS = 86400000;
@@ -135,6 +135,22 @@ const NON_NOMI = new Set(('senza sopra sotto dentro fuori contro verso dopo dura
   + 'neanche nemmeno neppure tuttavia comunque eppure finché siccome sebbene affinché '
   + 'oltre tranne fra tra per con della delle degli dello sul sulla nel nella non che '
   + 'ma se anzitutto altrimenti benché nonché ovvero ossia purché qualora').split(' '));
+
+/* Segni di PLURALE nelle parole appena scritte: articoli e determinanti
+ * plurali, numeri, quantità, soggetti plurali. Servono a non anteporre
+ * il singolare quando la frase vuole il plurale ("i bambi…" → bambini). */
+const SEGNI_PLURALE = new Set(('i gli le dei degli delle ai agli alle dai dagli dalle nei negli '
+  + 'nelle sui sugli sulle coi questi queste quelli quelle quei quegli miei mie tuoi tue suoi '
+  + 'sue nostri nostre vostri vostre alcuni alcune molti molte tanti tante pochi poche '
+  + 'tutti tutte troppi troppe parecchi parecchie certi certe vari varie diversi diverse altri '
+  + 'altre entrambi entrambe ambedue due tre quattro cinque sei sette otto nove dieci undici '
+  + 'dodici venti cento mille noi voi siamo siete').split(' '));
+/** C'è un segno chiaro di plurale fra le ultime tre parole? ("sono" no:
+ *  per Daniela è quasi sempre "io sono".) */
+function contestoPlurale(S) {
+  for (let k = 1; k <= 3; k++) if (SEGNI_PLURALE.has(S[S.length - k])) return true;
+  return false;
+}
 
 /**
  * Quanto la parola `w` concorda con la parola che la precede.
@@ -617,7 +633,7 @@ export class Predictor {
     const Gm = ctxOn && P.grammatica !== false ? grammatica() : null;
     const Cp = ctxOn && P.coppie !== false ? coppie() : null;
     // Stessa domanda, stesse statistiche: stessa risposta, senza ricalcolare.
-    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}|${M ? 1 : 0}|${Gm ? 1 : 0}|${Cp ? 1 : 0}|${P.coppieK}|${P.coppieK3}|${P.puntiMin}|${P.gramMax}|${P.sensoBeta}|${P.sensoSoglia}|${P.sensoMax}|${P.gramK}|${P.sensoNomi}|${P.sensoForte}|${P.sensoZForte}`;
+    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}|${M ? 1 : 0}|${Gm ? 1 : 0}|${Cp ? 1 : 0}|${P.coppieK}|${P.coppieK3}|${P.puntiMin}|${P.gramMax}|${P.singolarePrima}|${P.pluraleK}|${P.sonoSingolare}|${P.sensoBeta}|${P.sensoSoglia}|${P.sensoMax}|${P.gramK}|${P.sensoNomi}|${P.sensoForte}|${P.sensoZForte}`;
     if (this._cache?.chiave === chiave) return this._cache.esito;
 
     const C = corpus();
@@ -784,8 +800,14 @@ export class Predictor {
      * questa ambiguità: la grammatica si astiene. */
     const ultima = S[S.length - 1];
     const astieni = DETERMINANTI.get(ultima)?.sicuro === false || ultima === 'l';
+    /* ⚠️ "sono", per Daniela, è "IO sono": nei testi scritti da cui
+     * vengono grammatica ed espressioni è quasi sempre "LORO sono", e
+     * "sono andat…" proponeva "andate, andati" prima di "andata". Per
+     * grammatica ed espressioni "sono" si legge come la forma singolare
+     * "è": dopo, ci si aspetta "andata", "stata", "stanca". */
+    const Sp = P.sonoSingolare !== false ? S.map(w => (w === 'sono' ? 'è' : w)) : S;
     if (Gm && !astieni) {
-      const d = attese(Gm, S);
+      const d = attese(Gm, Sp);
       if (d) {
         const kg = P.gramK ?? 10;
         for (const w of cand.keys()) {
@@ -804,12 +826,37 @@ export class Predictor {
 
     // 10. Parole che nell'italiano reale vanno insieme a quelle appena scritte.
     if (Cp && S.length) {
-      const { d1, d2 } = legami(Cp, S);
+      const { d1, d2 } = legami(Cp, Sp);
       if (d1 || d2) {
         const kb = P.coppieK ?? 7, kt = P.coppieK3 ?? 18;
         for (const w of cand.keys()) {
           piu(w, kb * (d1?.get(w) || 0) + kt * (d2?.get(w) || 0));
         }
+      }
+    }
+
+    /* 11. Il SINGOLARE prima del plurale, se il contesto non dice plurale.
+     *
+     * Nel parlato il singolare è il caso normale: "andata" prima di
+     * "andati", "montagna" prima di "montagne". I testi scritti da cui
+     * vengono grammatica e coppie dicevano il contrario dopo "sono", che
+     * lì è quasi sempre "sono andati": per Daniela è "io sono".
+     * Scende solo un plurale il cui SINGOLARE è fra le candidate (stessa
+     * radice): "occhiali" o "spaghetti", che un singolare non hanno, non
+     * vengono toccati. Se nelle parole precedenti c'è un segno chiaro di
+     * plurale — "i", "le", "dei", "questi", "tanti", "due", "noi",
+     * "siamo" — non scende nulla. */
+    if (Gm && P.singolarePrima !== false && !contestoPlurale(S)) {
+      const kn = P.pluraleK ?? 6;
+      const singolari = new Set();
+      for (const w of cand.keys()) {
+        const n = w.length > 3 ? numeroNominale(Gm, w) : null;
+        if (n && n.sing > 0.5) singolari.add(w.slice(0, -1));
+      }
+      for (const w of cand.keys()) {
+        if (w.length <= 3 || !singolari.has(w.slice(0, -1))) continue;
+        const n = numeroNominale(Gm, w);
+        if (n && n.plur > 0.5) piu(w, -kn * n.plur);
       }
     }
 

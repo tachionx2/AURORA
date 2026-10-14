@@ -140,3 +140,24 @@ export function quantoNome(g, w) {
   }
   return tot > 0 ? s / tot : null;
 }
+
+/**
+ * Il NUMERO di una parola come nome, aggettivo o participio: quanta
+ * parte delle sue letture è nominale al plurale e quanta al singolare,
+ * fra 0 e 1. I verbi coniugati ("sono", "auguro") non contano: "sono"
+ * non è il plurale di nulla, e "auguro" non è il singolare di "auguri".
+ * null se la parola non è nel lessico.
+ */
+export function numeroNominale(g, w) {
+  const p = g.lessico.get(w);
+  if (!p?.length) return null;
+  let plur = 0, sing = 0, tot = 0;
+  for (const [i, q] of p) {
+    const t = g.nomiTag[i];
+    tot += q;
+    if (!/^(N|A|V-part)-/.test(t)) continue;
+    if (/p$/.test(t)) plur += q;
+    else if (/s$/.test(t)) sing += q;
+  }
+  return tot > 0 ? { plur: plur / tot, sing: sing / tot } : null;
+}

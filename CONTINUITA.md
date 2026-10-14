@@ -332,6 +332,17 @@ cambiate di una virgola):
    ragione") sono il contrappeso dei testi scritti e valgono SOLO con
    `contestoFrase` acceso.
 
+4. **Singolare prima del plurale** (fonte 11, test sezione 76): un
+   nome, aggettivo o participio plurale scende se il suo singolare è fra
+   le candidate, a meno che le ultime tre parole contengano un segno di
+   plurale (i, le, dei, questi, tanti, due, noi, siamo…). I verbi
+   coniugati sono esclusi ("sono" non è il plurale di nulla, "auguro" non
+   è il singolare di "auguri").
+5. Per grammatica ed espressioni **"sono" si legge "è"**: nei testi
+   scritti è "loro sono", per Daniela "io sono". Era la causa di "sono
+   andat…" → "andate, andati". Costa 1-3 decimi sui testi giornalistici,
+   guadagna sul parlato: scelta voluta.
+
 Spento `contestoFrase`, i suggerimenti sono IDENTICI alla versione
 precedente (verificato su 30.029 suggerimenti, con lessico personale).
 I dati si caricano a riposo 4 s dopo l'avvio (`main.js`), in modo
