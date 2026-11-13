@@ -210,6 +210,7 @@ export class GestureEngine {
    */
   nuovaSessione() {
     this._rebuild();
+    this._insegna = null;
     for (const eye of ['left', 'right']) {
       this.blink[eye]?.reset?.();
       this.burst[eye]?.reset?.();
@@ -1039,7 +1040,9 @@ export class GestureEngine {
          * in modo che la soglia cada esattamente a quella frazione
          * dell'escursione. L'ampiezza diventa allora costante per
          * costruzione, perché l'escursione è stabile. */
-        if (sE.sogliaRelativa && A.escursioneGrezza > 0) {
+        // Con la modalità normalizzata accesa, la soglia come frazione
+        // non si applica: le due si escludono (v. `set` in main).
+        if (sE.sogliaRelativa && !s.modoNormalizzato && A.escursioneGrezza > 0) {
           const fr = sE.sogliaFrazione ?? 0.40;
           const soglia = Math.max(0.5, s.thresholdOn || 3.5);
           A.sigma = Math.max(sE.minSigma || 0.004,
@@ -1058,7 +1061,7 @@ export class GestureEngine {
         A.valid = true;
         // Modalità normalizzata: SOLO se accesa. Spenta, questa riga non
         // esiste e tutto ciò che segue è identico a prima.
-        if (s.modoNormalizzato) this._normalizza(t, A, s);
+        if (s.modoNormalizzato) { A.sigmaStd = A.sigma; this._normalizza(t, A, s, eye, axis); }
         else if (A.norm) A.norm = null;
         res.axes[axis] = {
           raw: A.raw, smooth: A.smooth, baseline: A.baseline, sigma: A.sigma,
@@ -1103,6 +1106,13 @@ export class GestureEngine {
       this._aggiornaMisura();
       out.misura = { ...this.misura };
       return out;
+    }
+    if (this._insegna) {
+      // "Insegna il gesto": finché raccoglie, nessun gesto diventa un
+      // comando. Si osserva soltanto, come durante la misura.
+      this._avanzaInsegna(t);
+      out.insegna = this.statoInsegna;
+      if (this._insegna.attivo) return out;
     }
     if (this.settling) {
       // Si aggiornano comunque i filtri (sopra) e la diagnostica, ma
@@ -1192,85 +1202,89 @@ export class GestureEngine {
    * dentro la stessa sessione: la stima del rumore si muove, la
    * persona è più o meno stanca, la telecamera è un po' più lontana.
    * Lo stesso gesto, perfettamente visibile nel grafico, un giorno vale
-   * 6 σ e un giorno 30. Con 6 σ la soglia a 3,5 è al limite; con 30 il
-   * rilascio a 1,5 non arriva mai, perché l'occhio non torna del tutto
-   * a riposo. Chi assiste insegue con guadagni e soglie, a mano.
+   * 6 σ e un giorno 30. Chi assiste insegue con guadagni e soglie.
    *
    * L'IDEA. Misurare il gesto rispetto a SE STESSO. Il programma impara
    * quanto è grande il gesto tipico di questa persona in questa
    * sessione — il "riferimento" — e chiama quell'ampiezza 1. Le soglie
-   * diventano frazioni: scatta a 0,5 (metà del gesto tipico), rilascia
-   * a 0,3. Che il gesto valga 6 σ o 30, è sempre 1.
+   * diventano frazioni: scatta a `normOn` (0,5), rilascia a `normOff`
+   * (0,3). Che il gesto valga 6 σ o 30, è sempre 1.
    *
-   * COME IMPARA IL RIFERIMENTO (per ogni occhio, asse e direzione):
-   *  · osserva le ESCURSIONI: tratti in cui il segnale si allontana dal
-   *    riposo oltre un minimo (`normMinSigma` volte il rumore) per
-   *    almeno 150 ms e non più di 8 secondi; di ognuna tiene il picco;
+   * COME IMPARA, per ogni occhio, asse e direzione. Tutto si misura
+   * come lo si vede nel GRAFICO, cioè con il guadagno della direzione
+   * e dell'occhio applicato:
+   *  · un'ESCURSIONE è un tratto in cui il segnale sale oltre
+   *    `normMinSigma` (2,5) e poi ridiscende; conta se dura almeno
+   *    `normDurMinMs` (250 ms) e non più di 8 s; di ognuna si tiene il
+   *    picco;
+   *  · per COMINCIARE servono TRE escursioni SIMILI fra loro (la più
+   *    grande non oltre `normSimile` volte la più piccola) e ben sopra
+   *    il rumore (`normAvvioSigma`, 3 nel grafico). È il gesto
+   *    riconosciuto dalla sua forma, non da una soglia: prima di
+   *    novembre si chiedeva che superasse la soglia di attivazione, e
+   *    chi l'aveva alzata a 10 non vedeva mai la modalità partire;
+   *  · oppure lo si INSEGNA: vedi `insegnaGesto`;
    *  · il riferimento è la MEDIANA degli ultimi picchi (fino a 7): un
-   *    colpo di testa o uno starnuto, da soli, non lo spostano;
-   *  · servono 3 escursioni per cominciare: fino ad allora valgono le
-   *    soglie di sempre, quindi i primi gesti funzionano come oggi;
-   *  · NON dimentica col tempo: dopo dieci minuti di riposo il gesto è
-   *    quello di prima, e il riferimento è ancora lì. (Era il difetto
-   *    della "soglia come frazione del gesto": guardava solo gli ultimi
-   *    dieci secondi, e a riposo il riferimento crollava sul rumore.)
-   *  · se il gesto CAMBIA davvero — 3 escursioni di fila tutte molto
-   *    più piccole, o 3 molto più grandi — si riallinea su quelle.
+   *    colpo di testa da solo non lo sposta. NON dimentica col tempo:
+   *    dopo dieci minuti di riposo il gesto è quello di prima;
+   *  · se il gesto CAMBIA davvero — 3 escursioni di fila molto più
+   *    piccole (<0,4) o molto più grandi (>2,5) — si riallinea.
    *
-   * I numeri (7 picchi, 3 di fila, rilascio a 0,30) vengono da sessioni
-   * simulate con questo stesso motore: gesto normale, debole, ampio con
-   * ritorno incompleto, riposo di dieci minuti, gesto che cambia a metà,
-   * colpo di testa, rumore che raddoppia.
-   *
-   * ⚠️ LA SICUREZZA. La soglia non scende MAI sotto `normMinSigma` volte
-   * il rumore (2,5 σ): anche se il riferimento fosse sbagliato, il
-   * rumore da solo non può far scattare un comando più facilmente di
-   * così.
+   * ⚠️ LA SICUREZZA. La soglia non scende MAI sotto `normMinSigma` (2,5)
+   * volte il rumore vero, qualunque riferimento si sia imparato e
+   * qualunque guadagno si sia messo: il rumore da solo non può dare un
+   * comando più facilmente.
    *
    * COSA NON TOCCA. Filtri, baseline, stima del rumore, MediaPipe: tutto
    * come prima. Cambia soltanto il numero per cui si divide lo
    * spostamento prima di confrontarlo con la soglia — e solo quando
-   * l'interruttore è acceso e il riferimento è pronto.
+   * l'interruttore è acceso.
    */
-  _normalizza(t, A, s) {
+  _normalizza(t, A, s, eye, axis) {
     const N = (A.norm = A.norm || {
-      rif: { '+1': null, '-1': null },        // gesto tipico, in unità del segnale
+      rif: { '+1': null, '-1': null },        // gesto tipico, in unità del segnale (senza guadagno)
       picchi: { '+1': [], '-1': [] },
+      candidati: { '+1': [], '-1': [] },      // escursioni in attesa di farne tre simili
       piccoli: { '+1': [], '-1': [] },
       grandi: { '+1': [], '-1': [] },
       corsa: { '+1': null, '-1': null },      // escursione in corso
       attiva: false, scala: 0,
     });
     const sigmaStd = A.sigma;                 // il rumore, stimato come sempre
-    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
-    const minimo = Math.max(1, s.normMinSigma ?? 2.5) * sigmaStd;
     const mediana = (a) => { const o = [...a].sort((p, q) => p - q); return o[o.length >> 1]; };
+    const minN = Math.max(1, s.normMinSigma ?? 2.5);
 
     for (const k of ['+1', '-1']) {
-      const v = (k === '+1' ? 1 : -1) * A.disp;
+      const segno = k === '+1' ? 1 : -1;
+      const gain = this._guadagnoAsse(eye, axis, segno);
+      const v = segno * A.disp;                       // in unità del segnale
+      const n = gain * v / Math.max(1e-9, sigmaStd);  // come nel grafico
       let c = N.corsa[k];
-      if (v > minimo) {
-        if (!c) c = N.corsa[k] = { da: t, picco: v };
-        else if (v > c.picco) c.picco = v;
+      if (n > minN) {
+        if (!c) c = N.corsa[k] = { da: t, picco: v, piccoN: n };
+        else if (v > c.picco) { c.picco = v; c.piccoN = n; }
         continue;
       }
       // Sotto il minimo: l'escursione, se c'era, finisce quando il
       // segnale è tornato sotto il 60% del minimo (niente rimbalzi).
-      if (!c || v > minimo * 0.6) continue;
+      if (!c || n > minN * 0.6) continue;
       N.corsa[k] = null;
       const dur = t - c.da;
-      if (dur < (s.normDurMinMs ?? 150) || dur > (s.normDurMaxMs ?? 8000)) continue;
-      const P = c.picco, R = N.rif[k];
+      if (dur < (s.normDurMinMs ?? 250) || dur > (s.normDurMaxMs ?? 8000)) continue;
+      const P = c.picco;
+
+      // ── Insegnamento in corso: si raccoglie e basta ──
+      if (this._insegna?.attivo) { this._raccogliInsegna(t, eye, axis, k, P, c.piccoN); continue; }
+
+      const R = N.rif[k];
       if (R == null) {
-        /* ⚠️ Per COMINCIARE servono escursioni che anche le soglie di
-         * sempre prenderebbero per un gesto (`thresholdOn` volte il
-         * rumore). Senza questo, in una sessione di solo tremore forte
-         * il programma "imparava" il tremore come se fosse il gesto, e
-         * poi lo faceva scattare: misurato, tre comandi involontari in
-         * un'ora di riposo, contro zero delle soglie di sempre. */
-        if (P < (s.normAvvioSigma ?? s.thresholdOn ?? 3.5) * sigmaStd) continue;
-        N.picchi[k].push(P);
-        if (N.picchi[k].length >= 3) N.rif[k] = mediana(N.picchi[k]);
+        // Per cominciare: tre escursioni SIMILI e ben sopra il rumore.
+        if (c.piccoN < (s.normAvvioSigma ?? 3)) continue;
+        const cand = N.candidati[k];
+        cand.push(P);
+        while (cand.length > 6) cand.shift();
+        const gruppo = this._treSimili(cand, s.normSimile ?? 1.8);
+        if (gruppo) { N.picchi[k] = gruppo; N.rif[k] = mediana(gruppo); N.candidati[k] = []; }
         continue;
       }
       if (P < 0.4 * R) {
@@ -1290,22 +1304,157 @@ export class GestureEngine {
       }
     }
 
-    // Il riferimento della direzione in cui il segnale si trova ora; se
-    // di quella non si sa ancora nulla, quello dell'altra.
-    const lato = A.disp >= 0 ? '+1' : '-1';
-    const R = N.rif[lato] ?? N.rif[lato === '+1' ? '-1' : '+1'];
-    if (R == null) { N.attiva = false; N.scala = 0; return; }
-    /* La soglia, in unità del segnale: la frazione scelta del gesto
-     * tipico — ma mai sotto il minimo di sicurezza. Da lì si ricava il
+    /* Il riferimento della direzione in cui il segnale si trova ora; se
+     * di quella non si sa ancora nulla, quello dell'altra. Da lì il
      * numero per cui dividere, in modo che la soglia di sempre
-     * (`thresholdOn`) cada esattamente lì: tutto ciò che a valle
-     * ragiona in "σ" — grafico, congelamento della baseline, canale
-     * combinato — continua a vedere numeri sensati, e un gesto tipico
-     * vale sempre `thresholdOn / normOn`. */
-    const soglia = Math.max(on * R, minimo);
+     * (`thresholdOn`) cada esattamente alla frazione scelta del gesto
+     * tipico: tutto ciò che a valle ragiona in "σ" — congelamento della
+     * baseline, canale combinato — continua a vedere numeri sensati. */
+    const lato = A.disp >= 0 ? 1 : -1;
+    const scala = this._scalaNorm(eye, axis, lato, A, s);
+    if (scala == null) { N.attiva = false; N.scala = 0; return; }
+    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
     N.attiva = true;
-    N.scala = soglia / on;                    // l'ampiezza che vale "1"
-    A.sigma = soglia / Math.max(0.5, s.thresholdOn || 3.5);
+    N.scala = scala;
+    A.sigma = (scala * on) / Math.max(0.5, s.thresholdOn || 3.5);
+  }
+
+  /** Guadagno di direzione × occhio per un asse e un verso. */
+  _guadagnoAsse(eye, axis, segno) {
+    const d = DIR_CHECKS.find(x => x.axis === axis && x.sign === segno);
+    return (d ? this.guadagnoDi(d.id) : 1) * this.guadagnoOcchio(eye);
+  }
+
+  /**
+   * L'ampiezza che vale "1" per un occhio, asse e verso, in unità del
+   * segnale; null se il riferimento non è ancora stato imparato.
+   * Rispetta il minimo di sicurezza sul rumore.
+   */
+  _scalaNorm(eye, axis, segno, A = this.eyes[eye]?.[axis], s = this.cfg.signal) {
+    const N = A?.norm;
+    if (!N) return null;
+    const k = segno > 0 ? '+1' : '-1';
+    const R = N.rif[k] ?? N.rif[k === '+1' ? '-1' : '+1'];
+    if (R == null) return null;
+    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
+    // Il rumore SENZA la sostituzione fatta dalla normalizzazione.
+    const sigmaStd = A.sigmaStd ?? A.sigma;
+    /* ⚠️ Il minimo è sul rumore VERO, senza guadagno. Il guadagno aiuta
+     * a riconoscere e imparare un gesto debole, ma non deve poter
+     * abbassare la sicurezza: provato con dieci minuti di tremore forte,
+     * un minimo diviso per il guadagno dava a guadagno 2 più comandi
+     * involontari della modalità di sempre (125 contro 21); così zero. */
+    const minimo = Math.max(1, s.normMinSigma ?? 2.5) * sigmaStd;
+    return Math.max(on * R, minimo) / on;
+  }
+
+  /** Tre valori simili fra loro (max/min ≤ rapporto), i più grandi; o null. */
+  _treSimili(valori, rapporto) {
+    if (valori.length < 3) return null;
+    const o = [...valori].sort((a, b) => b - a);
+    for (let i = 0; i + 2 < o.length; i++) {
+      if (o[i] <= rapporto * o[i + 2]) return [o[i], o[i + 1], o[i + 2]];
+    }
+    return null;
+  }
+
+  /**
+   * Stato della normalizzazione per un canale, per lo schermo:
+   * { attiva, quanti } — `quanti` è quante escursioni simili ha già
+   * visto, fino a 3.
+   */
+  statoNorm(eye, dirId) {
+    const d = DIR_CHECKS.find(x => x.id === dirId);
+    const A = d && this.eyes[eye]?.[d.axis];
+    const N = A?.norm;
+    if (!N) return { attiva: false, quanti: 0 };
+    const k = d.sign > 0 ? '+1' : '-1';
+    if (N.rif[k] != null) return { attiva: true, quanti: 3 };
+    const c = N.candidati[k] || [];
+    let quanti = Math.min(1, c.length);
+    if (c.length >= 2) {
+      const o = [...c].sort((a, b) => b - a);
+      for (let i = 0; i + 1 < o.length; i++) if (o[i] <= (this.cfg.signal.normSimile ?? 1.8) * o[i + 1]) { quanti = 2; break; }
+    }
+    return { attiva: false, quanti };
+  }
+
+  /**
+   * Valore del canale sulla scala 0–1 del grafico in modalità
+   * normalizzata: 1 = gesto tipico. Finché il riferimento non c'è, la
+   * soglia in uso è quella di sempre, e la si fa cadere sulla linea di
+   * attivazione: ciò che si vede è ciò che succede.
+   */
+  _valoreNorm(eye, d, A, v) {
+    const s = this.cfg.signal;
+    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
+    const sc = this._scalaNorm(eye, d.axis, d.sign, A, s);
+    if (sc != null) return (d.sign * v) / sc;
+    const g = this.guadagnoDi(d.id) * this.guadagnoOcchio(eye);
+    const sigmaStd = A.sigmaStd ?? A.sigma;
+    return (g * d.sign * v / Math.max(1e-9, sigmaStd)) * on / Math.max(0.1, this.sogliaDi(d.id));
+  }
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * INSEGNA IL GESTO
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * Invece di aspettare che il programma deduca da solo il gesto
+   * tipico, chi assiste preme un pulsante e la persona fa tre gesti. Il
+   * riferimento è fissato subito, per entrambi gli occhi e per ogni
+   * direzione che ha visto tre movimenti netti.
+   *
+   * Mentre si insegna nessun gesto diventa un comando: si osserva.
+   * Finisce da solo appena un canale ha visto tre movimenti (si aspetta
+   * un attimo l'altro occhio), o dopo 40 secondi.
+   */
+  insegnaGesto(t = this._lastT ?? 0) {
+    this._insegna = { attivo: true, da: t, raccolti: {}, primoCompleto: null, esito: null };
+  }
+
+  annullaInsegna() { if (this._insegna) this._insegna.attivo = false; this._insegna = null; }
+
+  /** { attivo, quanti, esito } per lo schermo; null se mai avviato. */
+  get statoInsegna() {
+    const I = this._insegna;
+    if (!I) return null;
+    let quanti = 0;
+    for (const v of Object.values(I.raccolti)) quanti = Math.max(quanti, v.length);
+    return { attivo: I.attivo, quanti: Math.min(3, quanti), esito: I.esito };
+  }
+
+  _raccogliInsegna(t, eye, axis, k, P, piccoN) {
+    const I = this._insegna;
+    if (piccoN < (this.cfg.signal.normInsegnaSigma ?? 2)) return;
+    const chiave = `${eye}|${axis}|${k}`;
+    (I.raccolti[chiave] = I.raccolti[chiave] || []).push(P);
+    if (I.raccolti[chiave].length >= 3 && I.primoCompleto == null) I.primoCompleto = t;
+  }
+
+  /** Chiude l'insegnamento quando è il momento. Chiamato a ogni fotogramma. */
+  _avanzaInsegna(t) {
+    const I = this._insegna;
+    if (!I?.attivo) return;
+    const scaduto = t - I.da > (this.cfg.signal.normInsegnaMaxMs ?? 40000);
+    const pronto = I.primoCompleto != null && t - I.primoCompleto > 800;
+    if (!scaduto && !pronto) return;
+    const mediana = (a) => { const o = [...a].sort((p, q) => p - q); return o[o.length >> 1]; };
+    const imparati = [];
+    for (const [chiave, v] of Object.entries(I.raccolti)) {
+      if (v.length < 3) continue;
+      const [eye, axis, k] = chiave.split('|');
+      const A = this.eyes[eye]?.[axis];
+      if (!A?.norm) continue;
+      const ultimi = v.slice(-3);
+      A.norm.picchi[k] = ultimi;
+      A.norm.rif[k] = mediana(ultimi);
+      A.norm.candidati[k] = []; A.norm.piccoli[k] = []; A.norm.grandi[k] = [];
+      const d = DIR_CHECKS.find(x => x.axis === axis && (x.sign > 0 ? '+1' : '-1') === k);
+      imparati.push(`${eye === 'left' ? 'SX' : 'DX'} ${d?.id || axis}`);
+    }
+    I.attivo = false;
+    I.esito = imparati.length ? { ok: true, canali: imparati } : { ok: false, canali: [] };
   }
 
   /** Canali di chiusura a durata accesi, nell'ordine in cui si provano. */
@@ -1460,9 +1609,9 @@ export class GestureEngine {
           const attiva = !!A.norm?.attiva;
           const on = attiva ? s.thresholdOn : this.sogliaDi(c.id);
           hyst.onK = on;
-          hyst.offK = attiva
-            ? on * Math.min(0.95, (s.normOff ?? 0.3) / Math.max(0.05, s.normOn ?? 0.5))
-            : on * (s.thresholdOff / s.thresholdOn);
+          // Il rilascio è sempre la frazione scelta: anche mentre impara,
+          // così le linee del grafico (0–1) dicono il vero.
+          hyst.offK = on * Math.min(0.95, (s.normOff ?? 0.3) / Math.max(0.05, s.normOn ?? 0.5));
           if (attiva) disp = c.sign * A.disp;
         }
 
@@ -1532,7 +1681,8 @@ export class GestureEngine {
           const dur = t - A.tRise[c.sign < 0 ? '-1' : '+1'];
           A.activeDir = 0;
           this._congelaAsse(eye, c.axis, false);
-          out.candidates.push({ eye, axis: c.axis, sign: c.sign, phase: 'fall', durMs: dur, t });
+          const cand = { eye, axis: c.axis, sign: c.sign, phase: 'fall', durMs: dur, t };
+          out.candidates.push(cand);
           /* ⚠️ Solo gli occhi IN GIOCO emettono un comando.
            *
            * Ma TUTTI E DUE arrivano fin qui, perché ciascuno deve
@@ -1541,7 +1691,13 @@ export class GestureEngine {
            * nemmeno valutato: la sua taratura si rovinava di nascosto,
            * e quando il programma cambiava occhio dominante si
            * ritrovava a lavorare con uno strumento starato. */
-          if (inGioco.includes(eye)) this._resolve(t, eye, c, dur, keys, wakeOnly, out);
+          /* Perché un gesto visto non è diventato un comando: solo
+           * un'annotazione per il grafico, nessun effetto sul resto. */
+          if (inGioco.includes(eye)) {
+            this._motivo = null;
+            this._resolve(t, eye, c, dur, keys, wakeOnly, out);
+            cand.motivo = this._motivo;
+          } else cand.motivo = { ok: false, testo: 'occhio non attivo' };
         }
       }
     }
@@ -1584,6 +1740,7 @@ export class GestureEngine {
         return;
       }
       this._pending[key] = { eye, t, durMs };
+      this._motivo = { ok: false, testo: "aspetto l'altro occhio" };
       this.counters.awaitingSecondEye = (this.counters.awaitingSecondEye || 0) + 1;
       return;
     }
@@ -1605,11 +1762,15 @@ export class GestureEngine {
     if (!chosen) {
       this.counters.rejected++;
       this.counters.lastRejectReason = `durata ${Math.round(durMs)} ms fuori da ogni finestra`;
+      this._motivo = { ok: false, testo: `durata ${Math.round(durMs)} ms fuori finestra` };
       return;
     }
     // In pausa possono uscire SOLO i comandi che risvegliano: tutto il
     // resto resterebbe senza effetto e rischierebbe di confondere.
-    if (wakeOnly && chosen.cfg.action !== 'WAKE' && chosen.cfg.action !== 'TOGGLE_PAUSE') return;
+    if (wakeOnly && chosen.cfg.action !== 'WAKE' && chosen.cfg.action !== 'TOGGLE_PAUSE') {
+      this._motivo = { ok: false, testo: 'in pausa' };
+      return;
+    }
     this._emit(t, chosen.key, chosen.cfg.action, { durMs, eye });
   }
 
@@ -1824,13 +1985,15 @@ export class GestureEngine {
 
 
   _emit(t, channel, action, meta) {
-    if (action === 'NONE') return;
+    if (action === 'NONE') { this._motivo = { ok: false, testo: 'canale senza azione' }; return; }
     if (t - this.lastEventAt < this.cfg.gestures.refractoryMs) {
       this.counters.rejected++;
       this.counters.lastRejectReason = 'periodo refrattario';
+      this._motivo = { ok: false, testo: 'troppo vicino al precedente' };
       return;
     }
     this.lastEventAt = t;
+    this._motivo = { ok: true, testo: action };
     this.counters.gestures[channel] = (this.counters.gestures[channel] || 0) + 1;
     this.onEvent({ t, channel, action, ...meta });
   }
@@ -1913,6 +2076,12 @@ export class GestureEngine {
           soglia: this.sogliaDi(d.id), guadagno: g,
           active: A.hyst[d.sign < 0 ? '-1' : '+1'].active,
           sigma: A.sigma, baseline: A.baseline,
+          // Solo in modalità normalizzata: la scala 0–1 del grafico.
+          ...(this.cfg.signal.modoNormalizzato ? {
+            nNorm: this._valoreNorm(eye, d, A, A.disp),
+            nRawNorm: this._valoreNorm(eye, d, A, A.raw - A.baseline),
+            norm: this.statoNorm(eye, d.id),
+          } : null),
         } : null;
       }
       outs[`${eye}.blink`] = {

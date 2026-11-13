@@ -493,17 +493,51 @@ finisce quando la sequenza è già avanti. `scan.indietroAnticipoMs`
 riferimento = MEDIANA degli ultimi 7 picchi delle escursioni (per
 occhio, asse, direzione); soglie = frazioni (`normOn` 0,5, `normOff`
 0,3). ⚠️ Regole trovate simulando, da non rompere:
-- per COMINCIARE servono 3 escursioni ≥ `thresholdOn`·σ: altrimenti il
-  tremore veniva imparato come gesto (9 comandi involontari in 2 ore di
-  riposo simulato; con la regola, 0);
+- per COMINCIARE servono 3 escursioni SIMILI (max/min ≤ `normSimile`
+  1,8, scelte fra le ultime 6), ognuna ≥ `normAvvioSigma` (3) nel
+  GRAFICO, cioè con il guadagno di direzione × occhio applicato, e
+  lunga ≥ `normDurMinMs` (250 ms). ⚠️ Fino al 13/11 ore 19 si chiedeva
+  ≥ `thresholdOn`·σ: chi aveva alzato la soglia a 10 con un gesto di
+  ~4 σ non vedeva MAI partire la modalità (il circolo vizioso
+  segnalato da Francesco). Il tremore resta non imparato: 0 comandi
+  involontari su 12 sessioni × 10 min di tremore forte;
 - il riferimento NON decade col tempo (era il difetto di
   `sogliaRelativa`, che guarda solo gli ultimi 10 secondi);
 - si riallinea dopo 3 escursioni di fila molto più piccole (<0,4) o
   molto più grandi (>2,5);
-- la soglia non scende mai sotto `normMinSigma`·σ;
+- la soglia non scende mai sotto `normMinSigma`·σ del rumore VERO,
+  senza guadagno (`_scalaNorm`). ⚠️ Provato a dividerlo per il guadagno:
+  a guadagno 2, 5 minuti di tremore forte davano 125 comandi involontari
+  (la modalità di sempre 21); così 0;
 - guadagni e soglie per direzione NON si applicano quando è attiva;
-- è agganciata in DUE punti soli, entrambi dietro l'interruttore: una
-  riga dopo il calcolo di `A.sigma` e un blocco in `_evaluate`.
+- mentre impara valgono le soglie di sempre per l'ATTIVAZIONE, ma il
+  rilascio è già la frazione `normOff`/`normOn`, così le linee del
+  grafico 0–1 dicono il vero;
+- esclude `sogliaRelativa`: nel motore quel ramo è saltato se la
+  normalizzata è accesa; in `main.set` accendendo una si spegne l'altra,
+  con un avviso;
+- è agganciata in punti soli dietro l'interruttore: una riga dopo il
+  calcolo di `A.sigma` (salva `A.sigmaStd`, il rumore vero), un blocco
+  in `_evaluate`, i campi `nNorm`/`nRawNorm`/`norm` di `channels()`.
+
+**Insegna il gesto** (pulsante in Diagnostica, `btnInsegnaGesto`):
+`insegnaGesto()` / `annullaInsegna()` / `statoInsegna`. Raccoglie le
+escursioni per occhio/asse/verso (≥ `normInsegnaSigma` 2 nel grafico);
+finisce 800 ms dopo che un canale ne ha 3, o dopo 40 s
+(`normInsegnaMaxMs`). Fissa il riferimento di OGNI canale con ≥ 3.
+Mentre insegna nessun gesto diventa comando (come `misura`). Se la
+modalità è spenta il pulsante la accende.
+
+**Grafico** — `js/ui/GraficoNorm.js`, sottoclasse di `SignalPlot`
+(`js/vision/` NON toccato). Modalità spenta: `super.draw` identico.
+Accesa: scala 0–1 (1 = gesto tipico), linee a `normOn`/`normOff`,
+scritta per traccia "SX ↑ imparato" / "sto imparando N di 3". In
+entrambe le modalità scrive accanto alla fine di ogni gesto l'esito:
+l'azione (✓) o il motivo dello scarto (✗): occhio non attivo, durata
+fuori finestra, in pausa, troppo vicino al precedente, aspetto l'altro
+occhio (motore, `cand.motivo` via `this._motivo`), scansione sospesa
+fuori da Parla, bande (main, `_esitoGesto`). Solo annotazioni: nessun
+effetto sui comandi.
 Effetto misurato: con un gesto ampio che non torna del tutto a riposo,
 le soglie di sempre misuravano la durata con 1,6 s di errore e
 prendevano 20 gesti brevi su 20 per LUNGHI (annulla invece di

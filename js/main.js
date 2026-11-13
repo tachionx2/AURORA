@@ -21,6 +21,7 @@ import { Dettatura, traduci, LINGUE, dettaturaDisponibile, conta } from './lang/
 import { AudioDirector } from './audio/AudioDirector.js';
 import { VoiceBank, Registratore, vocabolarioGuida } from './audio/VoiceBank.js';
 import { VisionPipeline, drawEyeDebug, SignalPlot, TRACE_STYLE, FACE_STYLE, BLINK_STYLE } from './vision/VisionPipeline.js';
+import { GraficoSegnale } from './ui/GraficoNorm.js';
 import { Watchdog, SorveglianzaAudio } from './vision/Watchdog.js';
 import { TERMINI_IT, TERMINI_EN, VERSIONE_TERMINI, testoInHtml } from './core/Legal.js';
 import { FinestraFluttuante, finestraSupportata } from './ui/FloatWindow.js';
@@ -185,7 +186,9 @@ class App {
     this.statsView = new StatsView(this);
     this.debugView = new DebugView(this);
 
-    this.plot = new SignalPlot(document.getElementById('plotY'));
+    // Il grafico di sempre, più la scala 0–1 della modalità normalizzata
+    // e l'esito di ogni gesto scritto accanto. Spenta, identico a prima.
+    this.plot = new GraficoSegnale(document.getElementById('plotY'));
 
     // --- Puntamento -------------------------------------------------
     this.calibration = new GazeCalibration();
@@ -306,6 +309,17 @@ class App {
     let o = this.cfg;
     for (let i = 0; i < keys.length - 1; i++) o = o[keys[i]];
     o[keys[keys.length - 1]] = value;
+    /* "Soglia come frazione" e modalità normalizzata si ESCLUDONO: sono
+     * due modi diversi di scegliere il denominatore della stessa
+     * misura, e insieme si contraddirebbero. Accendendone una, l'altra
+     * si spegne, e lo si dice. */
+    if (value === true && path === 'signal.modoNormalizzato' && this.cfg.signal.sogliaRelativa) {
+      this.cfg.signal.sogliaRelativa = false;
+      this.toast('Modalità normalizzata accesa: "soglia come frazione" è stata spenta (si escludono)');
+    } else if (value === true && path === 'signal.sogliaRelativa' && this.cfg.signal.modoNormalizzato) {
+      this.cfg.signal.modoNormalizzato = false;
+      this.toast('"Soglia come frazione" accesa: la modalità normalizzata è stata spenta (si escludono)');
+    }
     this.onConfigChanged();
   }
 
@@ -807,6 +821,7 @@ class App {
 
     this._letturaAI = (this._letturaAI || 0) + 1;
     if (this.cfg.drafts.stopSpeechOnGesture && this.stopSpeaking()) {
+      this._esitoGesto = { ok: true, testo: 'voce fermata' };
       this.audio.earcon('undo');
       this.debugView.logEvent(`${e.channel} → lettura interrotta`);
       return;
@@ -834,6 +849,7 @@ class App {
     // tempo divergono, e basterebbe una virgola per riaprire il difetto.
     const bandeInUso = this._bandeInComando();
     if (bandeInUso) {
+      this._esitoGesto = { ok: true, testo: `bande: ${e.action}` };
       if (e.action === 'SELECT') { this.stripe.select(performance.now()); return; }
       if (e.action === 'UNDO') { this.stripe.cancel(); return; }
       /* ⚠️ Pausa e ripresa con lo stesso gesto della scansione.
@@ -871,6 +887,10 @@ class App {
      *
      * Finché si è fuori da Parla e la sospensione è automatica, i
      * gesti non arrivano alla scansione. */
+    // Solo un'annotazione per il grafico: il gesto è stato visto, ma
+    // la scansione è sospesa. La riga dopo resta identica a prima.
+    if (this._pausaAutomatica && document.body.dataset.tab !== 'parla')
+      this._esitoGesto = { ok: false, testo: `scansione sospesa (fuori da Parla): ${e.action}` };
     if (this._pausaAutomatica && document.body.dataset.tab !== 'parla') return;
 
     /* Per "indietro di una voce" conta QUANDO il gesto è cominciato,
@@ -907,6 +927,7 @@ class App {
   _observe(tMs, obs, res) {
     // Il cuore batte: la telecamera sta producendo fotogrammi.
     this.watchdog?.battito(performance.now());
+    this._esitoGesto = null;
     const out = this.gestures.process(tMs, obs);
 
     // Il grafico riceve TUTTI i canali, non un segnale già fuso: ogni
@@ -917,7 +938,13 @@ class App {
     for (const id of Object.keys(BLINK_STYLE)) blink[id] = !!ch[id]?.closed;
     this.plot.push({
       ch, blink,
-      evt: out.candidates?.length ? out.candidates.map(c => ({ phase: c.phase, eye: c.eye })) : null,
+      evt: out.candidates?.length ? out.candidates.map(c => ({
+        phase: c.phase, eye: c.eye,
+        /* Perché il gesto è (o non è) diventato un comando: lo scrive
+         * il grafico accanto al marcatore. Se il motore l'ha emesso ma
+         * il programma l'ha fermato dopo, vale il motivo del programma. */
+        motivo: c.motivo ? (c.motivo.ok && this._esitoGesto ? this._esitoGesto : c.motivo) : undefined,
+      })) : null,
     });
 
     // Il puntatore usa il segnale GREZZO normalizzato dell'occhio
@@ -1004,7 +1031,15 @@ class App {
         ? sS.thresholdOn * Math.min(0.95, (sS.normOff ?? 0.3) / Math.max(0.05, sS.normOn ?? 0.5))
         : sS.thresholdOff;
       this.plot.draw(COLORS, sS.thresholdOn, rilascio,
-                     traces, blinks, this.cfg.ui.plotShowRaw);
+                     traces, blinks, this.cfg.ui.plotShowRaw,
+                     sS.modoNormalizzato ? {
+                       normalizzato: true,
+                       normOn: Math.max(0.05, Math.min(0.95, sS.normOn ?? 0.5)),
+                       // Esattamente il rilascio in uso nel motore.
+                       normOff: Math.max(0.05, Math.min(0.95, sS.normOn ?? 0.5))
+                         * Math.min(0.95, (sS.normOff ?? 0.3) / Math.max(0.05, sS.normOn ?? 0.5)),
+                       insegna: this.gestures.statoInsegna,
+                     } : null);
       this.debugView.renderCounters();
       // Il riepilogo clinico si ridisegna una volta ogni due secondi:
       // sono decine di percentili, non vanno ricalcolati a ogni fotogramma.
@@ -1023,6 +1058,29 @@ class App {
       }
     } catch (e) {
       console.error('[grafico]', e);
+    }
+  }
+
+  /** Aggiorna il pulsante "Insegna il gesto" e annuncia la fine. */
+  _mostraInsegna() {
+    const b = document.getElementById('btnInsegnaGesto');
+    const st = this.gestures.statoInsegna;
+    if (st?.attivo) {
+      if (b) b.textContent = `Insegno… ${st.quanti} di 3 (annulla)`;
+      return;
+    }
+    if (b) b.textContent = 'Insegna il gesto';
+    clearInterval(this._timerInsegna); this._timerInsegna = null;
+    const I = this.gestures._insegna;          // l'insegnamento appena chiuso
+    if (!st?.esito || this._insegnaAnnunciato === I) return;
+    this._insegnaAnnunciato = I;
+    if (st.esito.ok) {
+      this.toast(`Gesto imparato: ${st.esito.canali.join(', ')}`);
+      this.debugView?.logEvent(`gesto imparato: ${st.esito.canali.join(', ')}`);
+      try { this.audio.say(this.cfg.ui.language === 'en' ? 'Gesture learned' : 'Gesto imparato', 'menu'); } catch {}
+    } else {
+      this.toast('Nessun gesto riconosciuto: servono tre movimenti netti. Riprova.', true);
+      this.debugView?.logEvent('insegna il gesto: nessun gesto riconosciuto');
     }
   }
 
@@ -4874,6 +4932,32 @@ class App {
      * riferimenti, contatori, statistiche cliniche e grafico. Serve
      * passando a un'altra persona, a un altro video, o semplicemente
      * per rifare una prova da capo con la certezza di ripartire pulito. */
+    /* ── Insegna il gesto ──
+     * Tre gesti, e il riferimento della modalità normalizzata è fissato
+     * per entrambi gli occhi. Se la modalità è spenta la si accende
+     * (spegnendo "soglia come frazione", che la esclude). */
+    const bin = document.getElementById('btnInsegnaGesto');
+    if (bin) bin.onclick = () => {
+      if (this.gestures.statoInsegna?.attivo) {
+        this.gestures.annullaInsegna();
+        this._mostraInsegna();
+        this.toast('Insegnamento annullato');
+        return;
+      }
+      if (!this.cfg.signal.modoNormalizzato) {
+        this.set('signal.modoNormalizzato', true);
+        this.toast('Modalità normalizzata accesa per insegnare il gesto');
+        this.settingsView?.render?.();
+      }
+      this.gestures.insegnaGesto();
+      this.registraAzione('INSEGNA IL GESTO');
+      this.debugView?.logEvent('insegna il gesto: fai tre gesti');
+      this.toast('Insegna il gesto: fai TRE gesti, uguali, ben netti');
+      this._mostraInsegna();
+      clearInterval(this._timerInsegna);
+      this._timerInsegna = setInterval(() => this._mostraInsegna(), 250);
+    };
+
     const bns = document.getElementById('btnNuovaSessione');
     if (bns) bns.onclick = () => {
       if (!confirm('Azzerare la sessione?\n\nSi perdono le misure raccolte finora — rumore, baseline, statistiche cliniche e grafico — e si riparte da zero.\n\nLe impostazioni NON vengono toccate.')) return;

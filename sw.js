@@ -15,7 +15,7 @@
  * inviati altrove.
  */
 
-const VERSION = 'aurora-20261113-1900';
+const VERSION = 'aurora-20261113-2100';
 const APP_CACHE = `${VERSION}-app`;
 const CDN_CACHE = `${VERSION}-cdn`;
 
@@ -49,6 +49,7 @@ const APP_SHELL = [
   './js/vision/IrTracker.js',
   './js/vision/VisionPipeline.js',
   './js/ui/SettingsView.js',
+  './js/ui/GraficoNorm.js',
   './js/ui/Panels.js',
   './icons/icon-192.png',
   './icons/icon-512.png',

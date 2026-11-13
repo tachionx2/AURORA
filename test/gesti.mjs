@@ -266,6 +266,78 @@ import { ScanEngine } from '../js/scan/ScanEngine.js';
     const dopo = [g.eyes.left.y.hyst['-1'].onK, g.eyes.left.y.hyst['-1'].offK];
     ok(prima[0] === 5 && JSON.stringify(prima) === JSON.stringify(dopo) && !g.eyes.left.y.norm,
        `3s. accesa e rispenta: soglie e guadagni tornano esattamente quelli di prima (${prima} → ${dopo})`); }
+
+  /* ── Novembre, seconda parte: impara dalla FORMA del gesto ── */
+  const giri = (amp, n = 20) => ({ corri, gesto }) => { corri(8000); for (let i = 0; i < n; i++) { gesto(amp); corri(3500); } };
+  const ALTA = (c) => { c.signal.thresholdOn = 10; c.signal.thresholdOff = 6; };
+  { // Il caso di Daniela: soglia di attivazione alzata a 10, gesto chiaro ma piccolo.
+    const a = sessione(ALTA, giri(0.02)), b = sessione((c) => { ALTA(c); NORM(c); }, giri(0.02));
+    ok(a.presi === 0, `3t. soglia a 10 e gesto di ~4 σ: la modalità di sempre non lo prende mai (${a.presi}/20)`);
+    ok(b.g.eyes.left.y.norm?.attiva && b.presi >= 15 && b.falsi === 0,
+       `3u. normalizzata: lo impara lo stesso, dalla forma, e lo usa (${b.presi}/20, falsi ${b.falsi})`); }
+  { // Il guadagno conta, come nel grafico.
+    const a = sessione(NORM, giri(0.006)), b = sessione((c) => { NORM(c); c.signal.gainDir = { up: 3 }; }, giri(0.006));
+    ok(!a.g.eyes.left.y.norm?.attiva && b.g.eyes.left.y.norm?.attiva,
+       '3v. un gesto debole non si impara a guadagno 1, sì a guadagno 3: il guadagno dell asse è rispettato'); }
+  { // Insegna il gesto.
+    let durante = null, stato = null;
+    const b = sessione(NORM, ({ corri, gesto, g }) => {
+      corri(8000); g.insegnaGesto();
+      const n0 = g.counters.gestures.UP || 0;
+      for (let i = 0; i < 3; i++) { gesto(0.04); corri(2500); }
+      corri(1500);
+      durante = (g.counters.gestures.UP || 0) - n0; stato = g.statoInsegna;
+      for (let i = 0; i < 5; i++) { gesto(0.04); corri(3500); } });
+    const N = b.g.eyes.left.y.norm;
+    ok(stato && !stato.attivo && stato.esito?.ok && stato.esito.canali.length === 2,
+       `3w. "insegna il gesto": tre gesti e il riferimento è fissato, per entrambi gli occhi (${stato?.esito?.canali})`);
+    ok(durante === 0, `3x. mentre si insegna nessun gesto diventa un comando (${durante})`);
+    ok(N?.attiva && Math.abs(N.rif['-1'] - 0.04) < 0.01 && b.presi === 5,
+       `3y. e dopo i gesti vengono presi subito (${b.presi}/5 dopo i tre insegnati, riferimento ${N?.rif['-1']?.toFixed(3)})`); }
+  { // Insegnare senza gesti: nessun riferimento inventato.
+    const b = sessione(NORM, ({ corri, g }) => { corri(8000); g.insegnaGesto(); corri(42000); });
+    ok(b.g.statoInsegna?.esito?.ok === false && !b.g.eyes.left.y.norm?.attiva,
+       '3z. insegnando senza gesti: dopo 40 s si arrende e non inventa un riferimento'); }
+  { // La scala 0–1 del grafico.
+    let picco = 0;
+    const b = sessione(NORM, ({ corri, gesto, g }) => { corri(8000); for (let i = 0; i < 10; i++) { gesto(0.05); corri(3500); }
+      const f = g.process.bind(g); g.process = (t, o) => { const r = f(t, o); picco = Math.max(picco, g.channels()['left.up']?.nNorm ?? 0); return r; };
+      gesto(0.05); corri(2000); });
+    const ch = b.g.channels()['left.up'];
+    ok(picco > 0.75 && picco < 1.3, `4a. nel grafico il gesto tipico arriva a 1 (${picco.toFixed(2)})`);
+    ok(ch.norm?.attiva === true, '4b. e accanto all occhio si legge "imparato"');
+    const c0 = sessione(null, giri(0.05, 2)).g.channels()['left.up'];
+    ok(!('nNorm' in c0) && !('norm' in c0), '4c. a modalità spenta il grafico riceve esattamente i canali di sempre'); }
+  { const b = sessione(NORM, ({ corri, gesto }) => { corri(8000); gesto(0.05); corri(3500); });
+    const q = b.g.statoNorm('left', 'up');
+    ok(!q.attiva && q.quanti === 1, `4d. dopo un gesto: "sto imparando 1 di 3" (${q.quanti})`); }
+  { // Il motivo dello scarto.
+    const cand = [];
+    const b = sessione((c) => { c.detection.activeEye = 'right'; }, ({ corri, gesto, g }) => {
+      const f = g.process.bind(g); g.process = (t, o) => { const r = f(t, o); cand.push(...r.candidates.filter(x => x.phase === 'fall')); return r; };
+      corri(8000); gesto(0.05); corri(3500); });
+    const sx = cand.find(x => x.eye === 'left'), dx = cand.find(x => x.eye === 'right');
+    ok(sx?.motivo?.ok === false && sx.motivo.testo === 'occhio non attivo', `4e. gesto con l occhio non in gioco: "occhio non attivo" (${sx?.motivo?.testo})`);
+    ok(dx?.motivo?.ok === true && dx.motivo.testo === 'SELECT', `4f. gesto riuscito: il motivo è l azione eseguita (${dx?.motivo?.testo})`); }
+  { const cand = [];
+    sessione((c) => { c.gestures.UP_LONG.enabled = false; c.gestures.UP_VERYLONG.enabled = false; }, ({ corri, gesto, g }) => {
+      const f = g.process.bind(g); g.process = (t, o) => { const r = f(t, o); cand.push(...r.candidates.filter(x => x.phase === 'fall' && x.eye === 'left')); return r; };
+      corri(8000); gesto(0.05, 1800); corri(3500); });
+    ok(/fuori finestra/.test(cand[0]?.motivo?.testo || ''), `4g. durata fuori da ogni finestra: lo dice (${cand[0]?.motivo?.testo})`); }
+  { const cand = [];
+    sessione(null, ({ corri, gesto, g }) => {
+      const f = g.process.bind(g); g.process = (t, o) => { const r = f(t, o); cand.push(...r.candidates.filter(x => x.phase === 'fall' && x.eye === 'left')); return r; };
+      corri(8000); g.setPaused(true); gesto(0.05); corri(3500); });
+    ok(cand[0]?.motivo?.testo === 'in pausa', `4h. in pausa: "in pausa" (${cand[0]?.motivo?.testo})`); }
+  { // Le due modalità si escludono anche nel motore.
+    const b = sessione((c) => { NORM(c); c.signal.sogliaRelativa = true; }, giri(0.05));
+    ok(b.g.eyes.left.y.norm?.attiva && b.presi === 20, `4i. con anche "soglia come frazione" accesa, la normalizzata funziona lo stesso (${b.presi}/20)`); }
+  { // La sicurezza non dipende dal guadagno.
+    const b = sessione((c) => { NORM(c); c.signal.gainDir = { up: 3 }; }, ({ corri, gesto, st }) => {
+      corri(8000); for (let i = 0; i < 6; i++) { gesto(0.008); corri(3500); }
+      const n0 = 0; st.trem = 0.005; st.rum = 0.004; corri(300000); });
+    const dopo = b.ev.filter(e => e.t > 8000 + 6 * 4300).length;
+    ok(dopo === 0, `4l. guadagno 3, poi cinque minuti di tremore forte: nessun comando involontario (${dopo})`); }
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);
