@@ -2625,8 +2625,8 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(f[f.length - 1] === '⌫ parola', '77b. CANCELLA è l ultima voce di Scrivi, dopo i gruppi');
     ok(!b.eng._inLettere, '77c. Scrivi NON è scambiato per un gruppo di lettere (passo normale)');
     const voc = b.eng.level.node.children.find(x => x.label === 'Vocali').children.map(x => x.label);
-    ok(voc[voc.length - 1] === '← ESCI' && voc[voc.length - 2] === '⌫',
-       `77d. nei gruppi: lettere, CANCELLA, ESCI (${voc.join(' ')})`);
+    ok(voc[voc.length - 1] === '← ESCI' && !voc.includes('⌫'),
+       `77d. predefinito: nei gruppi niente CANCELLA, lettere ed ESCI come prima (${voc.join(' ')})`);
     ok(b.c.scan.groups.some(g => g.items.includes('␣')) && !f.includes('␣'),
        '77e. predefinito: lo spazio resta dentro i gruppi, non fuori'); }
   { const b = banco(c => { c.scan.spazioFuori = true; }); b.gesto('Scrivi');
@@ -2705,14 +2705,72 @@ function buildTreeFor(b){ return b.eng.tree; }
     } }
 
   // ── Cancella ──
-  { const b = banco(); b.gesto('Scrivi'); b.scrivi('se');
-    b.gesto('Vocali'); b.gesto('⌫');
+  const SI = (c) => { c.scan.cancellaNeiGruppi = true; };
+  { const b = banco(SI); b.gesto('Scrivi');
+    const voc = b.eng.level.node.children.find(x => x.label === 'Vocali').children.map(x => x.label);
+    ok(voc[voc.length - 1] === '← ESCI' && voc[voc.length - 2] === '⌫',
+       `77ac0. acceso: nei gruppi lettere, CANCELLA, ESCI (${voc.join(' ')})`);
+    b.scrivi('s'); b.gesto('Vocali'); b.gesto('E');
+    ok(b.eng.buffer.letters === 'SE' && b.eng.level.node.label === 'Vocali' && qui(b) === '⌫',
+       `77ac1. scelta la lettera, la sequenza non esce: va subito su CANCELLA (${b.eng.buffer.letters} / ${b.eng.level.node.label} / ${qui(b)})`);
+    b.gesto('⌫');
     ok(b.eng.buffer.letters === 'S' && b.eng.level.node.label === 'Vocali',
-       `77ac. CANCELLA nel gruppo: toglie l ultima lettera e resta nel gruppo (${b.eng.buffer.letters} / ${b.eng.level.node.label})`);
+       `77ac. sceltolo, la lettera appena scritta sparisce e si resta nel gruppo (${b.eng.buffer.letters} / ${b.eng.level.node.label})`);
     b.avanti(b.eng.attesaCorrente + 30);
-    ok(qui(b) === '← ESCI', `77ad. e riparte da ESCI (${qui(b)})`);
+    ok(qui(b) === '← ESCI', `77ad. e si riparte dall inizio del gruppo, da ESCI (${qui(b)})`);
     b.gesto('A');
-    ok(b.eng.buffer.letters === 'SA', '77ae. poi si sceglie la lettera giusta nello stesso gruppo'); }
+    ok(b.eng.buffer.letters === 'SA' && qui(b) === '⌫', '77ae. poi si sceglie la lettera giusta, e di nuovo si passa da CANCELLA');
+    b.avanti(b.eng.stepCorrente + 30);
+    ok(b.eng.buffer.letters === 'SA' && b.eng.level.node.id === 'write',
+       `77ae1. lasciato passare CANCELLA, la lettera resta e si esce dal gruppo (${b.eng.buffer.letters} / ${b.eng.level.node.label})`); }
+  { // Lasciato passare il CANCELLA, si riparte esattamente da dove si ripartiva prima.
+    const a = banco(), b = banco(SI);
+    for (const x of [a, b]) { x.gesto('Scrivi'); x.gesto('Vocali'); x.gesto('A'); }
+    b.avanti(b.eng.stepCorrente + 30);
+    ok(a.eng.level.node.id === 'write' && b.eng.level.node.id === 'write' && a.eng.level.index === b.eng.level.index
+       && a.eng.buffer.letters === 'A' && b.eng.buffer.letters === 'A',
+       `77ae2. stessa ripartenza della logica di sempre (${qui(a)} / ${qui(b)})`); }
+  { const b = banco(SI); b.gesto('Scrivi'); b.scrivi('ciao');
+    ok(b.eng.buffer.letters === 'CIAO', `77ae3. con CANCELLA acceso si scrive normalmente (${b.eng.buffer.letters})`);
+    b.spazio();
+    ok(b.eng.buffer.words.join(' ') === 'CIAO' && b.eng.level.node.id === 'write',
+       `77ae4. lo spazio nel gruppo non si ferma su CANCELLA (${testo(b)} / ${qui(b)})`); }
+  { // Finestra di grazia: un gesto appena dopo che CANCELLA è passato vale per CANCELLA.
+    // La grazia si accende solo ora: il banco seleziona appena arriva
+    // sulla voce, e con la grazia accesa sceglierebbe quella prima.
+    const b = banco(SI); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('O');
+    b.c.scan.graceMs = 400;
+    b.avanti(b.eng.stepCorrente + 30);
+    const t = b.tempo(); b.eng.select(t + 100);
+    ok(b.eng.buffer.letters === '' && b.eng.level.node.label === 'Vocali',
+       `77ae5. gesto entro la grazia dopo CANCELLA: la lettera si cancella (${JSON.stringify(b.eng.buffer.letters)} / ${b.eng.level.node.label})`); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
+    ok(b.eng.level.node.id === 'write', '77ae6. spento: dopo la lettera si esce subito, come prima'); }
+
+  // ── Conferme a voce durante la scrittura ──
+  const menuDetti = (b, da = 0) => b.detti.slice(da).filter(d => d.k === 'menu').map(d => d.t);
+  { const b = banco(); b.gesto('Scrivi'); const n0 = b.detti.length;
+    b.scrivi('ho'); b.spazio();
+    ok(menuDetti(b, n0).length === 0, `77af1. spente (predefinito): nessuna conferma a voce, come prima (${menuDetti(b, n0)})`); }
+  { const b = banco(c => { c.scan.ecoLettera = true; }); b.gesto('Scrivi'); const n0 = b.detti.length;
+    b.scrivi('ho');
+    ok(menuDetti(b, n0).join(',') === 'H,O', `77af2. "ripeti la lettera": ogni lettera detta una volta (${menuDetti(b, n0)})`);
+    const n1 = b.detti.length; b.spazio();
+    ok(menuDetti(b, n1).length === 0 && b.eng.buffer.words.join(' ') === 'HO',
+       `77af3. lo spazio non viene ripetuto come lettera, e il testo è intatto (${menuDetti(b, n1)})`); }
+  { const b = banco(c => { c.scan.ecoParola = true; }); b.gesto('Scrivi'); const n0 = b.detti.length;
+    b.scrivi('ho');
+    ok(menuDetti(b, n0).length === 0, '77af4. "rileggi la parola": le lettere non vengono dette');
+    b.spazio(); b.scrivi('sete'); b.gesto('.');
+    ok(menuDetti(b, n0).join(',') === 'HO,SETE.', `77af5. ogni parola finita (spazio, punto) riletta una volta (${menuDetti(b, n0)})`);
+    b.gesto('AZIONI'); b.gesto('PARLA');
+    ok(b.detti.some(d => d.k === 'speech' && d.t === 'HO SETE.'), '77af6. PARLA dice la frase intera, come sempre'); }
+  { const b = banco(c => { c.scan.ecoLettera = true; c.scan.ecoParola = true; c.scan.cancellaNeiGruppi = true; });
+    b.gesto('Scrivi'); const n0 = b.detti.length;
+    b.gesto('Vocali'); b.gesto('E');
+    ok(menuDetti(b, n0).join(',') === 'E' && qui(b) === '⌫', `77af7. con CANCELLA nei gruppi: la lettera detta una volta, poi CANCELLA (${menuDetti(b, n0)} / ${qui(b)})`);
+    b.avanti(b.eng.stepCorrente + 30);
+    ok(menuDetti(b, n0).join(',') === 'E', `77af8. lasciato passare CANCELLA, la lettera non viene ripetuta di nuovo (${menuDetti(b, n0)})`); }
   { const b = banco(); b.gesto('Scrivi'); b.scrivi('ho'); b.spazio(); b.scrivi('sete'); b.spazio(); b.scrivi('or');
     ok(testo(b) === 'HO SETE OR', `77af. preparazione (${testo(b)})`);
     b.gesto('⌫ parola');

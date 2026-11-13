@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 47;
+export const CONFIG_VERSION = 48;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -852,14 +852,24 @@ export const DEFAULT_CONFIG = {
      *   spazioFuori        lo SPAZIO come voce a sé, subito dopo AZIONI
      *                      (e sparisce dai gruppi di lettere);
      *   puntoFuori         il PUNTO, subito dopo lo spazio;
-     *   cancellaNeiGruppi  CANCELLA in fondo a ogni gruppo: toglie
-     *                      l'ultima lettera e resta nel gruppo;
+     *   cancellaNeiGruppi  CANCELLA in fondo a ogni gruppo. Acceso,
+     *                      dopo ogni lettera la sequenza si ferma un
+     *                      passo sul CANCELLA: sceltolo, la lettera
+     *                      sparisce e si riparte da ESCI nel gruppo;
+     *                      lasciato passare, si esce come sempre.
+     *                      Spento: nessun CANCELLA, come prima;
      *   cancellaDopoGruppi CANCELLA dopo i gruppi: toglie l'ultima
      *                      parola, e ripetuto cancella parola per parola. */
     spazioFuori: false,
     puntoFuori: true,
-    cancellaNeiGruppi: true,
+    cancellaNeiGruppi: false,
     cancellaDopoGruppi: true,
+    /* ── Conferme a voce durante la scrittura (facoltative) ──
+     *   ecoLettera  dopo ogni lettera o numero scelto lo ripete, una volta;
+     *   ecoParola   dopo ogni parola finita la rilegge, una volta.
+     * Solo in auricolare; il testo, PARLA e LEGGI non cambiano. */
+    ecoLettera: false,
+    ecoParola: false,
     phraseCount: 12,
     // Gruppi di frasi. Vuoto = elenco unico, ordinato dalle statistiche.
     phraseGroups: DEFAULT_PHRASE_GROUPS,
@@ -1495,6 +1505,13 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 48 && c.scan) {
+    /* Il CANCELLA nei gruppi di lettere ha cambiato significato: acceso,
+     * ora la sequenza si ferma su di lui dopo OGNI lettera. Prima era
+     * acceso di serie, non per scelta: si torna alla scrittura veloce
+     * di sempre, e chi lo vuole lo accende. */
+    c.scan.cancellaNeiGruppi = false;
+  }
   if (v < 47 && c.scan && c.scan.suggerimentiDirettiSoglia === 0.35) {
     /* La proposta a voce compariva "solo ogni tanto": il vecchio valore
      * predefinito la filtrava. Ora che occupa un passo e non un posto

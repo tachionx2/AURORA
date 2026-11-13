@@ -868,6 +868,13 @@ export class ScanEngine {
 
   _advance(now) {
     const l = this.level;
+    if (this._verifica) {
+      if (l.node.id === this._verifica.gruppo && l.node.children?.[l.index]?.action === 'DEL_CHAR_QUI') {
+        this._concludiVerifica(now);
+        return;
+      }
+      this._verifica = null;
+    }
     const n = l.node.children?.length ?? 0;
     if (n === 0) { this._up(now); return; }
 
@@ -926,6 +933,7 @@ export class ScanEngine {
 
   _up(now) {
     this.proposta = null;
+    this._verifica = null;
     const lasciato = this.stack.length > 1 ? this.stack.pop() : null;
     this.level.index = this._dopoUscita(lasciato?.node);
     this.emptyCycles = 0;
@@ -1172,6 +1180,26 @@ export class ScanEngine {
     }
     this._tAvanzamento = null;
 
+    /* Il CANCELLA dopo la lettera è appena passato, ma il gesto è
+     * arrivato entro la finestra di grazia: valeva per il CANCELLA. */
+    const vp = this._verificaPassata;
+    this._verificaPassata = null;
+    if (grazia > 0 && vp && !this._verifica && (now - vp.t) < grazia
+        && this.level.node.id === 'write') {
+      const g = (this.level.node.children || []).find(c => c.id === vp.gruppo);
+      const x = g?.children?.findIndex(c => c.action === 'DEL_CHAR_QUI') ?? -1;
+      if (x >= 0) {
+        this._chiudiProposta();
+        this.stats.graziaUsata = (this.stats.graziaUsata || 0) + 1;
+        this.stats.selections++;
+        this.emptyCycles = 0;
+        this.stack.push({ node: g, index: x });
+        this._execute(g.children[x], now);
+        return;
+      }
+    }
+    this._verifica = null;
+
     const node = this.currentNode;
     // Qualunque cosa si sia scelta, la proposta in corso è chiusa.
     this._chiudiProposta();
@@ -1198,6 +1226,7 @@ export class ScanEngine {
         this.buffer.letters += node.payload;
         this.stats.chars++;
         this._afterCompose(now, node.payload === ' ');
+        if (this._verificaLettera(node, now)) return;
         break;
       case 'SPAZIO':
         // Lo spazio fuori dai gruppi: identico a quello dentro.
@@ -1251,7 +1280,8 @@ export class ScanEngine {
           lista = lista.slice(0, Math.max(1, Math.min(3, this.cfg.scan.variantiN || 3)));
           this._backToWrite(now, true, 'azioni');
           this.proposta = lista.length ? { lista, i: 0, variante: true } : null;
-          this._announce(now);
+          const eco = this._ecoDi(node);
+          if (!(eco && this._hold(eco, now))) this._announce(now);
           this._pushState();
           return;
         }
@@ -1506,6 +1536,11 @@ export class ScanEngine {
     // proposta a voce) o una cancellazione si riparte invece dalle
     // AZIONI: la parola è finita, o si sta correggendo, e in entrambi
     // i casi il passo successivo probabile è un'azione. Deciso sul campo.
+    this._dopoComposizione(now, node);
+  }
+
+  /** Dopo una lettera, uno spazio, una parola…: dove riparte la sequenza. */
+  _dopoComposizione(now, node, letteraGiaDetta = false) {
     const daAzioni = node.action !== 'CHAR' || node.payload === ' ';
     if (this.stack.some(f => f.node.id === 'write')) {
       this._backToWrite(now, true, daAzioni ? 'azioni' : 'gruppi');
@@ -1516,12 +1551,87 @@ export class ScanEngine {
       const proposte = (this.cfg.scan?.suggerimentiDiretti && lettera)
         ? (this.ctx.proposte || []).filter(Boolean) : [];
       this.proposta = proposte.length ? { lista: proposte, i: 0 } : null;
-      this._announce(now);
+      /* Conferma a voce (facoltativa): la lettera appena scelta, o la
+       * parola appena finita. Detta una volta, poi la sequenza riprende
+       * dalla voce di sempre (proposta compresa). */
+      const eco = this._ecoDi(node, letteraGiaDetta);
+      if (!(eco && this._hold(eco, now))) this._announce(now);
       this._pushState();
     } else {
       this._resetToRoot(now, true);
     }
     return;
+  }
+
+  /**
+   * ══ CONFERME A VOCE DURANTE LA SCRITTURA (facoltative) ══
+   *
+   * Per chi non vede lo schermo: dice cosa è appena stato scritto, una
+   * volta sola, in auricolare (canale degli annunci).
+   *  · `scan.ecoLettera`: la lettera o il numero appena scelto;
+   *  · `scan.ecoParola`: la parola appena finita (spazio, punto o
+   *    suggerimento scelto).
+   * Non tocca il testo, PARLA, LEGGI, la rilettura: è solo un annuncio.
+   * Entrambe spente: nulla cambia. Restituisce la promessa dell'annuncio,
+   * o null se non c'è nulla da dire.
+   */
+  _ecoDi(node, letteraGiaDetta = false) {
+    const S = this.cfg.scan || {};
+    if (!node || !this.stack.some(f => f.node.id === 'write')) return null;
+    const lettera = node.action === 'CHAR' && node.payload !== ' ';
+    if (lettera) {
+      if (!S.ecoLettera || letteraGiaDetta) return null;
+      return this._eco('lettera', String(node.payload));
+    }
+    const fineParola = (node.action === 'CHAR' && node.payload === ' ')
+      || node.action === 'SPAZIO' || node.action === 'PUNTO' || node.action === 'WORD';
+    if (!fineParola || !S.ecoParola) return null;
+    const w = this.buffer.words[this.buffer.words.length - 1];
+    return w ? this._eco('parola', w) : null;
+  }
+
+  _eco(tipo, testo) {
+    try {
+      return this.h.onEco ? this.h.onEco(tipo, testo) : this.h.onOutput('menu', testo);
+    } catch { return null; }
+  }
+
+  /**
+   * ══ CANCELLA SUBITO DOPO LA LETTERA (facoltativo) ══
+   *
+   * Con `scan.cancellaNeiGruppi` acceso, scelta una LETTERA dentro un
+   * gruppo la sequenza non esce subito: si ferma un passo sul CANCELLA
+   * del gruppo.
+   *  · Sceltolo, la lettera appena scritta sparisce e si resta nel
+   *    gruppo, ripartendo da ESCI (vedi DEL_CHAR_QUI).
+   *  · Lasciato passare, la lettera andava bene: si esce dal gruppo e
+   *    si riparte come sempre (punto o spazio, secondo le impostazioni).
+   * Lo spazio dentro un gruppo NON si ferma sul CANCELLA: chiude la
+   * parola, e da cancellare ci sarebbe una lettera di quella.
+   * Spento: nessun CANCELLA nei gruppi e tutto esattamente come prima.
+   */
+  _verificaLettera(node, now) {
+    if (!this.cfg.scan?.cancellaNeiGruppi || node.payload === ' ') return false;
+    if (!this.stack.some(f => f.node.id === 'write')) return false;
+    const figli = this.level.node.children || [];
+    const x = figli.findIndex(c => c.action === 'DEL_CHAR_QUI');
+    if (x < 0) return false;
+    this.proposta = null;
+    this.level.index = x;
+    this._verifica = { gruppo: this.level.node.id, lettera: node };
+    this.lastStepAt = now;
+    const eco = this._ecoDi(node);
+    if (!(eco && this._hold(eco, now))) this._announce(now);
+    this._pushState();
+    return true;
+  }
+
+  /** Il CANCELLA dopo la lettera è passato senza essere scelto. */
+  _concludiVerifica(now) {
+    const v = this._verifica;
+    this._verifica = null;
+    this._verificaPassata = { t: now, gruppo: v.gruppo };
+    this._dopoComposizione(now, v.lettera, true);
   }
 
   _afterCompose(now, wordEnded) {
@@ -1674,6 +1784,7 @@ export class ScanEngine {
    */
   _backToWrite(now, silent, dove = 'gruppi') {
     this.proposta = null;
+    this._verifica = null;
     const wl = this.stack.findIndex(f => f.node.id === 'write');
     if (wl < 0) { this._resetToRoot(now, silent); return; }
     this.stack = this.stack.slice(0, wl + 1);
@@ -1690,6 +1801,7 @@ export class ScanEngine {
 
   _resetToRoot(now, silent = false) {
     this.proposta = null;
+    this._verifica = null;
     this.stack = [{ node: this.tree, index: 0 }];
     this.emptyCycles = 0;
     this.lastStepAt = now;
@@ -1712,6 +1824,7 @@ export class ScanEngine {
    */
   undo(now) {
     this.proposta = null;
+    this._verifica = null;
     this.stats.undos++;
     const homeDepth = this._homeDepth();
     if (this.stack.length > homeDepth) { this._up(now); return; }

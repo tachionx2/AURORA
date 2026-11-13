@@ -547,3 +547,35 @@ seleziona); normalizzata, errore 30 ms.
 (`signal.thresholdDir`) non venivano applicate all'avvio né dopo una
 modifica ai filtri, ma solo al cambio di un'altra impostazione. Ora
 `_rebuild` chiama `_aggiornaSoglie`.
+
+### CANCELLA nei gruppi di lettere — dopo la lettera (13/11, build 2200)
+
+`scan.cancellaNeiGruppi` (predefinito **spento**; CONFIG_VERSION 48 lo
+rimette spento nei profili salvati, perché prima era acceso di serie con
+un altro significato).
+
+- **Spento**: nessun CANCELLA nei gruppi; dopo ogni lettera si esce
+  subito, come sempre.
+- **Acceso**: ⌫ in coda al gruppo (prima di ESCI). Scelta una LETTERA,
+  la sequenza resta nel gruppo e si ferma un passo sul ⌫
+  (`_verificaLettera`). Scelto ⌫ → `DEL_CHAR_QUI`: via la lettera, si
+  resta nel gruppo ripartendo da ESCI. Lasciato passare (tick o NEXT) →
+  `_concludiVerifica` → `_dopoComposizione`, esattamente la ripartenza
+  di sempre dopo una lettera (punto, o spazio se fuori dai gruppi;
+  proposta a voce compresa).
+- Lo spazio dentro un gruppo NON si ferma sul ⌫.
+- Finestra di grazia (`graceMs`): un gesto arrivato entro la grazia dopo
+  che ⌫ è passato vale per ⌫ (`_verificaPassata`).
+- `_verifica` si azzera in `_up`, `_backToWrite`, `_resetToRoot`, `undo`
+  e a ogni selezione. Test: percorsi 77ac0–77ae6.
+
+### Conferme a voce durante la scrittura (13/11, build 2300)
+
+`scan.ecoLettera` e `scan.ecoParola`, entrambe spente di serie, in «Come
+comunica» dopo i CANCELLA. `ScanEngine._ecoDi` → `h.onEco(tipo, testo)`
+(main: canale annunci, nome della lettera se `audio.letterNames`). Detta
+UNA volta con `_hold`, poi la sequenza riannuncia la voce corrente
+(proposta a voce compresa). La lettera: CHAR non spazio. La parola:
+spazio, SPAZIO, PUNTO, WORD (anche con varianti). Con il CANCELLA nei
+gruppi la lettera è detta prima del ⌫ e non ripetuta alla conclusione.
+Testo, PARLA, LEGGI invariati. Test: percorsi 77af1–77af8.

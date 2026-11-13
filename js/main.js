@@ -18,7 +18,7 @@ import { invia as inviaEmail, verificaConfigurazione, indirizzoValido, ESEMPIO_N
 import { comanda as comandaCasa, verificaDomotica } from './device/HomeAssistant.js';
 import { Drafts, splitSentences } from './lang/Drafts.js';
 import { Dettatura, traduci, LINGUE, dettaturaDisponibile, conta } from './lang/Dictation.js';
-import { AudioDirector } from './audio/AudioDirector.js';
+import { AudioDirector, LETTER_NAMES_IT } from './audio/AudioDirector.js';
 import { VoiceBank, Registratore, vocabolarioGuida } from './audio/VoiceBank.js';
 import { VisionPipeline, drawEyeDebug, SignalPlot, TRACE_STYLE, FACE_STYLE, BLINK_STYLE } from './vision/VisionPipeline.js';
 import { GraficoSegnale } from './ui/GraficoNorm.js';
@@ -115,6 +115,12 @@ class App {
        * detta — insegnata ai suggerimenti a ogni rilettura. */
       onOutput: (kind, text, opt) => this.onOutput(kind, text, opt),
       onBuffer: (b) => this.onBuffer(b),
+      /* Conferma a voce facoltativa della lettera o della parola appena
+       * scritta: in auricolare, come gli altri annunci. La lettera con
+       * il suo nome ("bi", "effe") se così sono annunciate le lettere. */
+      onEco: (tipo, testo) => this.onOutput('menu',
+        tipo === 'lettera' && this.cfg.audio.letterNames
+          ? (LETTER_NAMES_IT[String(testo).toUpperCase()] || testo) : testo),
       // Forme vicine alla parola scelta ("staccare" → "staccarsi").
       onVarianti: (parola, prima) => this.predictor.varianti(parola, prima,
         this.cfg.scan?.variantiN || 3),

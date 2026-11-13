@@ -1851,11 +1851,17 @@ export class SettingsView {
         P(['Lo spazio diventa una voce a sé subito dopo AZIONI, prima del punto: un gesto solo invece di due. Quando è acceso, lo spazio dentro i gruppi di lettere sparisce (sarebbe un doppione). ⚠️ Sta PRIMA del punto da cui la sequenza riparte dopo ogni lettera: non rallenta la scrittura di una parola, ma per raggiungerlo a parola finita bisogna aspettare l\'inizio del giro successivo. Spento (predefinito), lo spazio resta dov\'è nei gruppi.',
            'Space becomes its own item right after ACTIONS: one gesture instead of two. When on, the space inside letter groups disappears.'])),
       this._toggle('scan.cancellaNeiGruppi', P(['CANCELLA in fondo a ogni gruppo di lettere', 'DELETE at the end of each letter group']),
-        P(['Toglie l\'ultima lettera scritta senza passare da AZIONI. Si resta nel gruppo, ripartendo da ESCI: da lì si esce, oppure si aspetta e si sceglie la lettera giusta.',
-           'Removes the last letter without going through ACTIONS. Scanning stays in the group, restarting from EXIT.'])),
+        P(['Acceso: dopo ogni lettera scelta dentro un gruppo la sequenza NON esce subito, ma si ferma un passo su CANCELLA. Se lo scegli, la lettera appena scritta sparisce e si riparte dall\'inizio del gruppo, da ESCI. Se lo lasci passare, la lettera andava bene e si esce come sempre (dal punto, o dallo spazio se è fuori dai gruppi). Lo spazio dentro un gruppo non si ferma su CANCELLA. Spento: niente CANCELLA nei gruppi, e dopo ogni lettera si esce subito, come prima.',
+           'On: after each letter chosen inside a group, scanning stops one step on DELETE. Choose it and the letter just written is removed, restarting the group from EXIT; let it pass and the letter is kept and scanning leaves the group as usual. Off: no DELETE in the groups, as before.'])),
       this._toggle('scan.cancellaDopoGruppi', P(['CANCELLA dopo i gruppi di lettere', 'DELETE after the letter groups']),
         P(['L\'ultima voce del menu Scrivi: toglie l\'ultima parola (o le lettere della parola in corso) e resta lì. Ripetendo il gesto si cancella parola per parola; lasciandola passare il giro ricomincia da ESCI.',
            'Last item of the Write menu: removes the last word and stays there. Repeating the gesture deletes word by word.'])),
+      this._toggle('scan.ecoLettera', P(['Ripeti la lettera scelta', 'Repeat the chosen letter']),
+        P(['Dopo ogni lettera o numero scelto, la voce in auricolare lo ripete una volta, come conferma: utile se non si vede lo schermo. Non cambia il testo, né PARLA, né LEGGI.',
+           'After each chosen letter or number, the earpiece voice repeats it once as confirmation. Text, SPEAK and READ are unchanged.'])),
+      this._toggle('scan.ecoParola', P(['Rileggi la parola appena finita', 'Read back the word just finished']),
+        P(['Quando una parola è finita (spazio, punto o suggerimento scelto), la voce in auricolare la rilegge una volta. Si può accendere insieme alla lettera o da sola. Per riascoltare tutta la frase c\'è LEGGI nelle AZIONI.',
+           'When a word is finished (space, period or chosen suggestion), the earpiece voice reads it once. For the whole sentence use READ in ACTIONS.'])),
     ]);
   }
 
