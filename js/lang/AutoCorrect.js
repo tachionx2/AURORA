@@ -192,6 +192,61 @@ export function plausibilita(scritto, giusta, mappa) {
   return 0.5;
 }
 
+/* ══════════════════════════════════════════════════════════════════
+ * PAROLE CHE NESSUN VOCABOLARIO ELENCA, MA CHE SONO ITALIANO
+ * ══════════════════════════════════════════════════════════════════
+ *
+ * "preparami", "lavami", "tienimi", "confessarmi", "pioverà",
+ * "pulisci": nessun elenco di parole le contiene tutte, perché
+ * l'italiano le costruisce — un verbo più un pronome attaccato, una
+ * radice più una desinenza. Il correttore le prendeva per errori e le
+ * cambiava: "preparami" in "prepararmi", "pioverà" in "piovere".
+ *
+ * Qui si riconoscono per COSTRUZIONE: se togliendo il pronome o
+ * cambiando la desinenza si arriva a una parola che esiste, la parola è
+ * buona e non si tocca.
+ */
+const CLITICI = ['gliela', 'glielo', 'gliele', 'glieli', 'gliene', 'mela', 'melo', 'mele', 'meli', 'mene',
+  'tela', 'telo', 'tele', 'teli', 'tene', 'cela', 'celo', 'cele', 'celi', 'cene', 'vela', 'velo', 'vene',
+  'sela', 'selo', 'sene', 'gli', 'mi', 'ti', 'lo', 'la', 'li', 'le', 'ci', 'vi', 'ne', 'si'];
+const DESINENZE_VERBO = {
+  are: ['o', 'i', 'a', 'iamo', 'ate', 'ano', 'avo', 'avi', 'ava', 'avamo', 'avate', 'avano', 'erò', 'erai',
+        'erà', 'eremo', 'erete', 'eranno', 'erei', 'eresti', 'erebbe', 'eremmo', 'ereste', 'erebbero',
+        'ato', 'ata', 'ati', 'ate', 'ando', 'ai', 'asti', 'ò', 'ammo', 'aste', 'arono', 'ino', 'assi', 'asse'],
+  ere: ['o', 'i', 'e', 'iamo', 'ete', 'ono', 'evo', 'evi', 'eva', 'evamo', 'evate', 'evano', 'erò', 'erai',
+        'erà', 'eremo', 'erete', 'eranno', 'erei', 'eresti', 'erebbe', 'eremmo', 'ereste', 'erebbero',
+        'uto', 'uta', 'uti', 'ute', 'endo', 'a', 'ano', 'essi', 'esse'],
+  ire: ['o', 'i', 'e', 'iamo', 'ite', 'ono', 'isco', 'isci', 'isce', 'iscono', 'ivo', 'ivi', 'iva', 'ivamo',
+        'ivate', 'ivano', 'irò', 'irai', 'irà', 'iremo', 'irete', 'iranno', 'irei', 'iresti', 'irebbe',
+        'iremmo', 'ireste', 'irebbero', 'ito', 'ita', 'iti', 'ite', 'endo', 'a', 'ano', 'isca', 'iscano',
+        'issi', 'isse'],
+};
+export function formaPlausibile(w, esiste) {
+  if (!w || w.length < 5) return false;
+  // 1. Verbo + pronome attaccato: "preparami", "tienimi", "confessarmi", "dammelo".
+  for (const c of CLITICI) {
+    if (w.length - c.length < 3 || !w.endsWith(c)) continue;
+    const base = w.slice(0, -c.length);
+    if (esiste(base) || esiste(base + 'e')) return true;               // prepara+mi, confessar(e)+mi
+    // Un infinito col pronome ("grattarmi") si riconosce dalla forma
+    // anche se il verbo non è in elenco: un errore non ci cade per caso.
+    if (base.length >= 5 && /(ar|er|ir)$/.test(base)) return true;
+    // "dammi", "fallo", "dimmelo": la consonante raddoppia dopo da', fa', di', va', sta'.
+    if (base.length >= 3 && base[base.length - 1] === c[0] && esiste(base.slice(0, -1))) return true;
+  }
+  // 2. Una voce di un verbo che esiste: "pioverà" (piovere), "pulisci" (pulire).
+  for (const [inf, des] of Object.entries(DESINENZE_VERBO)) {
+    for (const d of des) {
+      if (w.length - d.length < 3 || !w.endsWith(d)) continue;
+      const radice = w.slice(0, -d.length);
+      if (esiste(radice + inf)) return true;
+      // "cerchi" (cercare), "paghi" (pagare): la h davanti a e, i.
+      if (inf === 'are' && radice.endsWith('h') && esiste(radice.slice(0, -1) + inf)) return true;
+    }
+  }
+  return false;
+}
+
 export class Correttore {
   /**
    * @param lessico {{
@@ -269,6 +324,8 @@ export class Correttore {
     // trasformare in `perde`.
     const senza = senzaAccenti(w);
     if (senza !== w && this.lessico.esiste(senza)) return null;
+    // Costruita con le regole dell'italiano da una parola che esiste.
+    if (opt.forme !== false && formaPlausibile(w, (x) => this.lessico.esiste(x))) return null;
 
     /* ⚠️ Se esiste anche UN SOLO candidato a una modifica di distanza,
      * quelli a due modifiche non si considerano affatto.
@@ -385,13 +442,35 @@ export class Correttore {
     const parole = String(testo || '').split(/\s+/).filter(Boolean);
     const fuori = [];
     const correzioni = [];
+    let nuovaFrase = true;
     for (let i = 0; i < parole.length; i++) {
+      /* ⚠️ La punteggiatura attaccata si STACCA prima di correggere e si
+       * riattacca dopo. Senza, "casa." non esisteva in nessun vocabolario
+       * e veniva "corretta" — perdendo il punto, o diventando un'altra
+       * parola. */
+      const m = /^([("'«]*)(.*?)([.,;:!?"')»…]*)$/.exec(parole[i]);
+      const [, apre, nucleo, chiude] = m;
       // Il contesto usa la parola precedente GIÀ CORRETTA: un errore
-      // corretto migliora la scelta su quello successivo.
-      const prec = i > 0 ? fuori[i - 1].toLowerCase() : null;
-      const r = this.correggi(parole[i], prec, opt);
-      if (r) { fuori.push(r.parola); correzioni.push({ da: r.originale, a: r.parola, indice: i }); }
-      else fuori.push(parole[i]);
+      // corretto migliora la scelta su quello successivo. Dopo un punto
+      // comincia un'altra frase: la parola prima non è più contesto.
+      const prec = (!nuovaFrase && i > 0)
+        ? fuori[i - 1].toLowerCase().replace(/[.,;:!?"')»…]+$/, '') : null;
+      let r = nucleo ? this.correggi(nucleo, prec, opt) : null;
+      let nuova = r ? r.parola : nucleo;
+      /* Accordo con chi scrive ("sono stanco" → "stanca"): solo se chi
+       * chiama lo fornisce, e solo su una parola che per il resto è
+       * giusta. */
+      if (!r && nucleo && typeof opt.accordo === 'function') {
+        let a = null;
+        try { a = opt.accordo(fuori.slice(0, i), nucleo, parole[i + 1] || null); } catch { a = null; }
+        if (a && a !== nucleo.toLowerCase()) {
+          nuova = rispettaMaiuscole(nucleo, a);
+          r = { parola: nuova, originale: nucleo };
+        }
+      }
+      if (r) correzioni.push({ da: r.originale, a: nuova, indice: i });
+      fuori.push(apre + nuova + chiude);
+      nuovaFrase = /[.!?]/.test(chiude);
     }
     return { parole: fuori, testo: fuori.join(' '), correzioni };
   }

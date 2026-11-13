@@ -13,7 +13,7 @@ import { analizza as analizzaSegnale } from './signal/AutoTune.js';
 import { SessionStats } from './signal/SessionStats.js';
 import { ScanEngine, DEFAULT_PHRASES } from './scan/ScanEngine.js';
 import { Predictor, scegliSuggerimenti } from './lang/Predictor.js';
-import { Correttore } from './lang/AutoCorrect.js';
+import { Correttore, rispettaMaiuscole } from './lang/AutoCorrect.js';
 import { invia as inviaEmail, verificaConfigurazione, indirizzoValido, ESEMPIO_NETLIFY } from './lang/Mailer.js';
 import { comanda as comandaCasa, verificaDomotica } from './device/HomeAssistant.js';
 import { Drafts, splitSentences } from './lang/Drafts.js';
@@ -109,8 +109,14 @@ class App {
     this.scan = new ScanEngine(this.cfg, {
       onAnnounce: (n, m) => this.onAnnounce(n, m),
       onState: (s) => this.onScanState(s),
-      onOutput: (kind, text) => this.onOutput(kind, text),
+      /* ⚠️ Le OPZIONI vanno passate. Qui si perdevano: LEGGI arrivava
+       * senza il suo "è una rilettura" e veniva trattato come una frase
+       * detta — insegnata ai suggerimenti a ogni rilettura. */
+      onOutput: (kind, text, opt) => this.onOutput(kind, text, opt),
       onBuffer: (b) => this.onBuffer(b),
+      // Forme vicine alla parola scelta ("staccare" → "staccarsi").
+      onVarianti: (parola, prima) => this.predictor.varianti(parola, prima,
+        this.cfg.scan?.variantiN || 3),
       wakeHint: () => this.wakeHint(),
       /* ⚠️ Il comando va a CHI sta suonando.
        *
@@ -867,7 +873,11 @@ class App {
      * gesti non arrivano alla scansione. */
     if (this._pausaAutomatica && document.body.dataset.tab !== 'parla') return;
 
-    this.scan.handleAction(e.action, performance.now());
+    /* Per "indietro di una voce" conta QUANDO il gesto è cominciato,
+     * non quando è finito: nel frattempo la sequenza è andata avanti. */
+    const ora = performance.now();
+    const daQuanto = Number.isFinite(e.agoMs) ? e.agoMs : (Number.isFinite(e.durMs) ? e.durMs : null);
+    this.scan.handleAction(e.action, ora, daQuanto != null ? { inizio: ora - daQuanto } : null);
     this.gestures.setPaused(this._pausaVoluta());
   }
 
@@ -986,7 +996,14 @@ class App {
        * solo nessuno li mostrava. */
       const now = tMs;
       const { traces, blinks } = this.activeTraces();
-      this.plot.draw(COLORS, this.cfg.signal.thresholdOn, this.cfg.signal.thresholdOff,
+      /* In modalità normalizzata la linea di RILASCIO disegnata deve
+       * essere quella in uso: la frazione scelta, non la soglia in σ.
+       * A modalità spenta è esattamente la riga di prima. */
+      const sS = this.cfg.signal;
+      const rilascio = sS.modoNormalizzato
+        ? sS.thresholdOn * Math.min(0.95, (sS.normOff ?? 0.3) / Math.max(0.05, sS.normOn ?? 0.5))
+        : sS.thresholdOff;
+      this.plot.draw(COLORS, sS.thresholdOn, rilascio,
                      traces, blinks, this.cfg.ui.plotShowRaw);
       this.debugView.renderCounters();
       // Il riepilogo clinico si ridisegna una volta ogni due secondi:
@@ -1263,6 +1280,10 @@ class App {
       + ` σ ${f(L?.sigma, 5)}/${f(R?.sigma, 5)}`
       + ` | base ${f(L?.baseline)}/${f(R?.baseline)}`
       + ` | ampiezza ${f(nSx, 1)}σ/${f(nDx, 1)}σ`
+      + (this.cfg.signal.modoNormalizzato
+        ? ` | normalizzata rif ${f(this.gestures?.eyes?.left?.y?.norm?.rif?.['-1'], 4)}/${f(this.gestures?.eyes?.right?.y?.norm?.rif?.['-1'], 4)}`
+          + ` ${this.gestures?.eyes?.left?.y?.norm?.attiva ? 'attiva' : 'in apprendimento'}`
+        : '')
       + ` | grezzo ${f(L?.smooth)}/${f(R?.smooth)}`
       + ` | validi ${pct(C.validiLeft, C.scartatiLeft)}/${pct(C.validiRight, C.scartatiRight)}`
       + ` | schiacc ${sch('left')}/${sch('right')} (corretti ${quanteVolte('left')}/${quanteVolte('right')})`
@@ -1994,6 +2015,9 @@ class App {
       minLen: P.autoCorrectMinLen ?? 3,
       maxDist: P.autoCorrectMaxDist ?? 2,
       margine: P.autoCorrectMargin ?? 0.12,
+      // Accordo con chi scrive ("sono stanco" → "stanca"), se il genere
+      // è indicato nelle impostazioni.
+      accordo: (prima, parola, dopo) => this.predictor.accordoConChiScrive(prima, parola, dopo),
     };
     try {
       if (modo === 'frase') {
@@ -2001,7 +2025,16 @@ class App {
         if (r.correzioni.length) this._annunciaCorrezioni(r.correzioni);
         return r;
       }
-      const r = this.correttore.correggi(testo, precedente, opt);
+      let r = this.correttore.correggi(testo, precedente, opt);
+      if (!r) {
+        /* Parola per parola, l'accordo guarda le parole già scritte:
+         * quella appena finita è l'ultima del testo. */
+        const prima = (this.scan?.buffer?.words || []).slice(0, -1);
+        const a = this.predictor.accordoConChiScrive(prima, testo, null);
+        if (a && a !== String(testo).toLowerCase()) {
+          r = { parola: rispettaMaiuscole(String(testo), a), originale: String(testo) };
+        }
+      }
       if (r) this._annunciaCorrezioni([{ da: r.originale, a: r.parola }]);
       return r;
     } catch (e) {
@@ -4971,6 +5004,8 @@ class App {
         else this.gestures.injectKey('TOGGLE_PAUSE');
       }
       else if (ev.code === 'ArrowLeft') { ev.preventDefault(); this.gestures.injectKey('BACK'); }
+      // Freccia su: indietro di una voce (per provarlo da tastiera).
+      else if (ev.code === 'ArrowUp') { ev.preventDefault(); this.gestures.injectKey('PREV'); }
     });
   }
 

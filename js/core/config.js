@@ -110,6 +110,10 @@ export const GESTURE_CHANNELS = {
   DOUBLE_BLINK:  { label: 'Doppio ammiccamento', axis: 'lid', dir: +1, kind: 'pulse', count: 2 },
   TRIPLE_BLINK:  { label: 'Triplo ammiccamento', axis: 'lid', dir: +1, kind: 'pulse', count: 3 },
   LONG_CLOSE:    { label: 'Occhi chiusi a lungo',axis: 'lid', dir: +1, kind: 'dwell' },
+  // Chiusura a tre durate: si decide alla riapertura, in base a quanto è durata.
+  CLOSE_SHORT:   { label: 'Chiusura breve',      axis: 'lid', dir: +1, kind: 'dwell' },
+  CLOSE_MEDIUM:  { label: 'Chiusura media',      axis: 'lid', dir: +1, kind: 'dwell' },
+  CLOSE_LONG:    { label: 'Chiusura lunga',      axis: 'lid', dir: +1, kind: 'dwell' },
 };
 
 /**
@@ -133,6 +137,10 @@ export const ACTIONS = {
   TOGGLE_PAUSE: 'Pausa / Risveglia (alterna)',
   SPEAK:        'Pronuncia frase',
   BACK:         'Torna indietro',
+  /* INDIETRO DI UNA VOCE nella sequenza — da non confondere con BACK,
+   * che esce dal sottomenu. Serve a chi ha mancato una voce: invece di
+   * aspettare tutto il giro, torna a quella prima. */
+  PREV:         'Indietro di una voce (ripete la voce prima)',
   NEXT:         'Avanti (scansione manuale)',
   CLICK:        'Click del puntatore',
   RIGHT_CLICK:  'Click destro',
@@ -473,6 +481,27 @@ export const DEFAULT_CONFIG = {
     sogliaRelativa: false,
     sogliaFrazione: 0.40,
 
+    /* ══════════════════════════════════════════════════════════════
+     * MODALITÀ NORMALIZZATA — spenta di default
+     * ══════════════════════════════════════════════════════════════
+     *
+     * Il gesto misurato rispetto a SE STESSO: il programma impara
+     * quanto è grande il gesto tipico in questa sessione e lo chiama 1.
+     * Le soglie diventano frazioni di quel gesto, e non vanno più
+     * inseguite a mano quando l'ampiezza in σ cambia.
+     *   normOn       scatta a questa frazione del gesto tipico;
+     *   normOff      rilascia a questa frazione (serve alla DURATA: il
+     *                gesto finisce quando l'occhio è tornato sotto un
+     *                terzo, non quando è perfettamente a riposo);
+     *   normMinSigma la soglia non scende mai sotto questi multipli del
+     *                rumore, qualunque sia il riferimento: è la
+     *                sicurezza contro i comandi involontari.
+     * Vedi `GestureEngine._normalizza`. */
+    modoNormalizzato: false,
+    normOn: 0.5,
+    normOff: 0.3,
+    normMinSigma: 2.5,
+
     perOcchio: {
       left:  {},   // medianWindowMs, lowPassHz, baselineTauSec,
       right: {},   // sigmaPercentile, sigmaRitaratura, minSigma, minConfidence
@@ -678,6 +707,20 @@ export const DEFAULT_CONFIG = {
     CHEEK_PUFF:   { enabled: false, action: 'NONE', dwellMs: 700, maxMs: 6000 },
     BROW_UP:      { enabled: false, action: 'NONE', dwellMs: 600, maxMs: 6000 },
     LONG_CLOSE:   { enabled: false, action: 'WAKE',   dwellMs: 1500, maxMs: 99000 },
+    /* ── Chiusura dell'occhio a TRE DURATE ──
+     * Lo stesso gesto tenuto per tempi diversi: breve, media, lunga.
+     * Si decide alla RIAPERTURA. Tutte spente: chi non le usa non deve
+     * accorgersi che esistono. Gli intervalli non si sovrappongono e
+     * lasciano fuori l'ammiccamento spontaneo (sotto i 300 ms).
+     * La breve propone "indietro di una voce": è il gesto pensato per
+     * chi ha appena mancato una voce. */
+    CLOSE_SHORT:  { enabled: false, action: 'PREV',         dwellMs: 300,  maxMs: 900 },
+    CLOSE_MEDIUM: { enabled: false, action: 'UNDO',         dwellMs: 900,  maxMs: 2000 },
+    CLOSE_LONG:   { enabled: false, action: 'TOGGLE_PAUSE', dwellMs: 2000, maxMs: 6000 },
+    // Riapertura più breve di così = tremolio del rilevatore, non fine del gesto.
+    closeGapMs: 120,
+    // Occhio "non so" (campione scartato) oltre questo tempo: il gesto si chiude.
+    closeUnknownMs: 1500,
     refractoryMs: 700,           // silenzio dopo un gesto: evita rimbalzi
     // Finestra entro cui più ammiccamenti contano come raffica.
     // Due chiusure entro questo tempo = doppio, tre = triplo.
@@ -733,6 +776,11 @@ export const DEFAULT_CONFIG = {
      * scansione passa alla voce successiva, prende la precedente.
      * 0 = comportamento invariato. */
     graceMs: 0,
+    /* "Indietro di una voce": il gesto viene visto un po' DOPO che è
+     * cominciato davvero (i filtri del segnale, il tempo di reazione).
+     * Per decidere su quale voce era la sequenza quando la persona ha
+     * deciso, l'inizio si anticipa di tanto. */
+    indietroAnticipoMs: 250,
 
     /* ⚠️ La scansione si ferma uscendo dalla scheda Parla.
      *
@@ -790,6 +838,28 @@ export const DEFAULT_CONFIG = {
     suggerimentiDiretti: false,
     suggerimentiDirettiN: 1,
     suggerimentiDirettiSoglia: 0,
+    /* La proposta a voce torna a OGNI GIRO del menu Scrivi, finché la
+     * parola in corso non cambia: chi la manca la risente al giro dopo,
+     * senza dover scrivere un'altra lettera. */
+    propostaOgniGiro: true,
+    /* VARIANTI del suggerimento scelto dall'elenco: dopo "staccare" la
+     * voce propone "staccarsi", "staccarmi"… un passo ciascuna; un gesto
+     * sostituisce la parola. Spento di default: aggiunge passi dopo
+     * ogni parola scelta, e va voluto. */
+    variantiSuggerimento: false,
+    variantiN: 3,
+    /* ── Struttura del menu Scrivi ──
+     *   spazioFuori        lo SPAZIO come voce a sé, subito dopo AZIONI
+     *                      (e sparisce dai gruppi di lettere);
+     *   puntoFuori         il PUNTO, subito dopo lo spazio;
+     *   cancellaNeiGruppi  CANCELLA in fondo a ogni gruppo: toglie
+     *                      l'ultima lettera e resta nel gruppo;
+     *   cancellaDopoGruppi CANCELLA dopo i gruppi: toglie l'ultima
+     *                      parola, e ripetuto cancella parola per parola. */
+    spazioFuori: false,
+    puntoFuori: true,
+    cancellaNeiGruppi: true,
+    cancellaDopoGruppi: true,
     phraseCount: 12,
     // Gruppi di frasi. Vuoto = elenco unico, ordinato dalle statistiche.
     phraseGroups: DEFAULT_PHRASE_GROUPS,
@@ -891,6 +961,13 @@ export const DEFAULT_CONFIG = {
      * espressioni dell'italiano reale ("a pregare", "mal di testa").
      * Spegnendolo i suggerimenti tornano esattamente come prima. */
     contestoFrase: true,
+    /* Genere di chi scrive: '' (non indicato), 'f' oppure 'm'. Serve
+     * alla concordanza quando parla di sé: "sono stan…" → "stanca" per
+     * una donna, "stanco" per un uomo. */
+    genereUtente: '',
+    /* Parole corte prima delle lunghe. Spento: la frequenza lo fa già,
+     * e forzarlo abbassa la precisione (misurato). */
+    cortePrima: false,
     reorderLetters: false,       // riordino dinamico: spento di default,
                                  // distrugge la memoria motoria acquisita
     reorderStrength: 0.0,

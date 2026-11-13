@@ -737,6 +737,8 @@ function buildTreeFor(b){ return b.eng.tree; }
   // I nomi propri si imparano scrivendoli: è così che il correttore
   // può recuperare "franderco" → "Francesco".
   for (let i = 0; i < 4; i++) pred.learnSentence('chiama francesco');
+  // "ciao" è una parola che questa persona usa: lo si vede dal suo lessico.
+  for (let i = 0; i < 4; i++) pred.learnSentence('ciao a tutti');
   const c = new Correttore(pred.lessicoPerCorrezione());
   const opt = { minLen: 3, maxDist: 2, margine: 0.12 };
 
@@ -767,7 +769,20 @@ function buildTreeFor(b){ return b.eng.tree; }
   const sno = c.correggi('sno', null, opt);
   ok(sno?.parola === 'sono',
      `29d. "sno" → "sono": la frequenza rompe il pareggio (${sno?.parola ?? 'nessuna'})`);
-  ok(c.correggi('sino', null, opt)?.parola === 'sono', '29d2. e anche "sino" → "sono"');
+  /* "sino" È una parola italiana ("sino a domani"). Il correttore di
+   * prima conosceva solo 437 parole e la cambiava in "sono": con tutto
+   * il vocabolario la riconosce e non la tocca. */
+  ok(c.correggi('sino', null, opt) === null, '29d2. "sino" è italiano: non si tocca');
+  {
+    // ══ Le parole GIUSTE non si toccano: il difetto più grave di tutti ══
+    const giuste = 'chiesa fianco andata messa fredda sinistro gocce prude cambia preparami lavami tienimi tagliami salutami confessarmi pioverà pulisci alzami mettimi grattarmi pettinami coprirmi aspirami'.split(' ');
+    const toccate = giuste.filter(w => c.correggi(w, null, opt) !== null);
+    ok(toccate.length === 0, `29d3. parole italiane giuste, anche costruite (verbo + pronome, voci verbali), restano come sono (toccate: ${toccate.join(', ') || 'nessuna'})`);
+    // Senza il lessico personale "cao" ha troppi vicini veri (caso, capo, caro, ciao): nel dubbio, fermo.
+    const freddo = new Correttore(new P(deepClone(DEFAULT_CONFIG), null).lessicoPerCorrezione());
+    ok(freddo.correggi('cao', null, opt) === null, '29d4. "cao" senza saper nulla della persona: troppi vicini, non si corregge');
+    ok(freddo.correggi('aqua', null, opt)?.parola === 'acqua', '29d5. "aqua" → "acqua": una parola rarissima e corta non fa da scudo a un errore');
+  }
   ok(c.correggi('xyzwq', null, opt) === null, '29e. una parola senza vicini resta com è');
   ok(c.correggi('ab', null, opt) === null, '29f. parole troppo corte non si toccano');
   ok(c.correggi('casa123', null, opt) === null, '29g. le parole con numeri non si toccano');
@@ -941,7 +956,10 @@ function buildTreeFor(b){ return b.eng.tree; }
     return w.slice(0, i) + 'q' + w.slice(i + 1);
   };
 
-  const parole = [...L2.parole()].filter(w => w.length >= 4 && w.length <= 10);
+  /* Il correttore ora conosce tutto il vocabolario (trentamila parole,
+   * non più quattrocento): provarle tutte richiederebbe mezz'ora. Se ne
+   * prende una su venti, sempre le stesse. */
+  const parole = [...L2.parole()].filter(w => w.length >= 4 && w.length <= 10).filter((_, i) => i % 20 === 0);
   const senzaS = new C2(L2), conS = new C2(L2, cfg2.scan.groups);
   const opt2 = { minLen: 3, maxDist: 2, margine: 0.12 };
   let tot = 0, okS = 0, okC = 0, maleS = 0, maleC = 0;
@@ -956,7 +974,13 @@ function buildTreeFor(b){ return b.eng.tree; }
     }
   }
   ok(tot > 500, `31g. banco di prova ampio (${tot} errori realistici)`);
-  ok(okC / tot > 0.85, `31h. recupera oltre l 85% degli errori reali (${(100 * okC / tot).toFixed(1)}%)`);
+  /* La soglia era 85% quando il correttore conosceva 437 parole: fra
+   * così poche, il vicino giusto era quasi sempre l'unico. Con
+   * trentamila parole — rare comprese, ed è su TUTTE che si prova qui —
+   * i vicini plausibili sono di più e nel dubbio non si corregge. In
+   * cambio non tocca più le parole giuste (29d3), che contava molto
+   * di più. Sulle parole di frasi vere il recupero è intorno al 90%. */
+  ok(okC / tot > 0.78, `31h. recupera oltre il 78% degli errori reali su tutto il vocabolario (${(100 * okC / tot).toFixed(1)}%)`);
   ok(okC > okS, `31i. la struttura MIGLIORA il recupero (${(100 * okC / tot).toFixed(1)}% contro ${(100 * okS / tot).toFixed(1)}%)`);
   ok(maleC < maleS, `31l. e RIDUCE le correzioni sbagliate (${(100 * maleC / tot).toFixed(1)}% contro ${(100 * maleS / tot).toFixed(1)}%)`);
   ok(maleC / tot < 0.08, `31m. le correzioni sbagliate restano sotto l 8% (${(100 * maleC / tot).toFixed(1)}%)`);
@@ -986,7 +1010,8 @@ function buildTreeFor(b){ return b.eng.tree; }
     const liste = gr.map(g => g.items.map(c => String(c).toLowerCase()).filter(c => c !== ' ' && c !== '␣'));
     const alfabeto = new Set([...mp.keys()]);
     const cc = new C2(L2, gr);
-    const pp = [...L2.parole()].filter(w => w.length >= 4 && w.length <= 10 && [...w].every(ch => alfabeto.has(ch)));
+    const pp = [...L2.parole()].filter(w => w.length >= 4 && w.length <= 10 && [...w].every(ch => alfabeto.has(ch)))
+      .filter((_, i) => i % 60 === 0);   // una su sessanta: vedi sopra
     let semi3 = 999;
     const r3 = () => { semi3 = (semi3 * 1103515245 + 12345) % 2147483648; return semi3 / 2147483648; };
     let t3 = 0, o3 = 0, m3 = 0;
@@ -1905,15 +1930,15 @@ function buildTreeFor(b){ return b.eng.tree; }
   };
 
   const base = etichette();
-  ok(base.slice(0, 3).join(' ') === 'LEGGI PARLA SALVA',
-     `70a. in testa LEGGI, PARLA, SALVA, in quest ordine (${base.join(' · ')})`);
+  ok(base.slice(0, 4).join(' ') === 'PARLA RIPETI LEGGI SALVA',
+     `70a. in testa PARLA, RIPETI, LEGGI, SALVA, in quest ordine (${base.join(' · ')})`);
   ok(base[base.length - 1] === 'SVUOTA',
      '70b. SVUOTA è l ultima: la più difficile da selezionare per sbaglio');
   ok(!base.includes('RILEGGI'),
      '70c. RILEGGI non esiste più fra le azioni: si chiama LEGGI');
 
   const conAi = etichette(c => { c.assistente.enabled = true; });
-  ok(conAi.slice(0, 4).join(' ') === 'LEGGI PARLA SALVA CHIEDI',
+  ok(conAi.slice(0, 5).join(' ') === 'PARLA RIPETI LEGGI SALVA CHIEDI',
      `70d. con l assistente acceso CHIEDI viene subito dopo SALVA (${conAi.join(' · ')})`);
   ok(conAi[conAi.length - 1] === 'SVUOTA', '70e. e SVUOTA resta in fondo');
 
@@ -2017,8 +2042,8 @@ function buildTreeFor(b){ return b.eng.tree; }
     const sicura = scegliSuggerimenti(p, { letters: 'SI', words: ['MI', 'GIRI', 'SUL', 'FIANCO'] }, c);
     ok(sicura.proposte.length === 1 && sicura.proposte[0] === 'sinistro',
        `71m. parola netta: proposta a voce (${sicura.proposte.join(', ')})`);
-    ok(!sicura.suggerimenti.includes('sinistro'),
-       '71n. e non ripetuta nel gruppo Suggerimenti');
+    ok(sicura.suggerimenti[0] === 'sinistro',
+       '71n. e nel gruppo Suggerimenti è la PRIMA: ciò che si è sentito proporre è ciò che si trova');
 
     // Predefinito: si propone SEMPRE la migliore, appena c'è un
     // suggerimento. Prima compariva "solo ogni tanto".
@@ -2543,6 +2568,275 @@ function buildTreeFor(b){ return b.eng.tree; }
   const spenta = deepClone(c); spenta.prediction.contestoFrase = false;
   ok(new P76(spenta).suggerisci({ prefisso: 'andat', parole: ['sono'], n: 4 }).length > 0,
      '76. con "Suggerimenti che capiscono la frase" spento la regola non interviene e tutto funziona');
+}
+
+/* ══════ 77. SCRIVI: RIPETI, PUNTO, SPAZIO, CANCELLA, PROPOSTA A OGNI GIRO, VARIANTI ══════
+ *
+ * Richieste dal campo (novembre 2026). */
+{
+  const { Predictor: P77, scegliSuggerimenti: sc77, fraseInCorso } = await import('../js/lang/Predictor.js');
+  const banco = (mod) => {
+    const c = deepClone(DEFAULT_CONFIG);
+    c.prediction.minPrefixForWord = 2;
+    if (mod) mod(c);
+    const pred = new P77(c);
+    for (let i = 0; i < 3; i++) pred.learnSentence('ho sete per favore');
+    const detti = [];
+    let eng;
+    function ctx() {
+      const { proposte, suggerimenti } = sc77(pred, eng.buffer, c);
+      eng.setContext({ suggestions: suggerimenti, proposte,
+                       hasText: !!(eng.buffer.words.length || eng.buffer.letters) });
+    }
+    eng = new ScanEngine(c, {
+      onOutput: (k, t, o) => { detti.push({ k, t, o: o || null }); },
+      onBuffer: () => ctx(),
+      onVarianti: (w, prima) => pred.varianti(w, prima, 3),
+    });
+    let T = 0;
+    eng.start(T); ctx();
+    const passo = () => { T += 25; eng.tick(T); ctx(); };
+    const gesto = (lab) => {
+      for (let i = 0; i < 6000; i++) {
+        ctx();
+        if (eng.currentNode?.label === lab) { eng.select(T); ctx(); return true; }
+        passo();
+      }
+      return false;
+    };
+    const scrivi = (parola) => {
+      for (const ch of parola.toUpperCase()) {
+        const g = c.scan.groups.find(x => x.items.includes(ch));
+        if (!gesto(g.label) || !gesto(ch)) throw new Error('lettera non raggiunta ' + ch);
+      }
+    };
+    const spazio = () => { const g = c.scan.groups.find(x => x.items.includes('␣')); return gesto(g.label) && gesto('␣'); };
+    const figli = () => eng.level.node.children.map(x => x.label);
+    return { eng, pred, gesto, scrivi, spazio, passo, detti, figli, c, tempo: () => T, avanti: (ms) => { const fine = T + ms; while (T < fine) passo(); } };
+  };
+  const qui = (b) => b.eng.currentNode?.label;
+  const testo = (b) => [...b.eng.buffer.words, b.eng.buffer.letters].join(' ').trim();
+
+  // ── Struttura del menu Scrivi ──
+  { const b = banco(); b.gesto('Scrivi');
+    const f = b.figli();
+    ok(f[0] === '← ESCI' && f[1] === 'AZIONI' && f[2] === '.' && f[3] === 'Vocali',
+       `77a. predefinito: ESCI, AZIONI, punto, poi le lettere (${f.join(' · ')})`);
+    ok(f[f.length - 1] === '⌫ parola', '77b. CANCELLA è l ultima voce di Scrivi, dopo i gruppi');
+    ok(!b.eng._inLettere, '77c. Scrivi NON è scambiato per un gruppo di lettere (passo normale)');
+    const voc = b.eng.level.node.children.find(x => x.label === 'Vocali').children.map(x => x.label);
+    ok(voc[voc.length - 1] === '← ESCI' && voc[voc.length - 2] === '⌫',
+       `77d. nei gruppi: lettere, CANCELLA, ESCI (${voc.join(' ')})`);
+    ok(b.c.scan.groups.some(g => g.items.includes('␣')) && !f.includes('␣'),
+       '77e. predefinito: lo spazio resta dentro i gruppi, non fuori'); }
+  { const b = banco(c => { c.scan.spazioFuori = true; }); b.gesto('Scrivi');
+    const f = b.figli();
+    ok(f.slice(0, 4).join('|') === '← ESCI|AZIONI|␣|.', `77f. spazio fuori: ESCI, AZIONI, spazio, punto (${f.join(' · ')})`);
+    const dentro = b.eng.level.node.children.flatMap(x => (x.children || []).map(y => y.label));
+    ok(!dentro.includes('␣'), '77g. e lo spazio dentro i gruppi sparisce: niente doppioni');
+    ok(!b.eng._inLettere, '77h. con lo spazio fuori Scrivi resta un menu, non un gruppo di lettere');
+    b.scrivi('ho'); b.gesto('␣');
+    ok(b.eng.buffer.words.join(' ') === 'HO' && b.eng.buffer.letters === '' && qui(b) === 'AZIONI',
+       `77i. lo spazio fuori chiude la parola e riparte da AZIONI (${testo(b)} / ${qui(b)})`); }
+  { const b = banco(c => { c.scan.puntoFuori = false; c.scan.cancellaNeiGruppi = false; c.scan.cancellaDopoGruppi = false; });
+    b.gesto('Scrivi');
+    const f = b.figli();
+    const voc = b.eng.level.node.children.find(x => x.label === 'Vocali').children.map(x => x.label);
+    ok(f.join('|') === ['← ESCI', 'AZIONI', ...b.c.scan.groups.map(g => g.label)].join('|') && !voc.includes('⌫'),
+       `77l. tutto spento: il menu Scrivi è esattamente quello di prima (${f.join(' · ')})`); }
+
+  // ── Punto ──
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('.');
+    ok(testo(b) === 'CIAO.' && b.eng.buffer.letters === '' && qui(b) === 'AZIONI',
+       `77m. il punto chiude la parola, si attacca e riparte da AZIONI (${testo(b)} / ${qui(b)})`);
+    b.gesto('.');
+    ok(testo(b) === 'CIAO.', `77n. due punti di fila: il secondo non fa nulla (${testo(b)})`);
+    b.scrivi('ho');
+    ok(fraseInCorso(b.eng.buffer.words).length === 0,
+       '77o. dopo il punto comincia una frase nuova: il contesto dei suggerimenti riparte');
+    b.gesto('AZIONI'); b.gesto('PARLA');
+    ok(b.detti.some(d => d.k === 'speech' && d.t === 'CIAO. HO'), '77p. PARLA dice il testo con il suo punto'); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('.');
+    ok(testo(b) === '', '77q. punto senza testo: non scrive nulla'); }
+  { const p = new P77(deepClone(DEFAULT_CONFIG));
+    p.learnSentence('Ho sete. Vorrei acqua.');
+    ok(p.words.has('sete') && !p.words.has('sete.') && !p.bigrams.get('sete\tvorrei') && p.bigrams.get('ho\tsete') === 1,
+       '77r. imparando, il punto non entra nel lessico e separa le frasi');
+    const q = new P77(deepClone(DEFAULT_CONFIG)), q0 = new P77(deepClone(DEFAULT_CONFIG));
+    q.learnSentence('mi giri sul fianco sinistro');
+    ok(q.words.get('sinistro')?.n === 1 && q.bigrams.get('fianco\tsinistro') === 1 && q.trigrams.get('sul\tfianco\tsinistro') === 1,
+       '77s. una frase senza punteggiatura si impara esattamente come prima'); }
+
+  // ── PARLA, RIPETI, LEGGI ──
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('LEGGI');
+    const l = b.detti.filter(d => d.k === 'speech').pop();
+    ok(l?.t === 'CIAO' && l.o?.rilettura === true && testo(b) === 'CIAO',
+       `77t. LEGGI legge, lascia il testo e si dichiara rilettura (${JSON.stringify(l)})`);
+    ok(qui(b) === 'AZIONI', '77u. dopo LEGGI si resta sulle AZIONI');
+    for (let i = 0; i < 5; i++) { b.gesto('AZIONI'); b.gesto('LEGGI'); }
+    ok(testo(b) === 'CIAO' && !b.detti.some(d => d.t === 'niente da leggere'),
+       '77v. LEGGI cinque volte di fila: il testo non sparisce mai');
+    b.gesto('AZIONI'); b.gesto('PARLA');
+    ok(testo(b) === '' && b.eng.ultimoDetto === 'CIAO', '77w. PARLA toglie il testo dallo schermo ma lo tiene in memoria');
+    const prima = b.detti.length;
+    b.gesto('AZIONI'); b.gesto('RIPETI'); b.gesto('AZIONI'); b.gesto('RIPETI');
+    const rip = b.detti.slice(prima).filter(d => d.k === 'speech');
+    ok(rip.length === 2 && rip.every(d => d.t === 'CIAO' && d.o?.rilettura === true),
+       `77x. RIPETI ridice l ultima cosa detta, quante volte si vuole, senza insegnarla di nuovo (${JSON.stringify(rip)})`);
+    b.scrivi('ok'); b.gesto('AZIONI'); b.gesto('RIPETI');
+    const u = b.detti.filter(d => d.k === 'speech').pop();
+    ok(u.t === 'OK' && !u.o?.rilettura && testo(b) === '' && b.eng.ultimoDetto === 'OK',
+       '77y. con un testo nuovo RIPETI fa ciò che fa PARLA, e la memoria si aggiorna'); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('RIPETI');
+    ok(b.detti.some(d => d.k === 'menu' && d.t === 'niente da ripetere'), '77z. RIPETI senza nulla da ripetere lo dice'); }
+  { const b = banco(); b.gesto('Frasi');
+    const f = b.eng.level.node.children.find(x => x.action === 'PHRASE' || x.children);
+    const frase = b.eng.level.node.children.flatMap(x => x.children || [x]).find(x => x.action === 'PHRASE');
+    if (frase.id.split(':').length > 2) b.gesto(b.eng.level.node.children.find(x => x.children?.includes(frase)).label);
+    b.gesto(frase.label);
+    ok(b.eng.ultimoDetto === frase.payload, '77aa. una frase pronta diventa l ultima cosa detta');
+    void f; }
+  { // Una correzione non può svuotare il testo.
+    const c = deepClone(DEFAULT_CONFIG); c.prediction.autoCorrectMode = 'frase';
+    for (const rotto of [{ testo: ' ' }, { testo: 'una sola' }, { testo: '\n' }, {}]) {
+      const e = new ScanEngine(c, { onOutput: () => {}, onCorrect: () => rotto });
+      e.loadText('CIAO A TUTTI QUANTI', 0); e._correggiFrase();
+      ok(e._composedText() === 'CIAO A TUTTI QUANTI', `77ab. correzione difettosa (${JSON.stringify(rotto)}): il testo resta`);
+    } }
+
+  // ── Cancella ──
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('se');
+    b.gesto('Vocali'); b.gesto('⌫');
+    ok(b.eng.buffer.letters === 'S' && b.eng.level.node.label === 'Vocali',
+       `77ac. CANCELLA nel gruppo: toglie l ultima lettera e resta nel gruppo (${b.eng.buffer.letters} / ${b.eng.level.node.label})`);
+    b.avanti(b.eng.attesaCorrente + 30);
+    ok(qui(b) === '← ESCI', `77ad. e riparte da ESCI (${qui(b)})`);
+    b.gesto('A');
+    ok(b.eng.buffer.letters === 'SA', '77ae. poi si sceglie la lettera giusta nello stesso gruppo'); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ho'); b.spazio(); b.scrivi('sete'); b.spazio(); b.scrivi('or');
+    ok(testo(b) === 'HO SETE OR', `77af. preparazione (${testo(b)})`);
+    b.gesto('⌫ parola');
+    ok(testo(b) === 'HO SETE', `77ag. CANCELLA dopo i gruppi: via la parola in corso (${testo(b)})`);
+    b.avanti(b.eng.attesaCorrente + 30);
+    ok(qui(b) === '⌫ parola', `77ah. e si resta su CANCELLA (${qui(b)})`);
+    b.eng.select(b.tempo());
+    ok(testo(b) === 'HO', `77ai. ripetendo il gesto si cancella parola per parola (${testo(b)})`); }
+
+  // ── La proposta a voce torna a ogni giro ──
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; }); b.gesto('Scrivi'); b.scrivi('se');
+    const prop = b.eng.parolaProposta;
+    ok(!!prop, `77al. dopo la lettera la parola viene proposta (${prop})`);
+    ok(b.eng.ctx.suggestions[0] === prop, `77am. ed è la prima dell elenco Suggerimenti (${b.eng.ctx.suggestions.join(', ')})`);
+    // La si lascia passare, e si lascia fare un giro intero.
+    let viste = 0, primaDi = null, giri = 0, T0 = b.tempo();
+    let era = true;
+    while (b.tempo() - T0 < 60000 && viste < 2) {
+      b.passo();
+      const c2 = b.eng.parolaProposta;
+      if (c2 && !era) { viste++; primaDi = b.eng.level.node.children[b.eng.level.index]?.label; }
+      era = !!c2; giri++;
+    }
+    ok(viste >= 2, `77an. non scelta, viene riproposta a ogni giro (${viste} volte in ${Math.round((b.tempo() - T0) / 1000)} s)`);
+    ok(primaDi === 'Suggerimenti', `77ao. nello stesso punto della prima volta: un attimo prima di Suggerimenti (${primaDi})`);
+    ok(b.eng.buffer.letters === 'SE', '77ap. e intanto non è stato scritto nulla');
+    // Al giro dopo la si prende.
+    for (let i = 0; i < 6000 && !b.eng.parolaProposta; i++) b.passo();
+    b.eng.select(b.tempo());
+    ok(b.eng.buffer.words.join(' ') === prop.toUpperCase() && b.eng.buffer.letters === '' && qui(b) === 'AZIONI',
+       `77aq. scelta al secondo giro: la parola entra e si riparte da AZIONI (${testo(b)} / ${qui(b)})`); }
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.propostaOgniGiro = false; }); b.gesto('Scrivi'); b.scrivi('se');
+    b.avanti(b.eng.stepCorrente + 30);
+    let rivista = false; const T0 = b.tempo();
+    while (b.tempo() - T0 < 40000) { b.passo(); if (b.eng.parolaProposta) rivista = true; }
+    ok(!rivista, '77ar. opzione spenta: la proposta viene detta una volta sola, come prima'); }
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; }); b.gesto('Scrivi'); b.scrivi('se');
+    b.avanti(b.eng.stepCorrente + 30); b.spazio();
+    let rivista = false; const T0 = b.tempo();
+    while (b.tempo() - T0 < 40000) { b.passo(); if (b.eng.parolaProposta) rivista = true; }
+    ok(!rivista, '77as. a parola finita non si ripropone nulla'); }
+
+  // ── Varianti del suggerimento scelto ──
+  { const b = banco(c => { c.scan.variantiSuggerimento = true; c.prediction.minPrefixForWord = 3; });
+    b.gesto('Scrivi'); b.scrivi('and');
+    b.gesto('Suggerimenti');
+    // Una parola dell'elenco che abbia forme vicine ("andare" → "andarci").
+    const scelta = b.eng.level.node.children.find(x => x.action === 'WORD' && b.pred.varianti(x.label, []).length).label;
+    b.gesto(scelta);
+    const v = b.eng.proposta;
+    ok(v?.variante && v.lista.length >= 1 && !v.lista.includes(scelta),
+       `77at. scelta "${scelta}" dall elenco: la voce propone le varianti (${v?.lista?.join(', ')})`);
+    ok(b.eng.buffer.words.join(' ') === scelta.toUpperCase(), '77au. intanto la parola scelta è già nella frase');
+    const var1 = b.eng.parolaProposta;
+    b.eng.select(b.tempo());
+    ok(b.eng.buffer.words.join(' ') === var1.toUpperCase() && qui(b) === 'AZIONI',
+       `77av. un gesto sulla variante SOSTITUISCE la parola (${testo(b)}) e riparte da AZIONI (${qui(b)})`); }
+  { const b = banco(c => { c.scan.variantiSuggerimento = true; c.prediction.minPrefixForWord = 3; });
+    b.gesto('Scrivi'); b.scrivi('and'); b.gesto('Suggerimenti');
+    const scelta = b.eng.level.node.children.find(x => x.action === 'WORD' && b.pred.varianti(x.label, []).length).label;
+    b.gesto(scelta);
+    ok(!!b.eng.proposta, '77ay. (le varianti ci sono)');
+    b.avanti(b.eng.stepCorrente * 4 + 100);
+    ok(!b.eng.proposta && b.eng.buffer.words.join(' ') === scelta.toUpperCase(),
+       '77az. varianti lasciate passare: la parola scelta resta com è'); }
+  { const b = banco(c => { c.prediction.minPrefixForWord = 3; }); b.gesto('Scrivi'); b.scrivi('and'); b.gesto('Suggerimenti');
+    b.gesto(b.eng.level.node.children.find(x => x.action === 'WORD').label);
+    ok(!b.eng.proposta && qui(b) === 'AZIONI', '77ba. opzione spenta (predefinito): nessun passo in più, come prima'); }
+}
+
+/* ══════ 78. GENERE DI CHI SCRIVE, CORREZIONE CON LA PUNTEGGIATURA ══════ */
+{
+  const { Predictor: P78, parlaDiSe } = await import('../js/lang/Predictor.js');
+  const { Correttore: C78 } = await import('../js/lang/AutoCorrect.js');
+  const con = (g, mod) => { const c = deepClone(DEFAULT_CONFIG); c.prediction.minPrefixForWord = 2; c.prediction.genereUtente = g; if (mod) mod(c); return new P78(c); };
+  const top = (p, fr, pre, n = 3) => p.suggerisci({ prefisso: pre, parole: fr ? fr.split(' ') : [], n }).map(x => x.parola);
+  const F = con('f'), M = con('m'), N = con('');
+
+  ok(DEFAULT_CONFIG.prediction.genereUtente === '', '78a. il genere non è indicato di default: nessun cambiamento finché non lo si sceglie');
+  for (const [fr, pre, f, m] of [['sono', 'stan', 'stanca', 'stanco'], ['sono', 'and', 'andata', 'andato'],
+                                 ['mi sento', 'sol', 'sola', 'solo'], ['sono molto', 'cont', 'contenta', 'contento'],
+                                 ['io sono', 'nat', 'nata', 'nato'], ['sono', 'pront', 'pronta', 'pronto']]) {
+    ok(top(F, fr, pre)[0] === f, `78b. donna: "${fr} ${pre}…" → ${f} (${top(F, fr, pre).join(', ')})`);
+    ok(top(M, fr, pre)[0] === m, `78c. uomo: "${fr} ${pre}…" → ${m} (${top(M, fr, pre).join(', ')})`);
+  }
+  // Non tocca ciò che non riguarda chi scrive, né le parole senza genere.
+  ok(top(F, 'sono', 'tr')[0] === top(N, 'sono', 'tr')[0] && top(F, 'sono', 'tr')[0] === 'triste',
+     `78d. "sono tr…" → triste, uguale per tutti: gli aggettivi in -e non si toccano (${top(F, 'sono', 'tr').join(', ')})`);
+  ok(JSON.stringify(top(F, 'loro sono', 'stan')) === JSON.stringify(top(N, 'loro sono', 'stan')),
+     '78e. "loro sono stan…": non parla di chi scrive, nessun effetto');
+  ok(JSON.stringify(top(F, 'ho', 'mangiat')) === JSON.stringify(top(N, 'ho', 'mangiat')),
+     '78f. "ho mangiat…": con avere non si accorda, nessun effetto');
+  ok(JSON.stringify(top(F, 'la casa è', 'bell')) === JSON.stringify(top(N, 'la casa è', 'bell')),
+     '78g. "la casa è bell…": terza persona, nessun effetto');
+  ok(parlaDiSe(['sono']) && parlaDiSe(['mi', 'sento']) && parlaDiSe(['sono', 'molto']) && parlaDiSe(['sono', 'stata'])
+     && !parlaDiSe(['loro', 'sono']) && !parlaDiSe(['ho']) && !parlaDiSe(['i', 'bambini', 'sono']) && !parlaDiSe([]),
+     '78h. "parla di sé": sono, mi sento, sono molto, sono stata — non loro sono, ho, i bambini sono');
+
+  // ── Correzione della frase: accordo, punteggiatura ──
+  const corr = (p, t) => {
+    const k = new C78(p.lessicoPerCorrezione(), DEFAULT_CONFIG.scan.groups);
+    return k.correggiFrase(t, { minLen: 3, maxDist: 2, margine: 0.12, accordo: (a, b, d) => p.accordoConChiScrive(a, b, d) }).testo;
+  };
+  ok(corr(F, 'SONO STANCO') === 'SONO STANCA', `78i. donna: "SONO STANCO" → "SONO STANCA" (${corr(F, 'SONO STANCO')})`);
+  ok(corr(M, 'sono stanca') === 'sono stanco', `78l. uomo: "sono stanca" → "sono stanco" (${corr(M, 'sono stanca')})`);
+  ok(corr(N, 'sono stanco') === 'sono stanco', '78m. genere non indicato: non si tocca nulla');
+  ok(corr(F, 'oggi sono solo stanca') === 'oggi sono solo stanca', `78n. "sono solo stanca": "solo" è un avverbio, resta (${corr(F, 'oggi sono solo stanca')})`);
+  ok(corr(F, 'mio marito è stanco') === 'mio marito è stanco', '78o. "mio marito è stanco": non parla di sé, resta');
+  ok(corr(F, 'sono maestro') === 'sono maestro', '78p. un nome ("maestro") non si accorda');
+  ok(corr(F, 'sono andato a casa. Vorrei bere acqa.') === 'sono andata a casa. Vorrei bere acqua.',
+     `78q. due frasi col punto: accordo nella prima, refuso nella seconda, i punti restano (${corr(F, 'sono andato a casa. Vorrei bere acqa.')})`);
+  ok(corr(N, 'la chiesa è bella. preparami il caffè.') === 'la chiesa è bella. preparami il caffè.',
+     '78r. un testo giusto con la punteggiatura esce identico');
+  ok(corr(N, 'ho dolre.') === 'ho dolore.', `78s. la parola prima del punto viene corretta e il punto resta (${corr(N, 'ho dolre.')})`);
+
+  // ── Nomi propri e parole corte ──
+  ok(top(N, '', 'ma', 7).indexOf('mamma') >= 0, `78t. "ma…" a inizio frase: "mamma" è fra le proposte (${top(N, '', 'ma', 7).join(', ')})`);
+  const pn = con(''); for (let i = 0; i < 3; i++) pn.learnSentence('chiama marzia');
+  ok(top(pn, 'chiama', 'ma', 2).includes('marzia'), '78u. un nome che la persona usa davvero resta in cima');
+  ok(top(N, '', 'no')[0] === 'non', `78v. "no…" → "non" per prima, senza forzare nulla (${top(N, '', 'no', 5).join(', ')})`);
+  ok(DEFAULT_CONFIG.prediction.cortePrima === false, '78z. "parole corte prima" è una scelta, spenta di default (misurato: abbassa la precisione)');
+  const corte = con('', c => { c.prediction.cortePrima = true; });
+  const mediaLen = (p) => { const r = top(p, '', 'co', 6); return r.reduce((a, w) => a + w.length, 0) / r.length; };
+  ok(mediaLen(corte) <= mediaLen(N), `78aa. accesa, le proposte sono più corte (${mediaLen(corte).toFixed(1)} contro ${mediaLen(N).toFixed(1)} lettere)`);
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);

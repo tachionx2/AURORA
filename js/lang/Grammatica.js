@@ -161,3 +161,34 @@ export function numeroNominale(g, w) {
   }
   return tot > 0 ? { plur: plur / tot, sing: sing / tot } : null;
 }
+
+/**
+ * Quanto una parola è un NOME PROPRIO ("maria", "max", "grecia"), fra 0
+ * e 1. null se non è nel lessico.
+ */
+export function quantoProprio(g, w) {
+  const p = g.lessico.get(w);
+  if (!p?.length) return null;
+  let s = 0, tot = 0;
+  for (const [i, q] of p) { if (g.nomiTag[i] === 'PROPN' || g.nomiTag[i] === 'X') s += q; tot += q; }
+  return tot > 0 ? s / tot : null;
+}
+
+/**
+ * Il GENERE di una parola come aggettivo o participio SINGOLARE: quanta
+ * parte delle sue letture è femminile e quanta maschile, fra 0 e 1.
+ * Serve alla concordanza con chi scrive ("sono stanca" / "sono stanco").
+ * null se non è nel lessico.
+ */
+export function genereSingolare(g, w) {
+  const p = g.lessico.get(w);
+  if (!p?.length) return null;
+  let f = 0, m = 0, tot = 0;
+  for (const [i, q] of p) {
+    const t = g.nomiTag[i];
+    tot += q;
+    if (!/^(A|V-part)-/.test(t)) continue;
+    if (/-fs$/.test(t)) f += q; else if (/-ms$/.test(t)) m += q;
+  }
+  return tot > 0 ? { f: f / tot, m: m / tot } : null;
+}

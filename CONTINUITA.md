@@ -393,3 +393,123 @@ L'**autocorrezione** NON usa questo vocabolario: ha il proprio
 - **Piattaforma utenti**: informativa privacy e registro dei
   trattamenti da scrivere, revisione legale prima di aprire le
   registrazioni.
+
+
+---
+
+## MENU SCRIVI, RIPETI, PUNTO, CORREZIONE (versione `20261113`)
+
+Richieste dal campo, novembre 2026. Test: `percorsi` sezioni 77 e 78,
+`applicazione` ("ripeti: …").
+
+**AZIONI: PARLA, RIPETI, LEGGI, SALVA, [CHIEDI], ⌫ lettera, ⌫ parola,
+[ANNULLA CORREZIONE], SVUOTA.**
+- PARLA dice e toglie dallo schermo, ma tiene in `scan.ultimoDetto`.
+- RIPETI (`SPEAK_AGAIN`): con un testo da dire fa ciò che fa PARLA;
+  senza, ridice `ultimoDetto` con `{ rilettura: true }` (non lo insegna
+  di nuovo). La memoria cambia solo quando si DICE altro (PARLA, RIPETI
+  su testo nuovo, una frase pronta).
+- LEGGI legge e lascia il testo.
+- ⚠️ `main.js` deve passare le OPZIONI di `onOutput` (terzo argomento).
+  Per mesi non le passava: LEGGI arrivava senza `rilettura` e insegnava
+  la frase ai suggerimenti a ogni rilettura.
+
+**Menu Scrivi**: ESCI, AZIONI, [␣ `spazioFuori`], [. `puntoFuori`],
+[Suggerimenti], gruppi di lettere, [⌫ parola `cancellaDopoGruppi`].
+- Spazio e punto stanno PRIMA del punto di ripartenza (`hot`): non
+  costano un passo a ogni lettera. Lo spazio fuori è un'azione `SPAZIO`,
+  NON `CHAR`: altrimenti Scrivi verrebbe preso per un gruppo di lettere
+  (`_inLettere`) e ne avrebbe il passo corto. Con `spazioFuori` lo
+  spazio dentro i gruppi sparisce.
+- PUNTO chiude la parola, attacca "." all'ultima parola, riparte da
+  AZIONI. Mai due di fila, mai su testo vuoto. Dopo un punto il contesto
+  dei suggerimenti riparte (`fraseInCorso`), l'apprendimento separa le
+  frasi e NON mette "sete." nel lessico (`frasiDi`).
+- CANCELLA nei gruppi (`DEL_CHAR_QUI`): toglie una lettera, resta nel
+  gruppo, riparte da ESCI. CANCELLA dopo i gruppi: `DEL_WORD` + resta lì.
+
+**Proposta a voce**: torna a OGNI GIRO (`propostaOgniGiro`), un attimo
+prima del punto di ripartenza, finché ci sono lettere in corso. La parola
+proposta è anche la PRIMA dell'elenco Suggerimenti (prima ne era esclusa:
+si sentiva "sono", si entrava nell'elenco e si prendeva "solo"). L'elenco
+ha `suggestionCount` + le proposte: le alternative restano quante prima.
+
+**Varianti** (`variantiSuggerimento`, spento): dopo una parola scelta
+DALL'ELENCO, proposta virtuale `{variante:true}` che SOSTITUISCE.
+
+**Genere di chi scrive** (`prediction.genereUtente` '' | 'f' | 'm'):
+- suggerimenti: dopo "sono / mi sento / ero / sono stata…" (`parlaDiSe`)
+  la forma giusta PRENDE IL POSTO di quella sbagliata. Si guarda la
+  DESINENZA -o/-a e l'esistenza della gemella, non l'etichetta del
+  lessico (inaffidabile per "triste", "felice"). Le forme giuste non
+  vengono spinte: altrimenti ogni participio superava le parole neutre.
+- correzione: `accordoConChiScrive` ("sono stanco" → "stanca").
+
+**Correzione automatica** — ⚠️ il difetto più grave trovato: conosceva
+437 parole e ne "correggeva" una SANA su sette ("chiesa" → "chiama").
+Ora `lessicoPerCorrezione` usa tutte le trentamila (escluse le corte e
+rarissime, che fanno da scudo agli errori: "cao", "aqua"), e
+`formaPlausibile` riconosce verbo+pronome e voci verbali. La
+punteggiatura si stacca e riattacca. Provati grammatica ed espressioni
+come contesto: +2-3% di correzioni ma il DOPPIO di correzioni sbagliate
+→ lasciati fuori. Banco: refusi plausibili per la scansione su frasi
+vere (parole sane toccate 14% → 0,2%; correzioni sbagliate ~1%).
+
+**Parole corte prima** (`cortePrima`, spento): misurato a ogni intensità,
+anche come spareggio: abbassa sempre la precisione. La frequenza lo fa
+già. **Nomi propri** leggermente dopo le parole comuni (`propriK` 4).
+
+
+---
+
+## GESTI NUOVI (versione `20261113`, seconda consegna) — tutti SPENTI di default
+
+Test: `test/gesti.mjs`. ⚠️ Con le opzioni spente il motore dei gesti dà
+gli stessi eventi della versione precedente (verificato su sessioni
+casuali, evento per evento).
+
+**Chiusura degli occhi a tre durate** — `CLOSE_SHORT`, `CLOSE_MEDIUM`,
+`CLOSE_LONG` (`GestureEngine._chiusuraDurate`). Si decide alla
+RIAPERTURA in base alla durata; ogni canale ha intervallo e azione
+propri. Legge lo stesso "chiuso / aperto / non so" di ammiccamento e
+`LONG_CLOSE` (che resta com'è: scatta MENTRE gli occhi sono chiusi).
+"Non so" non chiude il gesto; una riapertura sotto `closeGapMs` è un
+tremolio; se `LONG_CLOSE` è già scattata, niente secondo comando; se la
+durata cade in una finestra, l'ammiccamento della stessa chiusura è
+annullato. L'evento porta `agoMs` (da quanto il gesto è cominciato).
+Le altre direzioni (giù, sinistra, destra) hanno ancora UNA durata;
+"in alto" ne ha tre da sempre.
+
+**Indietro di una voce** — azione `PREV` (≠ `BACK`, che esce dal
+sottomenu). `ScanEngine.indietro(now, inizio)`: torna alla voce PRIMA
+di quella che la sequenza stava dicendo quando il gesto è COMINCIATO
+(`_storia` degli annunci), non di quella corrente: un gesto che dura
+finisce quando la sequenza è già avanti. `scan.indietroAnticipoMs`
+(250) compensa il ritardo di rilevamento. `main.onGesture` passa
+`{ inizio }` a `handleAction`. Da tastiera: freccia su.
+
+**Modalità normalizzata** — `signal.modoNormalizzato`,
+`GestureEngine._normalizza`. Il gesto misurato rispetto a se stesso:
+riferimento = MEDIANA degli ultimi 7 picchi delle escursioni (per
+occhio, asse, direzione); soglie = frazioni (`normOn` 0,5, `normOff`
+0,3). ⚠️ Regole trovate simulando, da non rompere:
+- per COMINCIARE servono 3 escursioni ≥ `thresholdOn`·σ: altrimenti il
+  tremore veniva imparato come gesto (9 comandi involontari in 2 ore di
+  riposo simulato; con la regola, 0);
+- il riferimento NON decade col tempo (era il difetto di
+  `sogliaRelativa`, che guarda solo gli ultimi 10 secondi);
+- si riallinea dopo 3 escursioni di fila molto più piccole (<0,4) o
+  molto più grandi (>2,5);
+- la soglia non scende mai sotto `normMinSigma`·σ;
+- guadagni e soglie per direzione NON si applicano quando è attiva;
+- è agganciata in DUE punti soli, entrambi dietro l'interruttore: una
+  riga dopo il calcolo di `A.sigma` e un blocco in `_evaluate`.
+Effetto misurato: con un gesto ampio che non torna del tutto a riposo,
+le soglie di sempre misuravano la durata con 1,6 s di errore e
+prendevano 20 gesti brevi su 20 per LUNGHI (annulla invece di
+seleziona); normalizzata, errore 30 ms.
+
+**Difetto corretto nel motore**: le soglie PER DIREZIONE
+(`signal.thresholdDir`) non venivano applicate all'avvio né dopo una
+modifica ai filtri, ma solo al cambio di un'altra impostazione. Ora
+`_rebuild` chiama `_aggiornaSoglie`.

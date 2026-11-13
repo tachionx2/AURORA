@@ -44,25 +44,29 @@ export function buildTree(cfg, ctx = {}) {
       ...(showBack ? [back('act')] : []),
       /* ══ ORDINE DECISO SUL CAMPO ══
        *
-       * LEGGI, PARLA, SALVA, CHIEDI: le quattro cose che si fanno col
-       * testo appena scritto, nell'ordine in cui servono più spesso.
-       * Ogni posizione in più costa un passo di scansione a ogni
-       * visita, quindi le più usate stanno in testa.
+       * PARLA, RIPETI, LEGGI, SALVA, CHIEDI: le cose che si fanno col
+       * testo appena scritto. Ordine deciso sul campo (novembre 2026).
        *
-       * ⚠️ LEGGI viene PRIMA di PARLA. Si rilegge molte volte mentre si
-       * scrive, si parla una volta sola alla fine — e LEGGI non
-       * cancella nulla, quindi selezionarlo per sbaglio non costa.
+       *  · PARLA  dice il testo e lo toglie dallo schermo (il messaggio
+       *           è stato consegnato), ma lo TIENE IN MEMORIA;
+       *  · RIPETI ridice l'ultima cosa detta, quante volte si vuole,
+       *           finché non si dice qualcos'altro. Se c'è un testo
+       *           ancora da dire, RIPETI fa esattamente ciò che fa
+       *           PARLA: così sbagliare fra i due non costa nulla;
+       *  · LEGGI  legge il testo e lo LASCIA sullo schermo, per
+       *           ricordare cosa si è scritto e continuare.
        *
-       * LEGGI e PARLA differiscono per UNA cosa sola: PARLA svuota il
-       * testo (il messaggio è stato consegnato), LEGGI lo lascia.
-       * Si chiamava RILEGGI: "leggi" ha due sillabe invece di tre, e
-       * questa voce viene annunciata decine di volte al giorno.
+       * ⚠️ RIPETI sta fra PARLA e LEGGI anche per sicurezza: chi fa il
+       * gesto un attimo tardi su PARLA finisce su RIPETI, che fa la
+       * stessa cosa. Prima LEGGI stava accanto a PARLA, e un gesto in
+       * ritardo su LEGGI svuotava il testo.
        *
        * ⚠️ SVUOTA sta IN FONDO, e di proposito. Cancella tutto ciò che
        * è stato scritto — minuti di lavoro — e non si annulla: in coda
        * è la voce più difficile da selezionare per sbaglio. */
-      { kind: NodeKind.ACTION, id: 'a:repeat', label: 'LEGGI',    spoken: 'leggi',   action: 'SPEAK_KEEP' },
       { kind: NodeKind.ACTION, id: 'a:speak',  label: 'PARLA',    spoken: 'parla',   action: 'SPEAK' },
+      { kind: NodeKind.ACTION, id: 'a:again',  label: 'RIPETI',   spoken: 'ripeti',  action: 'SPEAK_AGAIN' },
+      { kind: NodeKind.ACTION, id: 'a:repeat', label: 'LEGGI',    spoken: 'leggi',   action: 'SPEAK_KEEP' },
       { kind: NodeKind.ACTION, id: 'a:save',   label: 'SALVA',    spoken: 'salva',   action: 'SAVE_DRAFT' },
       /* L'assistente compare solo se acceso in impostazioni: chi non
        * lo usa non deve trovarsi una voce in più nella scansione, che
@@ -103,6 +107,28 @@ export function buildTree(cfg, ctx = {}) {
     // due voci di servizio non vengono riascoltate a ogni carattere.
     if (showBack) kids.push(back('write'));
     kids.push(actionsNode());
+    /* ══ SPAZIO e PUNTO fuori dai gruppi (facoltativi) ══
+     *
+     * Subito dopo AZIONI e PRIMA di Suggerimenti e dei gruppi di
+     * lettere. Stanno prima del punto di ripartenza (`hot`) apposta:
+     * così non costano un passo a ogni lettera — durante una parola
+     * non si riascoltano — e si incontrano all'inizio di ogni giro e
+     * dopo ogni parola finita, quando servono.
+     *
+     * Tutti e due, scelti, finiscono la parola e ripartono da AZIONI,
+     * come lo spazio di sempre. Il punto serve anche alla voce: separa
+     * le frasi e dà loro la cadenza giusta. */
+    if (cfg.scan.spazioFuori) {
+      // ⚠️ Azione propria, non 'CHAR': altrimenti il livello di Scrivi
+      // verrebbe scambiato per un gruppo di lettere e ne prenderebbe
+      // il passo più corto.
+      kids.push({ kind: NodeKind.ACTION, id: 'k:spazio', label: '␣', spoken: 'spazio',
+                  action: 'SPAZIO' });
+    }
+    if (cfg.scan.puntoFuori) {
+      kids.push({ kind: NodeKind.ACTION, id: 'k:punto', label: '.', spoken: 'punto',
+                  action: 'PUNTO' });
+    }
     /* ⚠️ La proposta a voce della parola NON è una voce di questo
      * elenco: è un passo a sé, gestito dal motore (vedi `proposta`),
      * detto a voce e mostrato in corsivo nella barra di scrittura.
@@ -117,14 +143,21 @@ export function buildTree(cfg, ctx = {}) {
         hot: true,
         children: [
           ...(showBack ? [back('sugg')] : []),
-          ...ctx.suggestions.slice(0, cfg.scan.suggestionCount).map(w => ({
+          // Le parole proposte a voce stanno in testa, in più rispetto
+          // al numero scelto: vedi `scegliSuggerimenti`.
+          ...ctx.suggestions.slice(0, cfg.scan.suggestionCount + (cfg.scan.suggerimentiDiretti ? (ctx.proposte || []).length : 0)).map(w => ({
             kind: NodeKind.ACTION, id: `w:${w}`, label: w, spoken: w, action: 'WORD', payload: w,
+            daElenco: true,
           })),
         ],
       });
     }
     g.forEach((grp, i) => {
-      const letters = grp.items.map(ch => ({
+      /* Con lo spazio fuori dai gruppi, quello dentro i gruppi sarebbe
+       * un doppione che costa un passo a ogni lettera: sparisce. */
+      const voci = cfg.scan.spazioFuori ? grp.items.filter(ch => ch !== '␣') : grp.items;
+      if (!voci.length) return;
+      const letters = voci.map(ch => ({
         kind: NodeKind.ITEM, id: `c:${grp.id}:${ch}`,
         label: ch === '␣' ? '␣' : ch,
         spoken: ch === '␣' ? 'spazio' : ch,
@@ -133,16 +166,34 @@ export function buildTree(cfg, ctx = {}) {
       // Dentro un gruppo di lettere l'uscita sta in CODA, non in testa:
       // in testa costerebbe un annuncio in più per OGNI lettera, cioè
       // circa il 30% sul percorso più frequente di tutti.
+      /* ══ CANCELLA in fondo al gruppo (facoltativo) ══
+       * Toglie l'ultima lettera scritta senza dover passare da AZIONI.
+       * Si RESTA nel gruppo, ripartendo da ESCI: da lì si può uscire
+       * oppure aspettare un passo e scegliere la lettera giusta. */
+      if (cfg.scan.cancellaNeiGruppi) {
+        letters.push({ kind: NodeKind.ACTION, id: `x:${grp.id}`, label: '⌫', spoken: 'cancella',
+                       action: 'DEL_CHAR_QUI' });
+      }
       const kidsG = cfg.scan.backPosition === 'first' && showBack
         ? [back(grp.id), ...letters]
         : showBack ? [...letters, back(grp.id)] : letters;
       kids.push({
         kind: NodeKind.GROUP, id: grp.id, label: grp.label,
         spoken: grp.spoken || grp.label,
-        hot: i === 0,
         children: kidsG,
       });
     });
+    // Il punto di ripartenza senza suggerimenti: il PRIMO gruppo di
+    // lettere che esiste davvero (uno fatto di soli spazi può sparire).
+    const primo = kids.find(k => g.some(grp => grp.id === k.id));
+    if (primo) primo.hot = true;
+    /* ══ CANCELLA dopo i gruppi (facoltativo) ══
+     * Toglie l'ultima PAROLA (o le lettere della parola in corso) e
+     * resta lì: ripetendo il gesto si cancella parola per parola. */
+    if (cfg.scan.cancellaDopoGruppi) {
+      kids.push({ kind: NodeKind.ACTION, id: 'k:cancella', label: '⌫ parola', spoken: 'cancella',
+                  action: 'DEL_WORD' });
+    }
     return kids;
   };
 
@@ -502,6 +553,10 @@ export class ScanEngine {
     // livello a schermo, ma non si annuncia nulla finché non scade.
     this.attesaFino = 0;
     this.buffer = { letters: '', words: [], sentence: '' };
+    // L'ultima cosa detta ad alta voce: è ciò che RIPETI ridice. Resta
+    // finché non si dice qualcos'altro (PARLA, RIPETI su un testo
+    // nuovo, una frase pronta).
+    this.ultimoDetto = '';
     // Sospensione: la scansione si ferma mentre il sistema sta
     // pronunciando un messaggio all'utente. Non è solo cortesia — è
     // necessario, perché l'annuncio successivo cancellerebbe il
@@ -649,7 +704,8 @@ export class ScanEngine {
     if (pr && pr.lista[pr.i]) {
       const w = pr.lista[pr.i];
       return { kind: NodeKind.ACTION, id: `proposta:${w}`, label: `▸ ${w}`,
-               spoken: w, action: 'WORD', payload: w, proposta: true };
+               spoken: w, action: 'WORD', payload: w, proposta: true,
+               variante: !!pr.variante };
     }
     const l = this.level;
     return l?.node.children?.[l.index] ?? null;
@@ -677,6 +733,7 @@ export class ScanEngine {
     const pr = this.proposta;
     if (!pr) return;
     this._propostaPrecedente = pr.lista[pr.i];
+    this._propostaPrecedenteVariante = !!pr.variante;
     this._tFineProposta = now;
     pr.i++;
     if (pr.i >= pr.lista.length) this.proposta = null;
@@ -841,9 +898,30 @@ export class ScanEngine {
       this._pushState();
       return;
     }
+    /* ══ LA PROPOSTA A VOCE TORNA A OGNI GIRO ══
+     *
+     * Prima veniva detta una volta sola, subito dopo la lettera: chi
+     * la mancava doveva scrivere un'altra lettera per risentirla.
+     * Ora, finché c'è una parola in corso e non si scrive altro, viene
+     * riproposta a ogni giro nello stesso punto della prima volta:
+     * un attimo prima del punto di ripartenza (Suggerimenti, o il
+     * primo gruppo). Poi la sequenza prosegue come sempre. */
+    if (this._propostaDelGiro(l)) {
+      this.proposta = { lista: this._propostaDelGiro(l), i: 0 };
+    }
     this.lastStepAt = now;
     this._announce(now);
     this._pushState();
+  }
+
+  /** Le parole da riproporre arrivando al punto di ripartenza, o null. */
+  _propostaDelGiro(l) {
+    const S = this.cfg.scan || {};
+    if (!S.suggerimentiDiretti || S.propostaOgniGiro === false) return null;
+    if (l?.node?.id !== 'write' || !this.buffer.letters.trim()) return null;
+    if (l.index !== this._hotIndex(l.node)) return null;
+    const lista = (this.ctx.proposte || []).filter(Boolean);
+    return lista.length ? lista : null;
   }
 
   _up(now) {
@@ -915,6 +993,12 @@ export class ScanEngine {
     if (!node) return;
     this.lastAnnounceAt = now;
     const l = this.level;
+    /* Memoria breve di ciò che è stato annunciato e quando: serve a
+     * "indietro di una voce", che deve sapere su quale voce era la
+     * sequenza nel momento in cui il gesto è COMINCIATO. */
+    this._storia = this._storia || [];
+    this._storia.push({ t: now, livello: l.node.id, profondita: this.stack.length, index: l.index });
+    if (this._storia.length > 24) this._storia.shift();
     this.h.onAnnounce(node, {
       index: l.index,
       total: l.node.children.length,
@@ -928,9 +1012,10 @@ export class ScanEngine {
   /* ------------------------------ Azioni ----------------------------- */
 
   /** Ingresso unico per ogni intenzione, da gesto o da tastiera. */
-  handleAction(action, now) {
+  handleAction(action, now, meta = null) {
     this._now = now;
     switch (action) {
+      case 'PREV':   return this.indietro(now, meta?.inizio);
       case 'SELECT': return this.select(now);
       case 'UNDO':   return this.undo(now);
       // Ogni comando fa UNA cosa sola, e se non c'è nulla da fare non
@@ -946,6 +1031,75 @@ export class ScanEngine {
       case 'NEXT':   return this.proposta ? this._avanzaProposta(now) : this._advance(now);
       default: return;
     }
+  }
+
+  /**
+   * ══════════════════════════════════════════════════════════════════
+   * INDIETRO DI UNA VOCE
+   * ══════════════════════════════════════════════════════════════════
+   *
+   * Chi manca una voce — per un attimo di ritardo, o perché il gesto
+   * non è stato visto — oggi deve aspettare che tutto il giro
+   * ricominci. Con un solo gesto disponibile e menu di dieci voci, è
+   * la frustrazione più grande di tutte.
+   *
+   * Questo comando riporta la sequenza alla voce PRIMA e la riannuncia,
+   * con un passo intero per sceglierla. Ripetuto, torna indietro ancora.
+   *
+   * ⚠️ PRIMA DI QUALE VOCE? Non di quella corrente. Un gesto che dura —
+   * tenere l'occhio chiuso mezzo secondo — FINISCE dopo che la sequenza
+   * è andata avanti, magari di due voci. La persona però ha deciso
+   * quando il gesto è COMINCIATO:
+   *
+   *     voce 1 ── voce 2 ───────── voce 3 ──── voce 4
+   *                 ↑ comincia il gesto         ↑ il gesto finisce
+   *                 (voleva la 1)               e viene riconosciuto
+   *
+   * Tornando indietro di una dalla voce 4 si finirebbe sulla 3, che
+   * non serve a nessuno. Si torna invece alla voce prima di quella che
+   * la sequenza stava dicendo ALL'INIZIO del gesto: la 1.
+   *
+   * @param inizio istante in cui il gesto è cominciato (stesso orologio
+   *        di `now`), o null/undefined per un comando istantaneo
+   *        (tastiera): in quel caso vale la voce corrente.
+   */
+  indietro(now, inizio = null) {
+    if (this.paused || this.suspended) return;
+    this.proposta = null;
+    this._propostaPrecedente = null;
+    const l = this.level;
+    const n = l?.node?.children?.length ?? 0;
+    if (!n) return;
+
+    let da = l.index;
+    if (inizio != null && Number.isFinite(inizio)) {
+      /* La persona reagisce a ciò che ha SENTITO, e il rilevamento
+       * vede il gesto con un piccolo ritardo (i filtri): l'inizio vero
+       * è un po' prima di quello misurato. */
+      const quando = inizio - (this.cfg.scan?.indietroAnticipoMs ?? 250);
+      const st = this._storia || [];
+      for (let i = st.length - 1; i >= 0; i--) {
+        if (st[i].t > quando) continue;
+        // Solo se allora si era in QUESTO stesso menu: altrimenti la
+        // voce di allora non esiste qui, e vale quella corrente.
+        if (st[i].livello === l.node.id && st[i].profondita === this.stack.length) da = st[i].index;
+        break;
+      }
+    }
+    da = Math.max(0, Math.min(n - 1, da));
+    l.index = da > 0 ? da - 1 : n - 1;     // prima della prima: l'ultima
+    this.inCyclePause = false;
+    this.attesaFino = 0;
+    this.emptyCycles = 0;
+    // La finestra di grazia non deve riportare avanti ciò che si è
+    // appena riportato indietro.
+    this._tAvanzamento = null;
+    this._vocePrecedente = null;
+    this._tFineProposta = null;
+    this.lastStepAt = now;
+    this.stats.indietro = (this.stats.indietro || 0) + 1;
+    this._announce(now);
+    this._pushState();
   }
 
   /**
@@ -1003,7 +1157,8 @@ export class ScanEngine {
      * la voce annunciata subito dopo. */
     if (grazia > 0 && !this.proposta && this._propostaPrecedente
         && this._tFineProposta != null && (now - this._tFineProposta) < grazia) {
-      this.proposta = { lista: [this._propostaPrecedente], i: 0 };
+      this.proposta = { lista: [this._propostaPrecedente], i: 0,
+                        variante: !!this._propostaPrecedenteVariante };
       this.stats.graziaUsata = (this.stats.graziaUsata || 0) + 1;
     }
     this._propostaPrecedente = null;
@@ -1044,6 +1199,26 @@ export class ScanEngine {
         this.stats.chars++;
         this._afterCompose(now, node.payload === ' ');
         break;
+      case 'SPAZIO':
+        // Lo spazio fuori dai gruppi: identico a quello dentro.
+        this.buffer.letters += ' ';
+        this.stats.chars++;
+        this._afterCompose(now, true);
+        break;
+      case 'PUNTO': {
+        /* Finisce la parola in corso (correzione compresa, come fa lo
+         * spazio) e attacca il punto all'ultima parola. Senza testo, o
+         * con un punto già messo, non fa nulla: due punti di fila non
+         * servono a nessuno e sarebbero solo da cancellare. */
+        this._afterCompose(now, true);
+        const n = this.buffer.words.length;
+        if (n && !/[.!?]$/.test(this.buffer.words[n - 1])) {
+          this.buffer.words[n - 1] += '.';
+          this.stats.chars++;
+        }
+        this._afterCompose(now, false);
+        break;
+      }
       case 'WORD': {
         // Il completamento sostituisce il prefisso già digitato.
         /* ⚠️ Con le maiuscole di ciò che era stato digitato. Le lettere
@@ -1051,7 +1226,11 @@ export class ScanEngine {
          * lessico in minuscolo: senza questo, la frase diventava
          * "MI GIRI SUL FIANCO sinistro" — a schermo, nei testi salvati
          * e nelle lettere spedite. */
-        const digitato = this.buffer.letters.trim();
+        /* Una VARIANTE ("staccarsi" dopo aver scelto "staccare")
+         * prende il posto della parola appena inserita, non si aggiunge —
+         * e ne prende anche le maiuscole. */
+        const sostituita = (node.variante && this.buffer.words.length) ? this.buffer.words.pop() : null;
+        const digitato = sostituita != null ? sostituita : this.buffer.letters.trim();
         const tutteMaiuscole = digitato && digitato === digitato.toUpperCase()
           && digitato !== digitato.toLowerCase();
         const parola = tutteMaiuscole ? String(node.payload).toUpperCase() : node.payload;
@@ -1059,15 +1238,51 @@ export class ScanEngine {
         this.buffer.words.push(parola);
         this.stats.predictionHits++;
         this._afterCompose(now, true);
+        /* ══ VARIANTI del suggerimento scelto (facoltative) ══
+         * Solo per una parola scelta dall'elenco Suggerimenti: la voce
+         * guida propone due o tre forme vicine, un passo ciascuna, e
+         * un gesto sostituisce la parola con quella. Lasciate passare,
+         * la parola scelta resta com'è. */
+        if (this.cfg.scan?.variantiSuggerimento && node.daElenco
+            && this.stack.some(f => f.node.id === 'write')) {
+          let lista = [];
+          try { lista = (this.h.onVarianti?.(node.payload, this.buffer.words.slice(0, -1)) || []).filter(Boolean); }
+          catch { lista = []; }
+          lista = lista.slice(0, Math.max(1, Math.min(3, this.cfg.scan.variantiN || 3)));
+          this._backToWrite(now, true, 'azioni');
+          this.proposta = lista.length ? { lista, i: 0, variante: true } : null;
+          this._announce(now);
+          this._pushState();
+          return;
+        }
         break;
       }
       case 'PHRASE': {
         // Pronuncia diretta: non passa dal buffer di composizione.
         const p = this.h.onOutput('speech', node.payload);
+        this.ultimoDetto = String(node.payload || '');
         this.buffer = { letters: '', words: [], sentence: '' };
         this.h.onBuffer({ ...this.buffer });
         this._resetToRoot(now, true);
         this._hold(p, now) || this._announceNow(now);
+        return;
+      }
+      case 'SPEAK_AGAIN': {
+        /* RIPETI. Con un testo ancora da dire fa ciò che fa PARLA.
+         * Senza, ridice l'ultima cosa detta — che NON è una frase nuova:
+         * non la si insegna di nuovo ai suggerimenti. */
+        if (this._composedText()) {
+          const said = this._speakSentence(now);
+          this._backToWrite(now, said, 'azioni');
+          return;
+        }
+        if (!this.ultimoDetto) {
+          this._hold(this.h.onOutput('menu', 'niente da ripetere'), now);
+          return;
+        }
+        const p = this.h.onOutput('speech', this.ultimoDetto, { keep: true, rilettura: true });
+        this._backToWrite(now, true, 'azioni');
+        if (!this._hold(p, now)) this._announceNow(now);
         return;
       }
       case 'SPEAK': {
@@ -1097,6 +1312,21 @@ export class ScanEngine {
         this._afterCompose(now, false);
         this._restaQui(now);
         return;
+      case 'DEL_CHAR_QUI': {
+        /* CANCELLA in fondo a un gruppo di lettere: toglie l'ultima
+         * lettera e resta NEL GRUPPO, ripartendo da ESCI. */
+        if (this.buffer.letters) {
+          this.buffer.letters = this.buffer.letters.slice(0, -1);
+        } else if (this.buffer.words.length) {
+          this.buffer.letters = this.buffer.words.pop().slice(0, -1);
+        }
+        this._afterCompose(now, false);
+        const figli = this.level.node.children || [];
+        const e = figli.findIndex(c => c.action === 'BACK');
+        if (e >= 0) this.level.index = e;
+        this._restaQui(now);
+        return;
+      }
       case 'DEL_WORD':
         if (this.buffer.letters) this.buffer.letters = '';
         else this.buffer.words.pop();
@@ -1348,6 +1578,12 @@ export class ScanEngine {
     if (!testo) return { testo, correzioni: [] };
     const r = this.h.onCorrect?.(testo, null, 'frase');
     if (!r || !r.testo || r.testo === testo) return { testo, correzioni: [] };
+    // Una correzione non può MAI far sparire il testo: se il risultato
+    // fosse vuoto, o con un numero diverso di parole, si tiene l'originale.
+    const nuove = String(r.testo).trim().split(/\s+/).filter(Boolean);
+    if (!nuove.length || nuove.length !== testo.trim().split(/\s+/).filter(Boolean).length) {
+      return { testo, correzioni: [] };
+    }
     this.buffer.words = r.testo.trim().split(/\s+/).filter(Boolean);
     this.buffer.letters = '';
     this.buffer.sentence = this._composedText();
@@ -1413,6 +1649,8 @@ export class ScanEngine {
       return false;
     }
     const p = this.h.onOutput('speech', text);
+    // Tolto dallo schermo, ma tenuto in memoria per RIPETI.
+    this.ultimoDetto = text;
     this.buffer = { letters: '', words: [], sentence: '' };
     this.h.onBuffer({ ...this.buffer });
     this._hold(p, now || this._now || 0);

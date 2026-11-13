@@ -17,7 +17,7 @@
 import { SEED_WORDS, SEED_BIGRAMS, SEED_BIGRAMS_PARLATO, LETTER_FREQ_IT, VOCABOLARIO_IT, FREQ_FASCIA, FREQ_BASE } from './seed-it.js';
 import { VOCABOLARIO_FREQ_IT } from './vocabolario-it.js';
 import { senso, caricaSenso, contestoDi, affinita } from './Senso.js';
-import { grammatica, caricaGrammatica, attese, fattoreGrammatica, quantoNome, numeroNominale } from './Grammatica.js';
+import { grammatica, caricaGrammatica, attese, fattoreGrammatica, quantoNome, numeroNominale, quantoProprio, genereSingolare } from './Grammatica.js';
 import { coppie, caricaCoppie, legami } from './Coppie.js';
 
 const DAY_MS = 86400000;
@@ -64,6 +64,37 @@ function corpus() {
   const vuote = new Set(perFrequenza.slice(0, 200));
   _CORPUS = { freq, ordinate, vuote };
   return _CORPUS;
+}
+
+/**
+ * Le parole di un testo divise per FRASE, minuscole, senza la
+ * punteggiatura attaccata ("sete." → "sete"). Un punto chiude la frase:
+ * la parola dopo non è "seguita" a quella prima.
+ *
+ * Un testo senza punteggiatura — tutto ciò che si scriveva prima che
+ * esistesse il PUNTO — dà esattamente le parole di sempre, in una frase
+ * sola.
+ */
+function frasiDi(testo) {
+  const out = [];
+  let cur = [];
+  for (const grezza of String(testo || '').toLowerCase().split(/\s+/)) {
+    if (!grezza) continue;
+    const fine = /[.!?]+["')\]]*$/.test(grezza);
+    const w = grezza.replace(/^[("'\[«]+/, '').replace(/[.,;:!?"')\]»…]+$/, '');
+    if (w) cur.push(w);
+    if (fine && cur.length) { out.push(cur); cur = []; }
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+/** Le parole della frase IN CORSO: quelle dopo l'ultimo punto. */
+export function fraseInCorso(parole) {
+  const ws = parole || [];
+  let da = 0;
+  for (let i = 0; i < ws.length; i++) if (/[.!?]$/.test(String(ws[i]))) da = i + 1;
+  return da ? ws.slice(da) : ws;
 }
 
 /** Le parole di un testo, minuscole, senza punteggiatura. */
@@ -145,6 +176,29 @@ const SEGNI_PLURALE = new Set(('i gli le dei degli delle ai agli alle dai dagli 
   + 'tutti tutte troppi troppe parecchi parecchie certi certe vari varie diversi diverse altri '
   + 'altre entrambi entrambe ambedue due tre quattro cinque sei sette otto nove dieci undici '
   + 'dodici venti cento mille noi voi siamo siete').split(' '));
+/* ── Chi scrive sta parlando di SÉ? ──
+ * Verbi in prima persona singolare che vogliono un aggettivo o un
+ * participio accordato con chi parla. "ho" NON c'è: "ho mangiato" non
+ * si accorda. */
+const VERBI_DI_SE = new Set('sono ero sarò sarei sto stavo starò sembro resto rimango divento diventerò'.split(' '));
+const AVVERBI_IN_MEZZO = new Set(('molto troppo tanto poco più meno così già sempre ancora proprio davvero '
+  + 'abbastanza piuttosto non mai un po quasi tutta tutto veramente ora adesso oggi').split(' '));
+export function parlaDiSe(S) {
+  let i = S.length - 1, saltati = 0;
+  while (i >= 0 && AVVERBI_IN_MEZZO.has(S[i]) && saltati < 3) { i--; saltati++; }
+  if (i < 0) return false;
+  const w = S[i], prima = S[i - 1], primaAncora = S[i - 2];
+  // Un soggetto diverso da "io" subito prima: non parla di sé.
+  const altri = new Set('tu lui lei noi voi loro essi esse egli ella che chi'.split(' '));
+  if (VERBI_DI_SE.has(w)) return !(prima && altri.has(prima)) && !contestoPlurale(S.slice(0, i));
+  // "mi sento …", "mi sono …" è già coperto da "sono"; "sono stata/stato …"
+  if (w === 'sento' && prima === 'mi') return true;
+  if ((w === 'stata' || w === 'stato') && (prima === 'sono' || prima === 'ero' || prima === 'sarei')) {
+    return !(primaAncora && altri.has(primaAncora));
+  }
+  return false;
+}
+
 /** C'è un segno chiaro di plurale fra le ultime tre parole? ("sono" no:
  *  per Daniela è quasi sempre "io sono".) */
 function contestoPlurale(S) {
@@ -216,8 +270,9 @@ function fattoreAccordo(prima, w, vuote) {
 export function scegliSuggerimenti(predictor, buffer, cfg) {
   const S = cfg.scan || {};
   const quanti = Math.max(S.suggestionCount || 4, 1) + 3;
+  // Dopo un PUNTO comincia una frase nuova: il contesto riparte da lì.
   const ris = cfg.prediction?.enabled
-    ? predictor.suggerisci({ prefisso: buffer?.letters || '', parole: buffer?.words || [], n: quanti })
+    ? predictor.suggerisci({ prefisso: buffer?.letters || '', parole: fraseInCorso(buffer?.words), n: quanti })
     : [];
   /* Proposta diretta: solo le parole che staccano nettamente le
    * altre. Chi assiste propone quando intuisce, non a ogni lettera. */
@@ -226,10 +281,18 @@ export function scegliSuggerimenti(predictor, buffer, cfg) {
          .slice(0, Math.max(1, Math.min(3, S.suggerimentiDirettiN || 1)))
          .map(s => s.parola)
     : [];
-  // Nel gruppo non si ripete ciò che è già stato proposto a voce.
-  const suggerimenti = ris.map(s => s.parola)
-    .filter(w => !proposte.includes(w))
-    .slice(0, S.suggestionCount || 4);
+  /* ⚠️ Nel gruppo la parola proposta a voce C'È, ed è la PRIMA.
+   *
+   * Prima veniva tolta ("non si ripete ciò che è già stato detto"), e
+   * il risultato era un inganno: la voce diceva "sono", chi entrava in
+   * Suggerimenti un attimo dopo trovava per prima "solo" — e scriveva
+   * "solo". Ciò che si è sentito proporre deve essere ciò che si
+   * trova: l'elenco è la classifica, dalla migliore in giù.
+   *
+   * Le parole proposte a voce si AGGIUNGONO in testa: le alternative
+   * restano tante quante prima (misurato: togliendone una, la parola
+   * giusta usciva dall'elenco tre volte su cento). */
+  const suggerimenti = ris.map(s => s.parola).slice(0, (S.suggestionCount || 4) + proposte.length);
   return { proposte, suggerimenti };
 }
 
@@ -393,14 +456,33 @@ export class Predictor {
   lessicoPerCorrezione() {
     const questo = this;
     let cache = null;
+    /* ⚠️ TUTTO il vocabolario, non solo le 437 parole di partenza.
+     *
+     * Per mesi il correttore ha conosciuto solo quelle, più il lessico
+     * personale: ogni altra parola italiana per lui era un errore.
+     * "chiesa" diventava "chiama", "fianco" "stanco", "andata"
+     * "andate". Misurato su frasi di assistenza scritte GIUSTE: toccava
+     * una parola sana su sette. Con le trentamila parole dei
+     * suggerimenti scende a una su cinquecento. */
     const tutte = () => {
       if (cache) return cache;
       const s = new Set(VOCABOLARIO_IT);
       for (const w of Object.keys(SEED_WORDS)) s.add(w);
       for (const w of questo.words.keys()) s.add(w);
+      /* Le parole CORTE e RARISSIME restano fuori: "cao", "aqua",
+       * "farm" stanno nel vocabolario (un cognome, una marca, una
+       * parola straniera) ma chi le scrive con Aurora ha quasi sempre
+       * sbagliato "ciao", "acqua", "fame". Tenendole, quegli errori
+       * risultavano parole giuste e non venivano mai corretti. */
+      for (const [w, F] of corpus().freq) {
+        if (w.length <= 4 && F < 12 && !s.has(w)) continue;
+        s.add(w);
+      }
       cache = s;
       return s;
     };
+    const piccolo = new Set(VOCABOLARIO_IT);
+    for (const w of Object.keys(SEED_WORDS)) piccolo.add(w);
     // Frequenza massima del lessico personale, per normalizzare.
     let maxPers = 1;
     for (const e of questo.words.values()) maxPers = Math.max(maxPers, e.n || 0);
@@ -415,7 +497,10 @@ export class Predictor {
         // correttore non saprebbe scegliere fra candidati equivalenti.
         const pers = questo.words.get(w)?.n || 0;
         const gen = SEED_WORDS[w] || 0;
-        const fascia = FREQ_FASCIA[w] ?? (tutte().has(w) ? FREQ_BASE : 0);
+        // Per le parole fuori dall'elenco di partenza, la frequenza
+        // reale d'uso (tarata sul banco dei refusi: 0,4).
+        const fascia = FREQ_FASCIA[w]
+          ?? ((piccolo.has(w) || questo.words.has(w)) ? FREQ_BASE : 0) + (corpus().freq.get(w) || 0) * 0.4;
         return Math.min(1,
           (pers / maxPers) * 0.55
           + Math.min(1, gen / 100) * 0.15
@@ -425,7 +510,17 @@ export class Predictor {
         if (!prec) return 0;
         const chiave = `${prec}\t${w}`;
         const n = questo.bigrams.get(chiave) || SEED_BIGRAMS[chiave] || 0;
-        return n > 0 ? Math.min(1, 0.4 + n / 10) : 0;
+        if (n > 0) return Math.min(1, 0.4 + n / 10);
+        /* Il parlato di chi è assistito: "mi manchi", "hai ragione".
+         * Vale meno delle coppie che Daniela ha scritto davvero, ma dice
+         * al correttore quale di due parole vicine è quella sensata.
+         *
+         * ⚠️ Provati anche la grammatica e le espressioni dell'italiano
+         * generico (quelle dei suggerimenti): correggevano il 2-3% in
+         * più, ma RADDOPPIAVANO le correzioni sbagliate. Per un
+         * correttore il conto non torna: lasciate fuori. */
+        const k2 = `${prec} ${w}`;
+        return SEED_BIGRAMS_PARLATO[k2] ? Math.min(1, 0.4 + SEED_BIGRAMS_PARLATO[k2] / 60) : 0;
       },
       parole: () => tutte(),
       invalida: () => { cache = null; },
@@ -453,7 +548,11 @@ export class Predictor {
     ph.n++; ph.last = now;
     this.phrases.set(clean, ph);
 
-    const ws = clean.toLowerCase().split(/\s+/).filter(Boolean);
+    /* ⚠️ Parole SENZA la punteggiatura attaccata, e una frase alla volta:
+     * altrimenti "sete." entrerebbe nel lessico come parola a sé — e
+     * verrebbe poi suggerita col punto — e la prima parola di una frase
+     * risulterebbe "seguita" all'ultima della precedente. */
+    for (const ws of frasiDi(clean)) {
     let prev = null;
     for (const w of ws) {
       const e = this.words.get(w) || { n: 0, last: 0, pinned: false };
@@ -471,15 +570,19 @@ export class Predictor {
       }
       prev = w;
     }
+    }
 
     /* ── Contesto lungo ──
      * Sulle parole pulite dalla punteggiatura, le stesse che i
      * suggerimenti leggono dalla frase in composizione: altrimenti
      * "sete." imparata con il punto non corrisponderebbe mai a "sete". */
     const tk = token(clean);
-    for (let i = 2; i < tk.length; i++) {
-      const k = `${tk[i - 2]}\t${tk[i - 1]}\t${tk[i]}`;
-      this.trigrams.set(k, num(this.trigrams.get(k)) + 1);
+    for (const fr of frasiDi(clean)) {
+      const t3 = fr.flatMap(w => token(w));
+      for (let i = 2; i < t3.length; i++) {
+        const k = `${t3[i - 2]}\t${t3[i - 1]}\t${t3[i]}`;
+        this.trigrams.set(k, num(this.trigrams.get(k)) + 1);
+      }
     }
     /* Compresenze: solo le parole che portano argomento. Un tetto alle
      * parole per frase evita che un testo lungo generi centinaia di
@@ -512,7 +615,7 @@ export class Predictor {
   }
 
   learnSentenceSilent(text) {
-    const ws = (text || '').toLowerCase().split(/\s+/).filter(Boolean);
+    const ws = frasiDi(text).flat();
     for (const w of ws) {
       const e = this.words.get(w) || { n: 0, last: Date.now(), pinned: false };
       e.n = Math.max(e.n, 2);
@@ -612,6 +715,69 @@ export class Predictor {
    *          misura quanto il suggerimento è sicuro, ed è ciò che
    *          decide se vale la pena proporlo a voce.
    */
+  /**
+   * Forme VICINE a una parola appena scelta: "staccare" → "staccarsi",
+   * "staccarmi"; "andato" → "andata", "andati"; "bello" → "bella".
+   *
+   * Sono le parole del vocabolario con la stessa radice — tutta la
+   * parola meno l'ultima lettera — e di lunghezza vicina, ordinate come
+   * ogni altro suggerimento: per frequenza, grammatica e senso della
+   * frase. Mai la parola stessa.
+   */
+  varianti(parola, parolePrima = [], n = 3) {
+    const w = token(parola).join('');
+    if (w.length < 4) return [];
+    const radice = w.slice(0, -1);
+    const P = this.cfg.prediction;
+    let ris = [];
+    try {
+      ris = this.suggerisci({ prefisso: radice, parole: fraseInCorso(parolePrima), n: 40 });
+    } catch { ris = []; }
+    // Parole corte: solo il cambio di desinenza (casa → case, caso), non
+    // tutta la famiglia (cassa, castello). Lunghe: fino a 4 lettere in più.
+    const piu = w.length <= 5 ? 1 : 4;
+    return ris.map(x => x.parola)
+      .filter(c => c !== w && c.length >= w.length - 1 && c.length <= w.length + piu)
+      .slice(0, Math.max(1, n));
+  }
+
+  /**
+   * La forma ACCORDATA con chi scrive, se quella scritta è del genere
+   * sbagliato: "sono stanco", scritto da una donna, → "stanca".
+   *
+   * Per la correzione automatica. Restituisce la parola da mettere, o
+   * null — che è la risposta in tutti i casi dubbi:
+   *   · il genere non è indicato nelle impostazioni;
+   *   · la frase non parla di chi scrive ("sono", "mi sento", "ero"…);
+   *   · la parola non finisce in -o / -a, o la gemella non esiste;
+   *   · né la parola né la gemella sono aggettivi o participi;
+   *   · dopo viene un altro aggettivo ("sono solo stanca": "solo" lì è
+   *     un avverbio, non va toccato).
+   */
+  accordoConChiScrive(parolePrima, parola, parolaDopo = null) {
+    const P = this.cfg.prediction;
+    const genere = P.genereUtente === 'f' || P.genereUtente === 'm' ? P.genereUtente : null;
+    const Gm = P.contestoFrase !== false ? grammatica() : null;
+    if (!genere || !Gm) return null;
+    const w = token(parola).join('');
+    if (w.length < 4 || w !== String(parola).toLowerCase().replace(/[.,;:!?]+$/, '')) return null;
+    const [sbagliata, giusta] = genere === 'f' ? ['o', 'a'] : ['a', 'o'];
+    if (!w.endsWith(sbagliata)) return null;
+    const S = fraseInCorso(parolePrima).flatMap(x => token(x));
+    if (!parlaDiSe(S)) return null;
+    const gemella = w.slice(0, -1) + giusta;
+    const C = corpus();
+    if (!C.freq.has(gemella) && !this.words.has(gemella)) return null;
+    const agg = (x) => { const q = genereSingolare(Gm, x); return q ? q.f + q.m : 0; };
+    if (agg(w) < 0.3 && agg(gemella) < 0.3) return null;
+    // Un nome non si accorda: "sono maestro" resta com'è solo se non è aggettivo.
+    if (parolaDopo) {
+      const d = token(parolaDopo).join('');
+      if (d && agg(d) >= 0.3 && agg(w) < 0.5) return null;   // "solo" + aggettivo: avverbio
+    }
+    return gemella;
+  }
+
   /** Carica il significato delle parole; per chi vuole aspettarlo (test). */
   preparaContesto() { return Promise.all([caricaSenso(), caricaGrammatica(), caricaCoppie()]); }
 
@@ -633,7 +799,7 @@ export class Predictor {
     const Gm = ctxOn && P.grammatica !== false ? grammatica() : null;
     const Cp = ctxOn && P.coppie !== false ? coppie() : null;
     // Stessa domanda, stesse statistiche: stessa risposta, senza ricalcolare.
-    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}|${M ? 1 : 0}|${Gm ? 1 : 0}|${Cp ? 1 : 0}|${P.coppieK}|${P.coppieK3}|${P.puntiMin}|${P.gramMax}|${P.singolarePrima}|${P.pluraleK}|${P.sonoSingolare}|${P.sensoBeta}|${P.sensoSoglia}|${P.sensoMax}|${P.gramK}|${P.sensoNomi}|${P.sensoForte}|${P.sensoZForte}`;
+    const chiave = `${this._ver}|${p}|${S.join(' ')}|${n}|${P.corpusWeight}|${M ? 1 : 0}|${Gm ? 1 : 0}|${Cp ? 1 : 0}|${P.coppieK}|${P.coppieK3}|${P.puntiMin}|${P.gramMax}|${P.singolarePrima}|${P.pluraleK}|${P.cortePrima}|${P.corteK}|${P.genereUtente}|${P.propriK}|${P.sonoSingolare}|${P.sensoBeta}|${P.sensoSoglia}|${P.sensoMax}|${P.gramK}|${P.sensoNomi}|${P.sensoForte}|${P.sensoZForte}`;
     if (this._cache?.chiave === chiave) return this._cache.esito;
 
     const C = corpus();
@@ -860,6 +1026,67 @@ export class Predictor {
       }
     }
 
+    /* 12. Le parole CORTE prima (facoltativo, `cortePrima`).
+     *
+     * ⚠️ SPENTO di default, e per una ragione misurata: la frequenza
+     * mette già prima le parole corte ("no…" → non, noi, nostro), perché
+     * in ogni lingua le parole più usate sono le più corte. Forzarlo
+     * oltre toglie il primo posto a parole lunghe ma giuste: su 1500
+     * parole di prova la proposta giusta al primo colpo scendeva di
+     * uno-due punti a OGNI intensità provata (anche come semplice
+     * spareggio). Resta come scelta per chi lo preferisce. */
+    if (ctxOn && P.cortePrima) {
+      const kl = P.corteK ?? 1;
+      for (const w of cand.keys()) piu(w, -kl * Math.max(0, w.length - p.length - 1));
+    }
+
+    /* 13. I NOMI PROPRI dopo le parole comuni.
+     *
+     * I testi da cui viene la grammatica cominciano spesso con un nome
+     * ("Maria ha detto…"): a inizio frase "ma…" proponeva "maria" e
+     * "max" prima di "mamma". Chi scrive con Aurora i nomi dei suoi li
+     * ha nel lessico personale, che non viene toccato. */
+    if (Gm && ctxOn) {
+      const kp = P.propriK ?? 4;
+      if (kp > 0) for (const w of cand.keys()) {
+        if (this.words.has(w)) continue;
+        const q = quantoProprio(Gm, w);
+        if (q && q > 0.4) piu(w, -kp * q);
+      }
+    }
+
+    /* 14. Concordanza con CHI SCRIVE, quando parla di sé.
+     *
+     * "sono stan…" → "stanca" se chi scrive è una donna, "stanco" se è
+     * un uomo. Vale solo dopo un verbo in prima persona che vuole un
+     * aggettivo o un participio accordato ("sono", "mi sento", "sono
+     * stata", "ero"…), e solo se il genere è indicato nelle impostazioni. */
+    const genere = P.genereUtente === 'f' || P.genereUtente === 'm' ? P.genereUtente : null;
+    /* ⚠️ Agisce su TUTTO il punteggio, non solo sulla parte generica
+     * come le altre fonti: "stanco" e "stanca" sono parole dell'assistenza,
+     * forti di loro, e una spinta sulla sola frequenza non le scambiava.
+     * È una regola di accordo, come quella fra articolo e nome. */
+    const perGenere = new Map();
+    if (Gm && ctxOn && genere && parlaDiSe(S)) {
+      /* Scende SOLO la forma del genere sbagliato, e solo se la sua
+       * gemella giusta esiste fra le candidate: "stanco" per una donna
+       * quando c'è "stanca". Si guarda la DESINENZA (-o / -a), non
+       * l'etichetta del lessico, che per gli aggettivi in -e ("triste",
+       * "felice", uguali per tutti) è inaffidabile: la prima versione
+       * li faceva scendere. Le forme giuste non salgono: spingendole,
+       * ogni participio accordato superava le parole senza genere
+       * ("sono tr…" → "trovata" prima di "triste"). */
+      const [sbagliata, giusta] = genere === 'f' ? ['o', 'a'] : ['a', 'o'];
+      const aggettivo = (w) => { const q = genereSingolare(Gm, w); return !!q && (q.f + q.m) > 0.3; };
+      for (const w of cand.keys()) {
+        if (w.length < 4 || !w.endsWith(sbagliata)) continue;
+        const gemella = w.slice(0, -1) + giusta;
+        if (!cand.has(gemella)) continue;
+        if (!aggettivo(w) && !aggettivo(gemella)) continue;
+        perGenere.set(w, gemella);
+      }
+    }
+
     /* I punti raccolti, applicati una volta sola — e SOLO alla parte
      * generica del punteggio.
      *
@@ -880,6 +1107,13 @@ export class Predictor {
       const quota = Math.min(1, g0 / (prima7.get(w) || tot || 1));
       const g = tot * quota;
       cand.set(w, (tot - g) + g * f);
+    }
+    /* La forma giusta PRENDE IL POSTO di quella sbagliata, se valeva
+     * meno: "stanca" sale dove stava "stanco", che scende di `kq`. */
+    for (const [w, gemella] of perGenere) {
+      const a = cand.get(w), b = cand.get(gemella);
+      if (b < a) cand.set(gemella, a);
+      cand.set(w, Math.min(a, b) * Math.exp(-(P.genereK ?? 0.7)));
     }
 
     const tutti = [...cand.entries()].sort((a, b) => b[1] - a[1]);

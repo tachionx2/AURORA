@@ -14,6 +14,7 @@ sh test/tutti.sh
 | `logica.mjs` | Motore di scansione, filtri del segnale, predizione, archivio testi, struttura dell'albero. |
 | `puntatore.mjs` | Calibrazione, mappatura sguardo→schermo, click per permanenza, cursore a bande. |
 | `video.mjs` | Catena di osservazione con DOM simulato: che gli occhi vengano davvero disegnati. |
+| `gesti.mjs` | I gesti aggiunti a novembre 2026, tutti spenti di default: la **chiusura degli occhi a tre durate** (breve, media, lunga, decisa alla riapertura), **indietro di una voce** (torna alla voce prima di quella detta quando il gesto è COMINCIATO), e la **modalità normalizzata** (il gesto misurato rispetto a se stesso), provata su sessioni simulate: gesto normale, ampio con ritorno incompleto, riposo, tremore, gesto che cambia. |
 | `diagnostica.mjs` | Camera e analisi degli occhi: che ogni impostazione produca un effetto **misurabile** (soglie, filtri, baseline, occhio attivo, confidenza, ammiccamento, durate, combinazione dei due occhi), che i dieci canali diagnostici e i contatori siano corretti, che il grafico disegni solo le tracce scelte, e che il rilevamento IR trovi pupilla, riflesso e movimento su un'immagine sintetica. |
 | `layout.mjs` | Bilancio verticale delle pagine Parla e Punta su 8 schermi × 4 livelli di zoom: nessuna deve richiedere scorrimento. |
 | `larghezze.mjs` | Larghezza dei controlli nelle righe di impostazione, su quattro larghezze di colonna: nessun controllo deve essere compresso al punto da mandare il testo a capo lettera per lettera. |

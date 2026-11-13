@@ -3121,5 +3121,40 @@ app.goto('parla');
      'volume: ogni file aperto riapplica la riduzione');
 }
 
+/* ══════ PARLA, RIPETI, LEGGI nell'applicazione vera ══════
+ * Il motore passava "è una rilettura" e l'applicazione non lo riceveva:
+ * il collegamento fra i due lasciava cadere le opzioni. Da fuori non si
+ * vedeva nulla — LEGGI insegnava ai suggerimenti a ogni rilettura.
+ * Solo l'applicazione intera può verificarlo. */
+{
+  app.cfg.prediction.autoCorrect = false;
+  app.scan.loadText('', CLOCK);
+  app.scan.start(CLOCK); pump(200);
+  const imparate = [];
+  const vera = app.predictor.learnSentence.bind(app.predictor);
+  app.predictor.learnSentence = (t) => { imparate.push(t); return vera(t); };
+  const scrivi = (parola) => { for (const ch of parola) {
+    const g = app.cfg.scan.groups.find(x => x.items.includes(ch)); pick(g.label); pick(ch); } };
+  ok(pick('Scrivi'), 'ripeti: si entra in Scrivi');
+  scrivi('CIAO');
+  pick('AZIONI'); pick('LEGGI'); pump(400);
+  ok(app.scan.buffer.letters === 'CIAO' || app.scan.buffer.words.join(' ') === 'CIAO', 'ripeti: LEGGI lascia il testo dov è');
+  ok(imparate.length === 0, `ripeti: LEGGI NON insegna la frase ai suggerimenti (imparate: ${imparate.join(' | ') || 'nessuna'})`);
+  pick('AZIONI'); pick('PARLA'); pump(400);
+  ok(imparate.length === 1 && imparate[0] === 'CIAO', `ripeti: PARLA sì, una volta (${imparate.join(' | ')})`);
+  ok(!app.scan.buffer.letters && !app.scan.buffer.words.length, 'ripeti: PARLA toglie il testo dallo schermo');
+  pick('AZIONI'); pick('RIPETI'); pump(400);
+  pick('AZIONI'); pick('RIPETI'); pump(400);
+  ok(imparate.length === 1, `ripeti: RIPETI ridice senza insegnare di nuovo (${imparate.length})`);
+  ok(app.scan.ultimoDetto === 'CIAO', 'ripeti: l ultima cosa detta resta in memoria');
+  app.predictor.learnSentence = vera;
+  // Il punto arriva alla voce: la frase viene letta in due parti.
+  const { splitSentences } = await import('../js/lang/Drafts.js');
+  ok(splitSentences('CIAO. HO SETE').length === 2, 'punto: la lettura divide le frasi al punto');
+  // Varianti: il collegamento con il suggeritore esiste e risponde.
+  ok(Array.isArray(app.scan.h.onVarianti('andato', [])) && app.scan.h.onVarianti('andato', []).includes('andata'),
+     'varianti: l applicazione le chiede al suggeritore ("andato" → "andata")');
+}
+
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);
 process.exit(fail?1:0);
