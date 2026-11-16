@@ -579,3 +579,36 @@ UNA volta con `_hold`, poi la sequenza riannuncia la voce corrente
 spazio, SPAZIO, PUNTO, WORD (anche con varianti). Con il CANCELLA nei
 gruppi la lettera è detta prima del ⌫ e non ripetuta alla conclusione.
 Testo, PARLA, LEGGI invariati. Test: percorsi 77af1–77af8.
+
+### Normalizzata: il gesto tipico arriva SEMPRE a 1 + Inquadratura (16/11, build 0100)
+
+**Il difetto** (segnalato da Francesco: "il gesto non arriva mai a 1, sta
+a 0,5–0,6"): con un gesto moderato (3–4 σ) il minimo di sicurezza
+legava la scala; il grafico divideva per `max(on·R, minimo)/on`, quindi
+il gesto tipico arrivava a `on·R/minimo` ≈ 0,6. E il minimo ignorava il
+guadagno (scelta del 13/11), quindi il guadagno a 2 non aiutava.
+
+**Ora** (tutto dietro `modoNormalizzato`):
+- grafico: `nNorm = segno·disp / R` → gesto tipico = 1 sempre;
+- `sogliaRealeNorm` = dove scatta davvero (≥ normOn), in `channels()` come
+  `sogliaNorm`; il grafico la disegna tratteggiata «attiva davvero»
+  quando il minimo la alza; il rilevamento è quello di prima;
+- `_minimoNorm` = max(normMinSigma/guadagno, `normPavimentoSigma` 2)·σ
+  vero: il guadagno conta, fino a 2 σ. Tremore forte grande quanto il
+  gesto, 4×5 min: normalizzata 1 comando involontario a guadagno 2 e 3;
+  modalità di sempre 21 e 502;
+- apprendimento: un'escursione conta solo oltre max(minimo nel grafico,
+  2 σ veri·guadagno) — con guadagno 4 il rumore amplificato veniva
+  imparato come gesto (test 4p). A guadagno 1 invariato.
+Test: gesti 4l (ora confronto con la modalità di sempre), 4m–4p.
+
+**Occhio "ingrandito" con camera di lato**: è solo `drawEyeDebug`, che
+adatta ogni ritaglio al riquadro: l'occhio lontano, più piccolo
+nell'immagine, viene ingrandito di più. Il segnale non c'entra.
+`js/vision` NON toccato.
+
+**Inquadratura** (`js/ui/Inquadratura.js`, Diagnostica, pulsante
+«Mostra inquadratura», spenta di serie): immagine INTERA a specchio di
+`vision.lastFrame`, croce e zona consigliata, riquadro del volto dai
+landmark MediaPipe (se ci sono), riquadri degli occhi in ogni modalità,
+giudizio "ben inquadrato / troppo a destra / lontano…". Solo disegno.

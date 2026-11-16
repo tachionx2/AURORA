@@ -1067,7 +1067,7 @@ export class GestureEngine {
           raw: A.raw, smooth: A.smooth, baseline: A.baseline, sigma: A.sigma,
           disp: A.disp,
           // Ampiezza fra 0 e 1 rispetto al gesto tipico (solo in modalità normalizzata).
-          norma: A.norm?.attiva ? Math.abs(A.disp) / Math.max(1e-9, A.norm.scala) : null,
+          norma: A.norm?.attiva ? Math.abs(A.disp) / Math.max(1e-9, this._rifNorm(A, A.disp >= 0 ? 1 : -1) ?? A.norm.scala) : null,
           nRaw: (A.raw - A.baseline) / Math.max(1e-6, A.sigma),
           n: A.disp / Math.max(1e-6, A.sigma),
         };
@@ -1259,15 +1259,21 @@ export class GestureEngine {
       const gain = this._guadagnoAsse(eye, axis, segno);
       const v = segno * A.disp;                       // in unità del segnale
       const n = gain * v / Math.max(1e-9, sigmaStd);  // come nel grafico
+      /* ⚠️ Si impara solo ciò che potrebbe DAVVERO diventare un comando:
+       * oltre al minimo nel grafico, anche il fondo di `normPavimentoSigma`
+       * (2) volte il rumore vero. Senza, con un guadagno alto (4) il
+       * rumore amplificato superava il minimo nel grafico e veniva
+       * imparato come "gesto tipico". A guadagno 1 non cambia nulla. */
+      const minK = Math.max(minN, (s.normPavimentoSigma ?? 2) * gain);
       let c = N.corsa[k];
-      if (n > minN) {
+      if (n > minK) {
         if (!c) c = N.corsa[k] = { da: t, picco: v, piccoN: n };
         else if (v > c.picco) { c.picco = v; c.piccoN = n; }
         continue;
       }
       // Sotto il minimo: l'escursione, se c'era, finisce quando il
       // segnale è tornato sotto il 60% del minimo (niente rimbalzi).
-      if (!c || n > minN * 0.6) continue;
+      if (!c || n > minK * 0.6) continue;
       N.corsa[k] = null;
       const dur = t - c.da;
       if (dur < (s.normDurMinMs ?? 250) || dur > (s.normDurMaxMs ?? 8000)) continue;
@@ -1331,21 +1337,63 @@ export class GestureEngine {
    * Rispetta il minimo di sicurezza sul rumore.
    */
   _scalaNorm(eye, axis, segno, A = this.eyes[eye]?.[axis], s = this.cfg.signal) {
+    const R = this._rifNorm(A, segno);
+    if (R == null) return null;
+    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
+    return Math.max(on * R, this._minimoNorm(eye, axis, segno, A, s)) / on;
+  }
+
+  /** Il gesto tipico imparato per quel verso (o, se manca, per l'altro). */
+  _rifNorm(A, segno) {
     const N = A?.norm;
     if (!N) return null;
     const k = segno > 0 ? '+1' : '-1';
-    const R = N.rif[k] ?? N.rif[k === '+1' ? '-1' : '+1'];
-    if (R == null) return null;
-    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
+    return N.rif[k] ?? N.rif[k === '+1' ? '-1' : '+1'];
+  }
+
+  /**
+   * ⚠️ IL MINIMO DI SICUREZZA, in unità del segnale.
+   *
+   * `normMinSigma` (2,5) volte il rumore, DIVISO per il guadagno di
+   * direzione × occhio — come nel grafico, così il guadagno fa ciò che
+   * chi lo imposta si aspetta — ma mai sotto `normPavimentoSigma` (2)
+   * volte il rumore vero, qualunque guadagno.
+   *
+   * Storia: diviso per il guadagno fino a 1,5 σ, dieci minuti di tremore
+   * forte e grande quanto il gesto davano a guadagno 2 più comandi
+   * involontari della modalità di sempre (125 contro 21). Allora lo si
+   * era reso indipendente dal guadagno (2,5 σ fissi): sicuro, ma un
+   * gesto di 3–4 σ restava appena sopra il minimo e, con il guadagno a 2
+   * ignorato, nel grafico non arrivava oltre 0,6. Con il fondo a 2 σ:
+   * in quella stessa prova 1 comando involontario in venti minuti
+   * (la modalità di sempre: 21 a guadagno 2, 502 a guadagno 3).
+   */
+  _minimoNorm(eye, axis, segno, A, s = this.cfg.signal) {
     // Il rumore SENZA la sostituzione fatta dalla normalizzazione.
     const sigmaStd = A.sigmaStd ?? A.sigma;
-    /* ⚠️ Il minimo è sul rumore VERO, senza guadagno. Il guadagno aiuta
-     * a riconoscere e imparare un gesto debole, ma non deve poter
-     * abbassare la sicurezza: provato con dieci minuti di tremore forte,
-     * un minimo diviso per il guadagno dava a guadagno 2 più comandi
-     * involontari della modalità di sempre (125 contro 21); così zero. */
-    const minimo = Math.max(1, s.normMinSigma ?? 2.5) * sigmaStd;
-    return Math.max(on * R, minimo) / on;
+    const gain = Math.max(1e-6, this._guadagnoAsse(eye, axis, segno));
+    return Math.max(Math.max(1, s.normMinSigma ?? 2.5) / gain,
+                    s.normPavimentoSigma ?? 2) * sigmaStd;
+  }
+
+  /**
+   * Dove scatta DAVVERO il gesto, sulla scala 0–1 del grafico. Di solito
+   * è `normOn`; se il gesto tipico è piccolo rispetto al rumore, il
+   * minimo di sicurezza la alza, e il grafico la mostra.
+   */
+  sogliaRealeNorm(eye, d, A = this.eyes[eye]?.[d.axis]) {
+    const s = this.cfg.signal;
+    const R = this._rifNorm(A, d.sign);
+    const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
+    if (R == null) {
+      // Mentre impara: la soglia di sempre, alzata dal fondo di sicurezza
+      // se il guadagno la porterebbe sotto 2 σ veri (v. `_evaluate`).
+      const sd = Math.max(0.1, this.sogliaDi(d.id));
+      const g = this.guadagnoDi(d.id) * this.guadagnoOcchio(eye);
+      return on * Math.max(1, ((s.normPavimentoSigma ?? 2) * g) / sd);
+    }
+    const sc = this._scalaNorm(eye, d.axis, d.sign, A, s);
+    return (sc * on) / R;
   }
 
   /** Tre valori simili fra loro (max/min ≤ rapporto), i più grandi; o null. */
@@ -1388,8 +1436,13 @@ export class GestureEngine {
   _valoreNorm(eye, d, A, v) {
     const s = this.cfg.signal;
     const on = Math.max(0.05, Math.min(0.95, s.normOn ?? 0.5));
-    const sc = this._scalaNorm(eye, d.axis, d.sign, A, s);
-    if (sc != null) return (d.sign * v) / sc;
+    /* Imparato il gesto, il grafico lo mostra rispetto a SE STESSO: il
+     * gesto tipico arriva a 1, sempre. Se il minimo di sicurezza alza la
+     * soglia, è la LINEA a salire (`sogliaRealeNorm`), non il gesto a
+     * scendere: prima il grafico si allargava e il gesto tipico restava
+     * a 0,6. */
+    const R = this._rifNorm(A, d.sign);
+    if (R != null) return (d.sign * v) / R;
     const g = this.guadagnoDi(d.id) * this.guadagnoOcchio(eye);
     const sigmaStd = A.sigmaStd ?? A.sigma;
     return (g * d.sign * v / Math.max(1e-9, sigmaStd)) * on / Math.max(0.1, this.sogliaDi(d.id));
@@ -1607,7 +1660,13 @@ export class GestureEngine {
          * gesti della sessione) valgono le soglie di sempre. */
         if (s.modoNormalizzato) {
           const attiva = !!A.norm?.attiva;
-          const on = attiva ? s.thresholdOn : this.sogliaDi(c.id);
+          /* Mentre impara valgono le soglie di sempre — ma MAI sotto il
+           * fondo di sicurezza (`normPavimentoSigma`, 2 σ veri), anche con
+           * un guadagno alto: con guadagno 3 e il gesto non ancora
+           * imparato, il tremore forte dava 48 comandi in venti minuti. */
+          const on = attiva ? s.thresholdOn
+            : Math.max(this.sogliaDi(c.id),
+                       (s.normPavimentoSigma ?? 2) * this.guadagnoDi(c.id) * this.guadagnoOcchio(eye));
           hyst.onK = on;
           // Il rilascio è sempre la frazione scelta: anche mentre impara,
           // così le linee del grafico (0–1) dicono il vero.
@@ -2081,6 +2140,7 @@ export class GestureEngine {
             nNorm: this._valoreNorm(eye, d, A, A.disp),
             nRawNorm: this._valoreNorm(eye, d, A, A.raw - A.baseline),
             norm: this.statoNorm(eye, d.id),
+            sogliaNorm: this.sogliaRealeNorm(eye, d, A),
           } : null),
         } : null;
       }

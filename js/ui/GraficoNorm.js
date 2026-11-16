@@ -56,9 +56,18 @@ export class GraficoSegnale extends SignalPlot {
       return;
     }
     const on = opz.normOn, off = opz.normOff;
+    /* Dove scatta DAVVERO: se per un canale disegnato il minimo di
+     * sicurezza sul rumore alza la soglia sopra la frazione scelta, si
+     * disegna anche quella linea. Ciò che si vede è ciò che succede. */
+    const ultimoF = this.frames[this.frames.length - 1];
+    let reale = null;
+    for (const id of traces) {
+      const v = ultimoF?.ch?.[id]?.sogliaNorm;
+      if (isFinite(v) && v > on + 0.01) reale = Math.max(reale ?? 0, v);
+    }
     // Scala fissa 0–1 (con un po' di margine), allargata solo se il
     // segnale esce: il gesto tipico arriva a 1.
-    let lo = -0.15, hi = 1.25;
+    let lo = -0.15, hi = Math.max(1.25, (reale ?? 0) + 0.1);
     for (const f of this.frames)
       for (const id of traces) {
         const v = GraficoSegnale._v(f.ch?.[id], false);
@@ -90,6 +99,15 @@ export class GraficoSegnale extends SignalPlot {
     ctx.beginPath(); ctx.moveTo(0, Y(on)); ctx.lineTo(W, Y(on)); ctx.stroke();
     ctx.strokeStyle = colors.warn;
     ctx.beginPath(); ctx.moveTo(0, Y(off)); ctx.lineTo(W, Y(off)); ctx.stroke();
+    if (reale != null) {
+      ctx.setLineDash([2, 3]); ctx.lineWidth = 2;
+      ctx.strokeStyle = colors.hot;
+      ctx.beginPath(); ctx.moveTo(0, Y(reale)); ctx.lineTo(W, Y(reale)); ctx.stroke();
+      ctx.strokeStyle = colors.warn;
+      const offR = reale * off / on;
+      ctx.beginPath(); ctx.moveTo(0, Y(offR)); ctx.lineTo(W, Y(offR)); ctx.stroke();
+      ctx.lineWidth = 1;
+    }
     ctx.setLineDash([]);
 
     for (const id of traces) {
@@ -138,6 +156,11 @@ export class GraficoSegnale extends SignalPlot {
     ctx.fillText('1 = gesto tipico', 4, Y(1) - 3);
     ctx.fillText(`${on.toFixed(2)} attiva`, 4, Y(on) - 3);
     ctx.fillText(`${off.toFixed(2)} rilascia`, 4, Y(off) - 3);
+    if (reale != null) {
+      ctx.fillStyle = colors.hot;
+      ctx.fillText(`${reale.toFixed(2)} attiva davvero (minimo di sicurezza sul rumore)`, 160, Y(reale) - 3);
+      ctx.fillStyle = colors.muted;
+    }
 
     // Stato dell'apprendimento, per ogni traccia disegnata.
     const ultimo = this.frames[this.frames.length - 1];

@@ -495,6 +495,16 @@
   </section>
 
   <div class="diag-grid">
+    <!-- Inquadratura: l'immagine INTERA della telecamera, per centrarla.
+         Solo disegno; spenta di serie. -->
+    <section class="card card-wide" id="inquadraturaCard">
+      <h2>Inquadratura della telecamera
+        <span class="tag" id="inquadraturaHint">l'immagine intera, a specchio: per centrare la telecamera sul volto</span></h2>
+      <div class="profile-actions">
+        <button class="btn btn-sm" id="btnInquadratura" title="Mostra l'immagine intera della telecamera, in qualunque modalità">Mostra inquadratura</button>
+      </div>
+      <canvas class="plotcanvas" id="camFull" width="640" height="360" style="display:none"></canvas>
+    </section>
     <section class="card">
       <h2><span data-i18n="card.eyeLeft">Occhio sinistro (suo)</span> <span class="tag" id="tagLeft">—</span></h2>
       <canvas class="eyecanvas" id="eyeLeft" width="380" height="200"></canvas>

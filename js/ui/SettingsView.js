@@ -599,7 +599,7 @@ export class SettingsView {
             0.05, 0.6, 0.05),
           this._range('signal.normMinSigma',
             P(['Sicurezza: soglia minima sul rumore', 'Safety: minimum threshold over noise']),
-            P(['Qualunque sia il riferimento imparato, la soglia non scende mai sotto questi multipli del rumore: il rumore da solo non può dare un comando più facilmente di così. Più alto = più protetto dai comandi involontari, ma un gesto debole può non scattare.',
+            P(['Qualunque sia il riferimento imparato, la soglia non scende mai sotto questi multipli del rumore, divisi per il guadagno del gesto (come nel grafico) — e comunque mai sotto 2 volte il rumore vero: il rumore da solo non può dare un comando più facilmente di così. Se un gesto è debole, nel grafico arriva comunque a 1 e compare una linea tratteggiata «attiva davvero»: è lì che scatta. Più alto = più protetto dai comandi involontari, ma un gesto debole può non scattare.',
                'Whatever reference was learned, the threshold never drops below this many times the noise.']),
             1.5, 6, 0.1, 'σ'),
         ] : []),

@@ -22,6 +22,7 @@ import { AudioDirector, LETTER_NAMES_IT } from './audio/AudioDirector.js';
 import { VoiceBank, Registratore, vocabolarioGuida } from './audio/VoiceBank.js';
 import { VisionPipeline, drawEyeDebug, SignalPlot, TRACE_STYLE, FACE_STYLE, BLINK_STYLE } from './vision/VisionPipeline.js';
 import { GraficoSegnale } from './ui/GraficoNorm.js';
+import { disegnaInquadratura } from './ui/Inquadratura.js';
 import { Watchdog, SorveglianzaAudio } from './vision/Watchdog.js';
 import { TERMINI_IT, TERMINI_EN, VERSIONE_TERMINI, testoInHtml } from './core/Legal.js';
 import { FinestraFluttuante, finestraSupportata } from './ui/FloatWindow.js';
@@ -1014,6 +1015,10 @@ class App {
     const frame = this.vision.lastFrame;
     drawEyeDebug(document.getElementById('eyeLeft'), frame, res, 'left', this.cfg, COLORS);
     drawEyeDebug(document.getElementById('eyeRight'), frame, res, 'right', this.cfg, COLORS);
+    // Inquadratura intera, solo se chiesta: per centrare la telecamera.
+    if (this._inquadratura) {
+      try { disegnaInquadratura(document.getElementById('camFull'), frame, res, COLORS); } catch {}
+    }
     this.debugView.updateTags(res);
     // Registro in console: gira sempre, anche fuori da diagnostica,
     // perché i problemi capitano proprio quando si è altrove.
@@ -4942,6 +4947,16 @@ class App {
      * Tre gesti, e il riferimento della modalità normalizzata è fissato
      * per entrambi gli occhi. Se la modalità è spenta la si accende
      * (spegnendo "soglia come frazione", che la esclude). */
+    /* ── Inquadratura ── l'immagine intera della telecamera, a specchio,
+     * con volto e occhi riquadrati: per centrarla, in qualunque modalità. */
+    const binq = document.getElementById('btnInquadratura');
+    if (binq) binq.onclick = () => {
+      this._inquadratura = !this._inquadratura;
+      const cv = document.getElementById('camFull');
+      if (cv) cv.style.display = this._inquadratura ? '' : 'none';
+      binq.textContent = this._inquadratura ? 'Nascondi inquadratura' : 'Mostra inquadratura';
+    };
+
     const bin = document.getElementById('btnInsegnaGesto');
     if (bin) bin.onclick = () => {
       if (this.gestures.statoInsegna?.attivo) {

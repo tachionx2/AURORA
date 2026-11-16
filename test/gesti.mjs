@@ -332,12 +332,36 @@ import { ScanEngine } from '../js/scan/ScanEngine.js';
   { // Le due modalità si escludono anche nel motore.
     const b = sessione((c) => { NORM(c); c.signal.sogliaRelativa = true; }, giri(0.05));
     ok(b.g.eyes.left.y.norm?.attiva && b.presi === 20, `4i. con anche "soglia come frazione" accesa, la normalizzata funziona lo stesso (${b.presi}/20)`); }
-  { // La sicurezza non dipende dal guadagno.
-    const b = sessione((c) => { NORM(c); c.signal.gainDir = { up: 3 }; }, ({ corri, gesto, st }) => {
+  { /* La sicurezza: il guadagno ora conta (lo si imposta per quello),
+     * ma il minimo sul rumore non scende sotto 2 σ veri. Cinque minuti
+     * di tremore forte, grande quanto il gesto imparato: la modalità di
+     * sempre allo stesso guadagno ne fa decine; la normalizzata al più
+     * uno. */
+    const prova = (norm) => sessione((c) => { if (norm) NORM(c); c.signal.gainDir = { up: 3 }; }, ({ corri, gesto, st }) => {
       corri(8000); for (let i = 0; i < 6; i++) { gesto(0.008); corri(3500); }
-      const n0 = 0; st.trem = 0.005; st.rum = 0.004; corri(300000); });
-    const dopo = b.ev.filter(e => e.t > 8000 + 6 * 4300).length;
-    ok(dopo === 0, `4l. guadagno 3, poi cinque minuti di tremore forte: nessun comando involontario (${dopo})`); }
+      st.trem = 0.005; st.rum = 0.004; corri(300000); });
+    const dopo = (b) => b.ev.filter(e => e.t > 8000 + 6 * 4300).length;
+    const n = dopo(prova(true)), sempre = dopo(prova(false));
+    ok(n <= 1 && sempre >= 10 * Math.max(1, n),
+       `4l. guadagno 3, poi cinque minuti di tremore forte: normalizzata ${n} comandi involontari, modalità di sempre ${sempre}`); }
+  { /* Il gesto tipico arriva a 1 nel grafico ANCHE quando è debole e il
+     * minimo di sicurezza alza la soglia: è la linea a salire, non il
+     * gesto a scendere (prima restava a 0,6 circa). */
+    let picco = 0, soglia = null;
+    const b = sessione(NORM, ({ corri, gesto, g }) => { corri(8000); g.insegnaGesto();
+      for (let i = 0; i < 3; i++) { gesto(0.012); corri(2500); } corri(1500);
+      const f = g.process.bind(g); g.process = (t, o) => { const r = f(t, o); const ch = g.channels()['left.up'];
+        picco = Math.max(picco, ch?.nNorm ?? 0); soglia = ch?.sogliaNorm ?? soglia; return r; };
+      for (let i = 0; i < 10; i++) { gesto(0.012); corri(3500); } });
+    ok(picco > 0.85 && picco < 1.35, `4m. gesto debole insegnato: nel grafico arriva a 1 (${picco.toFixed(2)})`);
+    ok(soglia > 0.5 && soglia < 0.9, `4n. e la soglia reale, alzata dal minimo sul rumore, è mostrata (${soglia?.toFixed(2)})`);
+    ok(b.presi >= 9, `4o. e i gesti vengono presi (${b.presi}/13, i primi 3 servono a insegnare)`); }
+  { // Il guadagno abbassa il minimo di sicurezza, fino a 2 σ veri.
+    const sc = (gu) => { const b = sessione((c) => { NORM(c); c.signal.gainDir = { up: gu }; }, giri(0.012, 8));
+      return b.g.channels()['left.up'].sogliaNorm; };
+    const s1 = sc(1), s2 = sc(2), s4 = sc(4);
+    ok(s2 < s1 && Math.abs(s4 - s2) < 0.15 * s2,
+       `4p. guadagno 2 abbassa la soglia reale (${s1?.toFixed(2)} → ${s2?.toFixed(2)}); oltre, il fondo di 2 σ tiene (×4: ${s4?.toFixed(2)})`); }
 }
 
 console.log(`\n${pass} superati, ${fail} falliti`);
