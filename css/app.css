@@ -1342,3 +1342,25 @@ body.has-media .media-stage:has(video){overflow:hidden}
 #ptView-media{overflow:hidden}
 #ptTiles{flex:0 0 auto;overflow:hidden}
 #ptMediaStage{flex:1 1 auto;min-height:0}
+
+/* ── Frase al centro (Impostazioni → «Frase e lettera al centro») ──
+   La stessa barra di scrittura, spostata dentro il palco subito sopra
+   la voce corrente: frase e lettera si leggono guardando un punto solo.
+   Spenta l'opzione, nessuna di queste regole si applica. */
+body.frase-al-centro .stage > .compose{
+  background:transparent;border:none;padding:0 .4rem;
+  margin:0 0 clamp(.2rem,1vh,.6rem);text-align:center;max-width:100%;width:100%;
+}
+body.frase-al-centro .stage > .compose .compose-sentence{max-height:calc(2.4em)}
+body.frase-al-centro .stage > .compose .compose-current{text-align:center}
+
+/* Inquadratura in Parla (pulsante nella barra di chi assiste): un
+   riquadro SOVRAPPOSTO in alto a destra, che non sposta né rimpicciolisce
+   il palco e la frase. */
+.parla-inquadra{
+  position:fixed;top:6.5rem;right:1rem;z-index:40;
+  width:min(440px,46vw);padding:.3rem;
+  background:var(--surface);border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:0 8px 30px rgba(0,0,0,.45);
+}
+.parla-inquadra canvas{display:block;width:100%;height:auto;aspect-ratio:16/9}

@@ -223,7 +223,8 @@ function banco(opts = {}) {
 {
   const b = banco();
   b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
-  ok(b.eng.currentNode?.label === 'Vocali', '11a. dopo una LETTERA si riparte dai gruppi');
+  // 25/11: dopo una lettera si riparte dal punto (o spazio) fuori dai gruppi, poi i gruppi.
+  ok(b.eng.currentNode?.label === '.', `11a. dopo una LETTERA si riparte dal punto, subito prima dei gruppi (${b.eng.currentNode?.label})`);
   b.gesto('Vocali'); b.gesto('␣');
   ok(b.eng.currentNode?.label === 'AZIONI', '11b. dopo uno SPAZIO si riparte dalle AZIONI');
   b.gesto('AZIONI'); b.gesto('LEGGI');
@@ -2121,14 +2122,14 @@ function buildTreeFor(b){ return b.eng.tree; }
        `71v2. la parola proposta non è nell elenco della sequenza (${elenco.join(' · ')})`);
     ok(eng.snapshot().proposta === 'sinistro',
        '71v3. lo stato per lo schermo la riporta, per il corsivo nella barra');
-    ok(eng.level.node.children[eng.level.index]?.label === 'Suggerimenti',
-       '71v4. e dietro la proposta la sequenza è già pronta su Suggerimenti');
+    ok(eng.level.node.children[eng.level.index]?.label === '.',
+       '71v4. e dietro la proposta la sequenza è già pronta sul punto di ripartenza (il punto, poi Suggerimenti)');
 
     /* ⚠️ Daniela NON la prende: dopo UN passo la proposta finisce e si
      * prosegue da Suggerimenti (ci sono, visto che c'è una proposta). */
     T += eng.stepCorrente + 10; eng.tick(T);
-    ok(!eng.parolaProposta && eng.currentNode?.label === 'Suggerimenti',
-       `71z. lasciata passare, dopo un passo si prosegue da SUGGERIMENTI (${eng.currentNode?.label})`);
+    ok(!eng.parolaProposta && eng.currentNode?.label === '.',
+       `71z. lasciata passare, dopo un passo si prosegue dal punto di ripartenza (${eng.currentNode?.label})`);
     ok(eng.snapshot().proposta === null, '71z0. e il corsivo sparisce');
 
     lettera('n');
@@ -2150,8 +2151,8 @@ function buildTreeFor(b){ return b.eng.tree; }
     lettera('p'); lettera('e');
     if (eng.parolaProposta) {
       eng.handleAction('NEXT', T);
-      ok(!eng.parolaProposta && eng.currentNode?.label === 'Suggerimenti',
-         `71z4c. "avanti" sulla proposta porta a Suggerimenti, non lo salta (${eng.currentNode?.label})`);
+      ok(!eng.parolaProposta && eng.currentNode?.label === '.',
+         `71z4c. "avanti" sulla proposta porta al punto di ripartenza, non lo salta (${eng.currentNode?.label})`);
     } else ok(true, '71z4c. (nessuna proposta per "pe": nulla da verificare)');
 
     // Mai dopo uno spazio.
@@ -2261,9 +2262,10 @@ function buildTreeFor(b){ return b.eng.tree; }
  * "Suggerimenti" o su AZIONI quando si stava scrivendo. */
 {
   const { Predictor: P72, scegliSuggerimenti: sc72 } = await import('../js/lang/Predictor.js');
-  const banco72 = () => {
+  const banco72 = (mod) => {
     const c = deepClone(DEFAULT_CONFIG);
     c.prediction.minPrefixForWord = 2;
+    if (mod) mod(c);
     const pred = new P72(c);
     for (let i = 0; i < 3; i++) pred.learnSentence('ho sete per favore');
     let eng;
@@ -2289,12 +2291,15 @@ function buildTreeFor(b){ return b.eng.tree; }
   const qui = (b) => b.eng.currentNode?.label;
 
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S');
-    ok(qui(b) === 'Vocali', `72a. lettera scelta → gruppo 1 (${qui(b)})`); }
+    // 25/11: dopo una lettera si riparte dal punto (o dallo spazio) fuori dai gruppi.
+    ok(qui(b) === '.', `72a. lettera scelta → il PUNTO fuori dai gruppi, poi il gruppo 1 (${qui(b)})`); }
+  { const b = banco72(c => { c.scan.ripartiDaSpazio = false; }); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S');
+    ok(qui(b) === 'Vocali', `72a2. con "riparti dallo spazio" spento: gruppo 1, come prima (${qui(b)})`); }
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('← ESCI');
     ok(qui(b) === 'Vocali', `72b. ESCI da un gruppo di lettere → gruppo 1, non ESCI (${qui(b)})`); }
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
-    ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === 'Suggerimenti',
-       `72c. lettera scelta CON suggerimenti presenti → Suggerimenti, per sceglierli subito (${qui(b)})`); }
+    ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === '.',
+       `72c. lettera scelta CON suggerimenti presenti → il punto, subito prima dei Suggerimenti (${qui(b)})`); }
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
     b.gesto('R–Q'); b.gesto('← ESCI');
     ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === 'Suggerimenti',
@@ -2362,8 +2367,8 @@ function buildTreeFor(b){ return b.eng.tree; }
     gesto('Scrivi'); gesto('R–Q'); gesto('S'); gesto('Vocali'); gesto('I');
     ok(e.parolaProposta === 'sinistro', '72n. proposta pronta');
     T += e.stepCorrente + 10; e.tick(T);           // la proposta scade
-    ok(!e.parolaProposta && e.currentNode?.label === 'Suggerimenti',
-       `72o. scaduta, si prosegue da Suggerimenti (${e.currentNode?.label})`);
+    ok(!e.parolaProposta && e.currentNode?.label === '.',
+       `72o. scaduta, si prosegue dal punto di ripartenza (il punto, poi Suggerimenti) (${e.currentNode?.label})`);
     T += 200; e.select(T); ctx();                  // gesto appena dopo
     ok(e.buffer.words.includes('SINISTRO'),
        `72p. un gesto appena dopo la parola prende la PAROLA, non la voce dopo (${e.buffer.words.join(' ')})`);
@@ -2371,8 +2376,8 @@ function buildTreeFor(b){ return b.eng.tree; }
        `72q. parola presa dalla proposta a voce → AZIONI, come dopo uno spazio (${e.currentNode?.label})`);
     /* Senza suggerimenti (prima delle lettere minime) si riparte dal gruppo 1. */
     gesto('R–Q'); gesto('S');
-    ok(!e.parolaProposta && e.currentNode?.label === 'Vocali',
-       `72r. una sola lettera, nessun suggerimento → gruppo 1 (${e.currentNode?.label})`);
+    ok(!e.parolaProposta && e.currentNode?.label === '.',
+       `72r. una sola lettera, nessun suggerimento → il punto, poi il gruppo 1 (${e.currentNode?.label})`);
   }
 }
 
@@ -2622,7 +2627,7 @@ function buildTreeFor(b){ return b.eng.tree; }
     const f = b.figli();
     ok(f[0] === '← ESCI' && f[1] === 'AZIONI' && f[2] === '.' && f[3] === 'Vocali',
        `77a. predefinito: ESCI, AZIONI, punto, poi le lettere (${f.join(' · ')})`);
-    ok(f[f.length - 1] === '⌫ parola', '77b. CANCELLA è l ultima voce di Scrivi, dopo i gruppi');
+    ok(f[f.length - 1] === '⌫ lettera', '77b. CANCELLA è l ultima voce di Scrivi, dopo i gruppi, e toglie la LETTERA');
     ok(!b.eng._inLettere, '77c. Scrivi NON è scambiato per un gruppo di lettere (passo normale)');
     const voc = b.eng.level.node.children.find(x => x.label === 'Vocali').children.map(x => x.label);
     ok(voc[voc.length - 1] === '← ESCI' && !voc.includes('⌫'),
@@ -2747,6 +2752,73 @@ function buildTreeFor(b){ return b.eng.tree; }
   { const b = banco(); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
     ok(b.eng.level.node.id === 'write', '77ae6. spento: dopo la lettera si esce subito, come prima'); }
 
+  // ── 25/11: ripartenza dallo spazio, CANCELLA lettera, inizio del gesto ──
+  // (la voce di ripartenza: quella dell'elenco, sotto l'eventuale proposta a voce)
+  const ripartenza = (b) => b.eng.level.node.children[b.eng.level.index]?.label;
+  { const b = banco(c => { c.scan.spazioFuori = true; }); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
+    ok(b.eng.level.node.id === 'write' && ripartenza(b) === '␣',
+       `77ag1. spazio fuori: dopo una lettera si riparte dallo SPAZIO (${ripartenza(b)})`);
+    b.gesto('␣');
+    ok(b.eng.buffer.words.join(' ') === 'A', '77ag2. e lo spazio si sceglie subito'); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
+    ok(ripartenza(b) === '.', `77ag3. predefinito (punto fuori): dopo una lettera si riparte dal PUNTO (${ripartenza(b)})`); }
+  { const b = banco(c => { c.scan.spazioFuori = true; c.scan.ripartiDaSpazio = false; }); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
+    ok(ripartenza(b) !== '␣' && ripartenza(b) !== '.', `77ag4. opzione spenta: si riparte come prima, dai suggerimenti o dal gruppo 1 (${ripartenza(b)})`); }
+  { const b = banco(c => { c.scan.puntoFuori = false; }); b.gesto('Scrivi'); b.gesto('Vocali'); b.gesto('A');
+    ok(ripartenza(b) !== '.' && ripartenza(b) !== '␣', `77ag5. senza spazio né punto fuori: come prima (${ripartenza(b)})`); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('⌫ lettera');
+    ok(b.eng.buffer.letters === 'CIA' && qui(b) === '⌫ lettera',
+       `77ah1. ⌫ lettera dopo i gruppi: toglie UNA lettera e resta lì (${b.eng.buffer.letters} / ${qui(b)})`);
+    for (let i = 0; i < 3; i++) b.gesto('⌫ lettera');
+    ok(b.eng.buffer.letters === '' , '77ah2. ripetendo si cancella lettera per lettera tutta la parola');
+    const az = b.eng.tree.children.find(x => x.id === 'write')?.children?.find(x => x.id === 'act')?.children?.map(x => x.label) || [];
+    ok(az.includes('⌫ lettera') && az.includes('⌫ parola'), `77ah3. in AZIONI restano sia ⌫ lettera sia ⌫ parola (${az.join(' ')})`);
+    const k = b.eng.level.node.children.find(x => x.id === 'k:cancella');
+    ok(k?.spoken === 'cancella', '77ah4. la voce guida dice "cancella"'); }
+  { // Il gesto comincia sulla voce M e finisce sulla N: vale la M.
+    const b = banco(); b.gesto('Scrivi');
+    const figli = b.eng.level.node.children;
+    const iG1 = figli.findIndex(x => x.label === 'Vocali');
+    b.gesto('Vocali'); b.avanti(b.eng.attesaCorrente + 30);
+    const lettere = b.eng.level.node.children;
+    // Si salta lo spazio: serve una LETTERA da confrontare.
+    while (b.eng.currentNode.label === '␣') b.avanti(b.eng.stepCorrente + 30);
+    let tm = b.tempo();
+    const m = b.eng.currentNode.label;
+    // L'annuncio di M è avvenuto all'ultimo cambio di voce.
+    tm = (b.eng._storia || []).filter(x => x.t <= tm).pop()?.t ?? tm;
+    b.avanti(b.eng.stepCorrente + 30);            // ora suona la voce dopo
+    const n = b.eng.currentNode.label;
+    b.eng.select(b.tempo(), tm + 400);            // gesto cominciato 400 ms dopo l'annuncio di M
+    ok(m !== n && b.eng.buffer.letters === m,
+       `77ai1. selezione dall'inizio del gesto: cominciato su ${m}, finito su ${n} → scrive ${b.eng.buffer.letters}`);
+    void iG1; void lettere; }
+  { const b = banco(c => { c.scan.selezioneDaInizio = false; }); b.gesto('Scrivi'); b.gesto('Vocali'); b.avanti(b.eng.attesaCorrente + 30);
+    const tm = b.tempo(); b.avanti(b.eng.stepCorrente + 30);
+    const n = b.eng.currentNode.label; b.eng.select(b.tempo(), tm + 400);
+    ok(b.eng.buffer.letters === n, `77ai2. opzione spenta: vale la voce su cui finisce, come prima (${b.eng.buffer.letters})`); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('Vocali'); b.avanti(b.eng.attesaCorrente + 30);
+    const tm = b.tempo(); b.avanti(b.eng.stepCorrente + 30);
+    const n = b.eng.currentNode.label; b.eng.select(b.tempo());
+    ok(b.eng.buffer.letters === n, `77ai3. senza l'istante d'inizio (tastiera, mouse): come prima (${b.eng.buffer.letters})`); void tm; }
+  { // Cancella con un gesto dedicato, da qualunque punto.
+    const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.spazio(); b.scrivi('ok');
+    const dove = qui(b);
+    b.eng.handleAction('DEL_CHAR', b.tempo());
+    ok(b.eng.buffer.letters === 'O' && qui(b) === dove, `77aj1. gesto "cancella lettera": toglie una lettera e la sequenza resta dov'era (${b.eng.buffer.letters} / ${qui(b)})`);
+    b.eng.handleAction('DEL_WORD', b.tempo());
+    ok(b.eng.buffer.letters === '' && b.eng.buffer.words.join(' ') === 'CIAO', '77aj2. gesto "cancella parola": toglie la parola in corso');
+    b.eng.handleAction('DEL_WORD', b.tempo());
+    ok(testo(b) === '', '77aj3. e poi la parola prima');
+    ok(b.eng.handleAction('DEL_CHAR', b.tempo()) === false, '77aj4. niente da cancellare: non fa nulla'); }
+  { // PARLA: la frase è protetta, e il tetto di sicurezza cresce con la lunghezza.
+    const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('PARLA');
+    const d = b.detti.filter(x => x.k === 'speech').pop();
+    ok(d?.o?.frase === true, '77ak1. PARLA segnala la frase composta: i gesti non la interrompono');
+    const lunga = 'parola '.repeat(80);
+    ok(b.eng._tettoFrase(lunga) > 25000 + lunga.length * 100 && b.eng._tettoFrase('ciao') === 25000,
+       `77ak2. tetto della frase: proporzionale alla lunghezza, mai sotto i 25 s (${b.eng._tettoFrase(lunga)} ms)`); }
+
   // ── Conferme a voce durante la scrittura ──
   const menuDetti = (b, da = 0) => b.detti.slice(da).filter(d => d.k === 'menu').map(d => d.t);
   { const b = banco(); b.gesto('Scrivi'); const n0 = b.detti.length;
@@ -2773,12 +2845,12 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(menuDetti(b, n0).join(',') === 'E', `77af8. lasciato passare CANCELLA, la lettera non viene ripetuta di nuovo (${menuDetti(b, n0)})`); }
   { const b = banco(); b.gesto('Scrivi'); b.scrivi('ho'); b.spazio(); b.scrivi('sete'); b.spazio(); b.scrivi('or');
     ok(testo(b) === 'HO SETE OR', `77af. preparazione (${testo(b)})`);
-    b.gesto('⌫ parola');
-    ok(testo(b) === 'HO SETE', `77ag. CANCELLA dopo i gruppi: via la parola in corso (${testo(b)})`);
+    b.gesto('⌫ lettera');
+    ok(testo(b) === 'HO SETE O', `77ag. CANCELLA dopo i gruppi: via l ultima LETTERA (${testo(b)})`);
     b.avanti(b.eng.attesaCorrente + 30);
-    ok(qui(b) === '⌫ parola', `77ah. e si resta su CANCELLA (${qui(b)})`);
+    ok(qui(b) === '⌫ lettera', `77ah. e si resta su CANCELLA (${qui(b)})`);
     b.eng.select(b.tempo());
-    ok(testo(b) === 'HO', `77ai. ripetendo il gesto si cancella parola per parola (${testo(b)})`); }
+    ok(testo(b) === 'HO SETE', `77ai. ripetendo il gesto si cancella lettera per lettera (${testo(b)})`); }
 
   // ── La proposta a voce torna a ogni giro ──
   { const b = banco(c => { c.scan.suggerimentiDiretti = true; }); b.gesto('Scrivi'); b.scrivi('se');

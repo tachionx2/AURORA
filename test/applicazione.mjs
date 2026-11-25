@@ -2503,6 +2503,35 @@ app.goto('parla');
      `ma un valore scritto a mano azzera quanto appreso (${Math.round(a.current)} ms)`);
 }
 
+/* ══════ Timing adattivo, 25/11: dall'inizio del gesto, sale E scende ══════ */
+{
+  const { AdaptiveTiming: AT } = await import('../js/scan/ScanEngine.js');
+  const { DEFAULT_CONFIG: DA, deepClone: da } = await import('../js/core/config.js');
+  // Lo stesso oggetto modificato sul posto, come fanno le impostazioni.
+  const c = da(DA); c.scan.stepMs = 1000;
+  const a = new AT(c);
+  for (let i = 0; i < 20; i++) a.record(2400);
+  c.scan.stepMs = 900; a.updateConfig(c);
+  ok(a.current === 900, `spostando il cursore (stesso oggetto) quanto appreso si azzera davvero (${Math.round(a.current)} ms)`);
+  // Reazione tipica 600 ms dall'annuncio all'inizio del gesto: converge
+  // a un passo poco sopra, partendo sia da molto lungo sia da molto corto.
+  const prova = (inizio) => {
+    const cc = da(DA); cc.scan.stepMs = inizio; const t = new AT(cc);
+    let s = 1;
+    for (let i = 0; i < 60; i++) { s = (s * 1103515245 + 12345) & 0x7fffffff; t.record(500 + (s % 200), true); }
+    return t.current;
+  };
+  const daLungo = prova(4000), daCorto = prova(700);
+  ok(daLungo < 1200 && daLungo > 800 && Math.abs(daLungo - daCorto) < 1,
+     `dai tempi di reazione converge allo stesso passo partendo da 4 s o da 0,7 s (${Math.round(daLungo)} / ${Math.round(daCorto)} ms)`);
+  // E se la persona rallenta, sale; se torna veloce, riscende.
+  const cc = da(DA); const t = new AT(cc);
+  for (let i = 0; i < 30; i++) t.record(1400, true);
+  const lento = t.current;
+  for (let i = 0; i < 30; i++) t.record(500, true);
+  ok(lento > 1700 && t.current < 900, `persona stanca: sale (${Math.round(lento)} ms); di nuovo pronta: riscende (${Math.round(t.current)} ms)`);
+}
+
 /* ══════ Radio: stazioni pronte e avvio automatico ══════
  *
  * ⚠️ Trovare l'indirizzo di uno stream è più difficile di quanto

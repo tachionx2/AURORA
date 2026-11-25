@@ -142,6 +142,10 @@ export const ACTIONS = {
    * aspettare tutto il giro, torna a quella prima. */
   PREV:         'Indietro di una voce (ripete la voce prima)',
   NEXT:         'Avanti (scansione manuale)',
+  /* Cancellare con un gesto dedicato, da qualunque punto della
+   * scansione, senza passare da Scrivi o AZIONI. */
+  DEL_CHAR:     'Cancella lettera',
+  DEL_WORD:     'Cancella parola',
   CLICK:        'Click del puntatore',
   RIGHT_CLICK:  'Click destro',
 };
@@ -859,11 +863,15 @@ export const DEFAULT_CONFIG = {
      *                      lasciato passare, si esce come sempre.
      *                      Spento: nessun CANCELLA, come prima;
      *   cancellaDopoGruppi CANCELLA dopo i gruppi: toglie l'ultima
-     *                      parola, e ripetuto cancella parola per parola. */
+     *                      lettera, e ripetuto cancella lettera per
+     *                      lettera (CANCELLA PAROLA resta in AZIONI);
+     *   ripartiDaSpazio    dopo una lettera si riparte dallo spazio (o
+     *                      dal punto) fuori dai gruppi, se ci sono. */
     spazioFuori: false,
     puntoFuori: true,
     cancellaNeiGruppi: false,
     cancellaDopoGruppi: true,
+    ripartiDaSpazio: true,
     /* ── Conferme a voce durante la scrittura (facoltative) ──
      *   ecoLettera  dopo ogni lettera o numero scelto lo ripete, una volta;
      *   ecoParola   dopo ogni parola finita la rilegge, una volta.
@@ -1022,6 +1030,10 @@ export const DEFAULT_CONFIG = {
     // Nasconde le voci vicine per lasciare tutto lo spazio alla voce
     // corrente. Si perde il contesto di ciò che arriva: è una scelta.
     readFocus: false,
+    /* Frase e parola in corso AL CENTRO, subito sopra la voce corrente,
+     * invece che in alto a sinistra: chi scrive vede tutto guardando in
+     * un punto solo, senza alzare gli occhi. Spento: come prima. */
+    fraseAlCentro: false,
     highContrast: false,
     showMirrorText: true,
     debugMode: false,

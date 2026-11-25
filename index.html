@@ -83,6 +83,16 @@
     <button class="btn" id="btnUndo" data-i18n="btn.undo">Annulla</button>
     <button class="btn" id="btnBack" data-i18n="btn.back">Indietro</button>
     <button class="btn btn-speak" id="btnSpeak" data-i18n="btn.speak">Pronuncia</button>
+    <!-- Per chi assiste, dopo aver riposizionato la persona o la
+         telecamera: controllare l'inquadratura e ricalibrare il gesto
+         senza andare in Diagnostica. Gli stessi comandi di là. -->
+    <button class="btn btn-sm" id="btnInquadraParla" title="Mostra l'immagine intera della telecamera, per controllare che inquadri bene il volto">Inquadratura</button>
+    <button class="btn btn-sm" id="btnInsegnaParla" title="Tre gesti, e il programma reimpara il gesto tipico (modalità normalizzata)">Insegna il gesto</button>
+  </section>
+
+  <!-- Inquadratura in Parla: compare solo se chiesta dal pulsante. -->
+  <section class="parla-inquadra" id="parlaInquadra" style="display:none">
+    <canvas class="plotcanvas" id="camFullParla" width="640" height="360"></canvas>
   </section>
 
   <div class="cambar">

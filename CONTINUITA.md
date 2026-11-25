@@ -612,3 +612,38 @@ nell'immagine, viene ingrandito di più. Il segnale non c'entra.
 `vision.lastFrame`, croce e zona consigliata, riquadro del volto dai
 landmark MediaPipe (se ci sono), riquadri degli occhi in ogni modalità,
 giudizio "ben inquadrato / troppo a destra / lontano…". Solo disegno.
+
+### 25/11, build 0200 — otto ritocchi chiesti da Francesco
+
+1. **Dopo una lettera si riparte dallo SPAZIO** (o dal PUNTO) fuori dai
+   gruppi, se ci sono: spazio, punto, suggerimenti, gruppo 1.
+   `scan.ripartiDaSpazio` (acceso); in `_backToWrite(…, 'gruppi')`.
+   Spento, o senza spazio/punto fuori: `_hotIndex` come prima.
+2. **⌫ dopo i gruppi = cancella LETTERA** (`k:cancella`, azione
+   `DEL_CHAR`, voce "cancella", resta lì). ⌫ parola resta in AZIONI.
+3. **PARLA / RIPETI / LEGGI protette**: `onOutput('speech', …, {frase})`
+   → `speakLong(text, {protetta})`; in `onGesture` i gesti durante una
+   frase protetta sono ignorati (la frase finisce, poi la scansione
+   riprende da sola). Il tetto di sicurezza di `_hold` per le frasi è
+   `_tettoFrase` = max(25 s, 150 ms × caratteri + 8 s): prima 25 s fissi,
+   e una frase lunga faceva ripartire la voce guida a metà. Le letture
+   lunghe (bozze, risposte) restano interrompibili.
+4. **Selezione dall'INIZIO del gesto** (`select(now, inizio)`,
+   `scan.selezioneDaInizio` acceso, `selezioneAnticipoMs` 150): sceglie
+   la voce che suonava quando il gesto è cominciato, nello stesso
+   livello (anche la proposta a voce: `_storia` ora la ricorda). Senza
+   istante d'inizio (tastiera, mouse) come prima.
+5. **Gesti → Cancella lettera / Cancella parola** (`ACTIONS.DEL_CHAR`,
+   `DEL_WORD`; `cancellaDaGesto`): da qualunque punto, la sequenza resta
+   dov'è e riannuncia la voce.
+6. **Frase al centro** (`ui.fraseAlCentro`, spenta): `_posizionaFrase`
+   SPOSTA il nodo `.compose` dentro `.stage` prima di `#stageCurrent`, e
+   lo rimette dov'era spegnendo. CSS `body.frase-al-centro`.
+7. **Parla: «Inquadratura» e «Insegna il gesto»** nella barra di chi
+   assiste (`btnInquadraParla`, `btnInsegnaParla`): stessi comandi della
+   Diagnostica; l'inquadratura è un riquadro sovrapposto in alto a destra.
+8. **Timing adattivo** (decisioni in memoria di progetto): misura
+   dall'annuncio della voce scelta all'INIZIO del gesto; passo =
+   max(p·1,25, p+250 ms), ultimi 30 tempi → sale e SCENDE, converge.
+   Corretto l'azzeramento: `updateConfig` confrontava `cfg.scan.stepMs`
+   con sé stesso (stesso oggetto) — ora con `_impostato`.

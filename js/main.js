@@ -352,6 +352,26 @@ class App {
     if (document.body.dataset.tab === 'diagnostica') this.renderTraceBar();
   }
 
+  /**
+   * Frase in composizione al centro (sopra la voce corrente) o in alto
+   * come sempre. Si SPOSTA lo stesso elemento, con gli stessi id: tutto
+   * ciò che lo aggiorna continua a funzionare, e spento torna esattamente
+   * dov'era.
+   */
+  _posizionaFrase(alCentro) {
+    const compose = document.querySelector('#panel-parla .compose');
+    const stage = document.querySelector('#panel-parla .stage');
+    const voce = document.getElementById('stageCurrent');
+    if (!compose || !stage || !voce) return;
+    if (!this._posFrase) this._posFrase = { parent: compose.parentNode, next: compose.nextSibling };
+    document.body.classList.toggle('frase-al-centro', alCentro);
+    if (alCentro) {
+      if (compose.parentNode !== stage) stage.insertBefore(compose, voce);
+    } else if (compose.parentNode !== this._posFrase.parent) {
+      this._posFrase.parent.insertBefore(compose, this._posFrase.next);
+    }
+  }
+
   applyUiConfig() {
     document.documentElement.style.setProperty('--scale', this.cfg.ui.fontScale);
     document.body.classList.toggle('high-contrast', this.cfg.ui.highContrast);
@@ -369,6 +389,7 @@ class App {
     document.body.classList.toggle('read-alto', contrasto === 'alto');
     document.body.classList.toggle('read-massimo', contrasto === 'massimo');
     document.body.classList.toggle('read-focus', !!this.cfg.ui.readFocus);
+    this._posizionaFrase(!!this.cfg.ui.fraseAlCentro);
     // Ingrandire può far traboccare: si rimisura subito.
     this.scheduleFit?.();
     document.body.classList.toggle('theme-light', this.cfg.ui.theme === 'light');
@@ -583,7 +604,7 @@ class App {
       this.statsView.render();
       this.debugView.logEvent(`pronunciata: "${text}"`);
       this.showSpoken(text);
-      return this.speakLong(text);
+      return this.speakLong(text, { protetta: !!opt?.frase });
     }
     // Anche i messaggi di servizio ("annullato", la rilettura) vanno
     // protetti: altrimenti il passo successivo li cancella a metà.
@@ -598,9 +619,14 @@ class App {
    * gesto qualsiasi interrompe: indispensabile per una lettera di
    * cinque minuti.
    */
-  async speakLong(text) {
+  async speakLong(text, { protetta = false } = {}) {
     const parts = this.cfg.drafts.speakBySentence ? splitSentences(text) : [text];
-    this._speaking = { stop: false, total: parts.length, index: 0 };
+    /* `protetta`: la frase composta da chi scrive (PARLA, RIPETI, LEGGI).
+     * Va detta fino in fondo: un gesto — anche involontario, muovendo
+     * gli occhi mentre si ascolta — non la interrompe e non fa ripartire
+     * la voce guida sopra di lei (vedi `onGesture`). Le letture lunghe
+     * (bozze, libri, risposte) restano interrompibili come prima. */
+    this._speaking = { stop: false, total: parts.length, index: 0, protetta };
     for (let i = 0; i < parts.length; i++) {
       if (this._speaking.stop) break;
       this._speaking.index = i;
@@ -826,6 +852,15 @@ class App {
      * programma, non trovarsi al buio con il gesto già consumato. */
     this.svegliaSchermo();
 
+    /* ⚠️ Mentre si legge la frase composta (PARLA, RIPETI, LEGGI) i
+     * gesti non fanno nulla: la frase finisce, poi la voce guida
+     * riprende da sola. Prima un movimento degli occhi durante una
+     * frase lunga la troncava e la sequenza ripartiva sopra. */
+    if (this._speaking?.protetta && !this._speaking.stop) {
+      this._esitoGesto = { ok: false, testo: 'frase in lettura: gesto ignorato' };
+      this.debugView.logEvent(`${e.channel} → ignorato (frase in lettura)`);
+      return;
+    }
     this._letturaAI = (this._letturaAI || 0) + 1;
     if (this.cfg.drafts.stopSpeechOnGesture && this.stopSpeaking()) {
       this._esitoGesto = { ok: true, testo: 'voce fermata' };
@@ -834,7 +869,7 @@ class App {
       return;
     }
     this.debugView.logEvent(`${e.channel} → ${e.action}${e.durMs ? ` (${Math.round(e.durMs)} ms)` : ''}`);
-    if (e.action === 'UNDO') this.audio.earcon('undo');
+    if (e.action === 'UNDO' || e.action === 'DEL_CHAR' || e.action === 'DEL_WORD') this.audio.earcon('undo');
     else if (e.action === 'WAKE' || e.action === 'TOGGLE_PAUSE' || e.action === 'PAUSE') {
       // Il tono racconta cosa è SUCCESSO, non cosa è stato chiesto: un
       // comando senza effetto (risveglia a programma già attivo) non
@@ -1011,6 +1046,11 @@ class App {
     // Il disegno della diagnostica è isolato: un problema nel grafico
     // non deve poter impedire di vedere gli occhi, che è l'informazione
     // più importante di questa schermata.
+    // Inquadratura in Parla, solo se chiesta da chi assiste.
+    if (this._inquadraturaParla && document.body.dataset.tab === 'parla') {
+      const risultato = res;   // il rilevamento di questo fotogramma
+      try { disegnaInquadratura(document.getElementById('camFullParla'), this.vision.lastFrame, risultato, COLORS); } catch {}
+    }
     if (document.body.dataset.tab !== 'diagnostica') return;
     const frame = this.vision.lastFrame;
     drawEyeDebug(document.getElementById('eyeLeft'), frame, res, 'left', this.cfg, COLORS);
@@ -1074,13 +1114,13 @@ class App {
 
   /** Aggiorna il pulsante "Insegna il gesto" e annuncia la fine. */
   _mostraInsegna() {
-    const b = document.getElementById('btnInsegnaGesto');
+    const bs = ['btnInsegnaGesto', 'btnInsegnaParla'].map(id => document.getElementById(id)).filter(Boolean);
     const st = this.gestures.statoInsegna;
     if (st?.attivo) {
-      if (b) b.textContent = `Insegno… ${st.quanti} di 3 (annulla)`;
+      for (const b of bs) b.textContent = `Insegno… ${st.quanti} di 3 (annulla)`;
       return;
     }
-    if (b) b.textContent = 'Insegna il gesto';
+    for (const b of bs) b.textContent = 'Insegna il gesto';
     clearInterval(this._timerInsegna); this._timerInsegna = null;
     const I = this.gestures._insegna;          // l'insegnamento appena chiuso
     if (!st?.esito || this._insegnaAnnunciato === I) return;
@@ -4957,8 +4997,23 @@ class App {
       binq.textContent = this._inquadratura ? 'Nascondi inquadratura' : 'Mostra inquadratura';
     };
 
+    /* Lo stesso in Parla, nella barra di chi assiste: dopo aver
+     * riposizionato la persona si controlla l'inquadratura senza
+     * cambiare scheda. */
+    const binqP = document.getElementById('btnInquadraParla');
+    if (binqP) binqP.onclick = () => {
+      this._inquadraturaParla = !this._inquadraturaParla;
+      const sec = document.getElementById('parlaInquadra');
+      if (sec) sec.style.display = this._inquadraturaParla ? '' : 'none';
+      binqP.textContent = this._inquadraturaParla ? 'Chiudi inquadratura' : 'Inquadratura';
+      // Subito un disegno, anche a telecamera spenta: lo dice.
+      if (this._inquadraturaParla) {
+        try { disegnaInquadratura(document.getElementById('camFullParla'), this.vision?.lastFrame, null, COLORS); } catch {}
+      }
+    };
+
     const bin = document.getElementById('btnInsegnaGesto');
-    if (bin) bin.onclick = () => {
+    const insegna = () => {
       if (this.gestures.statoInsegna?.attivo) {
         this.gestures.annullaInsegna();
         this._mostraInsegna();
@@ -4978,6 +5033,10 @@ class App {
       clearInterval(this._timerInsegna);
       this._timerInsegna = setInterval(() => this._mostraInsegna(), 250);
     };
+    if (bin) bin.onclick = insegna;
+    // Lo stesso pulsante anche in Parla: ricalibrare senza Diagnostica.
+    const binP = document.getElementById('btnInsegnaParla');
+    if (binP) binP.onclick = insegna;
 
     const bns = document.getElementById('btnNuovaSessione');
     if (bns) bns.onclick = () => {

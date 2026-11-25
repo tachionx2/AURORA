@@ -188,11 +188,14 @@ export function buildTree(cfg, ctx = {}) {
     const primo = kids.find(k => g.some(grp => grp.id === k.id));
     if (primo) primo.hot = true;
     /* ══ CANCELLA dopo i gruppi (facoltativo) ══
-     * Toglie l'ultima PAROLA (o le lettere della parola in corso) e
-     * resta lì: ripetendo il gesto si cancella parola per parola. */
+     * Toglie l'ultima LETTERA e resta lì: ripetendo il gesto si
+     * cancella lettera per lettera, fino a togliere anche tutta la
+     * parola. Si sbaglia molto più spesso una lettera che una parola
+     * intera. (Fino al 25/11 toglieva la parola intera: CANCELLA
+     * PAROLA resta in AZIONI.) */
     if (cfg.scan.cancellaDopoGruppi) {
-      kids.push({ kind: NodeKind.ACTION, id: 'k:cancella', label: '⌫ parola', spoken: 'cancella',
-                  action: 'DEL_WORD' });
+      kids.push({ kind: NodeKind.ACTION, id: 'k:cancella', label: '⌫ lettera', spoken: 'cancella',
+                  action: 'DEL_CHAR' });
     }
     return kids;
   };
@@ -492,7 +495,13 @@ export const DEFAULT_PHRASES = [
  * Timing adattivo
  * ------------------------------------------------------------------ */
 export class AdaptiveTiming {
-  constructor(cfg) { this.cfg = cfg; this.latencies = []; this.stepMs = cfg.scan.stepMs; }
+  constructor(cfg) {
+    this.cfg = cfg; this.latencies = []; this.stepMs = cfg.scan.stepMs;
+    // Il valore scelto a mano, ricordato a parte: `cfg` è lo stesso
+    // oggetto che le impostazioni modificano, quindi confrontare
+    // `cfg.scan.stepMs` con sé stesso non vedeva mai un cambiamento.
+    this._impostato = cfg.scan.stepMs;
+  }
   /* ⚠️ Cambiando il passo nelle impostazioni si RIPARTE da lì.
    *
    * Qui stava un difetto grave: il passo appreso continuava a valere
@@ -506,22 +515,49 @@ export class AdaptiveTiming {
    * alcun modo di correggere. Ora un valore scritto a mano azzera ciò
    * che è stato imparato: chi interviene deve avere l'ultima parola. */
   updateConfig(cfg) {
-    const cambiatoAMano = cfg.scan.stepMs !== this.cfg?.scan?.stepMs;
+    /* ⚠️ Fino al 25/11 il confronto era fra `cfg.scan.stepMs` e lo
+     * stesso valore nello stesso oggetto: sempre uguali, e spostando il
+     * cursore il passo imparato NON si azzerava (lo aveva notato
+     * Francesco). Ora si confronta con il valore ricordato. */
+    const cambiatoAMano = cfg.scan.stepMs !== this._impostato;
+    this._impostato = cfg.scan.stepMs;
     this.cfg = cfg;
     if (!cfg.scan.adaptive || cambiatoAMano) {
       this.stepMs = cfg.scan.stepMs;
       if (cambiatoAMano) this.latencies.length = 0;
     }
   }
-  /** Registra quanto tempo è passato dall'annuncio alla selezione. */
-  record(latencyMs) {
+  /**
+   * Registra quanto la persona ha impiegato a reagire.
+   *
+   * @param latencyMs  dall'annuncio all'INIZIO del gesto (`daInizio`),
+   *                   oppure — senza quell'istante — dall'annuncio alla
+   *                   selezione, come prima.
+   *
+   * ⚠️ PERCHÉ ORA SCENDE ANCHE. Misurando fino alla FINE del gesto, il
+   * tempo includeva la durata del gesto e, con la finestra di grazia,
+   * poteva superare il passo: il passo cresceva, i tempi misurati
+   * crescevano con lui, e non scendeva quasi mai. Il tempo di reazione
+   * invece non dipende dal passo: se il passo è troppo lungo i tempi
+   * restano brevi e il passo SCENDE; se è troppo corto i gesti arrivano
+   * tardi e SALE. Così converge al valore giusto per la persona.
+   * Gli ultimi 30 tempi (non più 60): si adatta più in fretta a una
+   * persona stanca o riposata.
+   */
+  record(latencyMs, daInizio = false) {
     if (!this.cfg.scan.adaptive) return;
+    if (!Number.isFinite(latencyMs) || latencyMs < 0) return;
     this.latencies.push(latencyMs);
-    if (this.latencies.length > 60) this.latencies.shift();
+    this._daInizio = (this._daInizio || 0) + (daInizio ? 1 : 0);
+    const max = daInizio ? 30 : 60;
+    while (this.latencies.length > max) this.latencies.shift();
     if (this.latencies.length < 8) return;
     const p = percentile(this.latencies, this.cfg.scan.adaptivePercentile);
-    // Margine del 25%: meglio un passo lento di un gesto perso.
-    this.stepMs = clamp(p * 1.25, this.cfg.scan.minStepMs, this.cfg.scan.maxStepMs);
+    // Margine del 25%: meglio un passo lento di un gesto perso. Dal
+    // tempo di reazione, almeno 250 ms in più: il gesto deve anche
+    // cominciare DENTRO il passo.
+    const v = daInizio ? Math.max(p * 1.25, p + 250) : p * 1.25;
+    this.stepMs = clamp(v, this.cfg.scan.minStepMs, this.cfg.scan.maxStepMs);
   }
   get current() { return this.cfg.scan.adaptive ? this.stepMs : this.cfg.scan.stepMs; }
   reset() { this.latencies.length = 0; this.stepMs = this.cfg.scan.stepMs; }
@@ -1005,7 +1041,9 @@ export class ScanEngine {
      * "indietro di una voce", che deve sapere su quale voce era la
      * sequenza nel momento in cui il gesto è COMINCIATO. */
     this._storia = this._storia || [];
-    this._storia.push({ t: now, livello: l.node.id, profondita: this.stack.length, index: l.index });
+    const pr = this.proposta && this.proposta.lista[this.proposta.i];
+    this._storia.push({ t: now, livello: l.node.id, profondita: this.stack.length, index: l.index,
+                        proposta: pr ? { w: pr, variante: !!this.proposta.variante } : null });
     if (this._storia.length > 24) this._storia.shift();
     this.h.onAnnounce(node, {
       index: l.index,
@@ -1024,7 +1062,7 @@ export class ScanEngine {
     this._now = now;
     switch (action) {
       case 'PREV':   return this.indietro(now, meta?.inizio);
-      case 'SELECT': return this.select(now);
+      case 'SELECT': return this.select(now, meta?.inizio);
       case 'UNDO':   return this.undo(now);
       // Ogni comando fa UNA cosa sola, e se non c'è nulla da fare non
       // fa nulla: un risveglio a programma già attivo non deve poterlo
@@ -1033,6 +1071,8 @@ export class ScanEngine {
       case 'PAUSE':        return this.paused ? undefined : this.pause(now);
       case 'TOGGLE_PAUSE': return this.paused ? this.resume(now) : this.pause(now);
       case 'SPEAK':  return this._speakSentence();
+      case 'DEL_CHAR':
+      case 'DEL_WORD': return this.cancellaDaGesto(action, now);
       case 'BACK':   this._chiudiProposta(); return this._up(now);
       // "Avanti" durante la proposta la scarta e va al punto di
       // ripartenza: non deve saltare anche quello.
@@ -1111,6 +1151,36 @@ export class ScanEngine {
   }
 
   /**
+   * ══ CANCELLA CON UN GESTO DEDICATO ══
+   *
+   * Assegnato a un gesto (per esempio il doppio ammiccamento), toglie
+   * l'ultima lettera o l'ultima parola da QUALUNQUE punto della
+   * scansione, senza spostarla: la sequenza resta dov'era e riannuncia
+   * la voce corrente, così si sa che il gesto è stato preso. Le stesse
+   * regole delle voci ⌫ lettera e ⌫ parola di AZIONI.
+   */
+  cancellaDaGesto(tipo, now) {
+    if (this.paused || this.suspended) return false;
+    const b = this.buffer;
+    if (!b.letters && !b.words.length) return false;
+    if (tipo === 'DEL_WORD') {
+      if (b.letters) b.letters = '';
+      else b.words.pop();
+    } else if (b.letters) {
+      b.letters = b.letters.slice(0, -1);
+    } else {
+      b.letters = b.words.pop().slice(0, -1);
+    }
+    this.proposta = null;
+    this._verifica = null;
+    this._afterCompose(now, false);
+    this.lastStepAt = now;
+    this._announce(now);
+    this._pushState();
+    return true;
+  }
+
+  /**
    * Esiste un gesto ACCESO capace di risvegliare?
    *
    * ⚠️ È una rete di sicurezza, non un dettaglio. Se la selezione non
@@ -1126,7 +1196,7 @@ export class ScanEngine {
       && (c.action === 'WAKE' || c.action === 'TOGGLE_PAUSE'));
   }
 
-  select(now) {
+  select(now, inizio = null) {
     if (this.paused) {
       /* Ascoltando la radio o guardando un video si mette in pausa la
        * voce di guida per sentire in santa pace. Ma se ogni selezione
@@ -1160,6 +1230,51 @@ export class ScanEngine {
      * A 0 (predefinito) il comportamento è quello di sempre.
      */
     const grazia = this.cfg.scan?.graceMs || 0;
+    /* ══ CONTA QUANDO IL GESTO È COMINCIATO ══
+     * Come per "indietro di una voce": si sceglie la voce che stava
+     * suonando quando il gesto è INIZIATO, non quella su cui è finito.
+     * Si comincia il gesto sentendo "M", lo si rilascia quando è già
+     * partita "N": si voleva la M. Vale solo dentro lo stesso livello
+     * (un gesto iniziato in un altro menu sceglie la voce corrente,
+     * come prima); se trova la voce, la finestra di grazia non serve.
+     * `scan.selezioneDaInizio` spento, o senza l'istante d'inizio
+     * (tastiera, mouse): come prima. */
+    let daInizio = false;
+    let tVoceScelta = null;   // quando è stata annunciata la voce scelta
+    if (inizio != null && Number.isFinite(inizio) && this.cfg.scan?.selezioneDaInizio !== false) {
+      const quando = inizio - (this.cfg.scan?.selezioneAnticipoMs ?? 150);
+      const st = this._storia || [];
+      const l = this.level;
+      for (let i = st.length - 1; i >= 0; i--) {
+        if (st[i].t > quando) continue;
+        if (st[i].livello === l?.node?.id && st[i].profondita === this.stack.length) {
+          const pv = st[i].proposta;
+          if (pv) {
+            // Il gesto è cominciato sulla proposta a voce: vale la parola.
+            if (!this.proposta || this.proposta.lista[this.proposta.i] !== pv.w) {
+              this.proposta = { lista: [pv.w], i: 0, variante: pv.variante };
+              this.stats.daInizio = (this.stats.daInizio || 0) + 1;
+            }
+            daInizio = true;
+            tVoceScelta = st[i].t;
+          } else if (st[i].index >= 0 && st[i].index < (l.node.children?.length ?? 0)) {
+            if (this.proposta || st[i].index !== l.index) {
+              this.proposta = null;
+              l.index = st[i].index;
+              this.stats.daInizio = (this.stats.daInizio || 0) + 1;
+            }
+            daInizio = true;
+            tVoceScelta = st[i].t;
+          }
+        }
+        break;
+      }
+    }
+    if (daInizio) {
+      this._propostaPrecedente = null;
+      this._tFineProposta = null;
+      this._tAvanzamento = null;
+    }
     /* La grazia vale anche per la proposta a voce: chi alza l'occhio
      * appena dopo aver sentito la parola vuole la parola, non il
      * la voce annunciata subito dopo. */
@@ -1208,7 +1323,17 @@ export class ScanEngine {
     this.stats.selections++;
     // Non imparare da un intervallo falsato: dopo una sospensione il
     // tempo trascorso include la pronuncia del messaggio.
-    if (!this._afterHold) this.timing.record(now - this.lastAnnounceAt);
+    /* Timing adattivo: quanto ci mette la persona a REAGIRE. Con
+     * l'istante d'inizio del gesto si misura dall'annuncio della voce
+     * scelta all'INIZIO del gesto — la durata del gesto non c'entra con
+     * la velocità di scansione, e prima la gonfiava (passi da 2–3 s con
+     * 1 s impostato). Senza, come prima: annuncio → selezione. */
+    if (!this._afterHold) {
+      const lat = (tVoceScelta != null && inizio != null && Number.isFinite(inizio))
+        ? Math.max(0, inizio - tVoceScelta)
+        : now - this.lastAnnounceAt;
+      this.timing.record(lat, tVoceScelta != null);
+    }
     this._afterHold = false;
     this.emptyCycles = 0;
 
@@ -1310,9 +1435,9 @@ export class ScanEngine {
           this._hold(this.h.onOutput('menu', 'niente da ripetere'), now);
           return;
         }
-        const p = this.h.onOutput('speech', this.ultimoDetto, { keep: true, rilettura: true });
+        const p = this.h.onOutput('speech', this.ultimoDetto, { keep: true, rilettura: true, frase: true });
         this._backToWrite(now, true, 'azioni');
-        if (!this._hold(p, now)) this._announceNow(now);
+        if (!this._hold(p, now, 0, this._tettoFrase(this.ultimoDetto))) this._announceNow(now);
         return;
       }
       case 'SPEAK': {
@@ -1385,9 +1510,9 @@ export class ScanEngine {
         if (this.cfg.prediction?.autoCorrectMode === 'frase') this._correggiFrase();
         const text = this._composedText();
         if (!text) { this._hold(this.h.onOutput('menu', 'niente da leggere'), now); return; }
-        const p = this.h.onOutput('speech', text, { keep: true, rilettura: true });
+        const p = this.h.onOutput('speech', text, { keep: true, rilettura: true, frase: true });
         this._backToWrite(now, true, 'azioni');
-        if (!this._hold(p, now)) this._announceNow(now);
+        if (!this._hold(p, now, 0, this._tettoFrase(text))) this._announceNow(now);
         return;
       }
       case 'ASK_AI': {
@@ -1720,7 +1845,7 @@ export class ScanEngine {
    * `onOutput` può restituire una promessa (nel browser) oppure nulla
    * (nei test), quindi la logica resta verificabile senza audio.
    */
-  _hold(result, now, fallbackMs = 0) {
+  _hold(result, now, fallbackMs = 0, tettoMs = 25000) {
     const resume = () => {
       this.suspended = false;
       this.suspendUntil = 0;
@@ -1734,7 +1859,7 @@ export class ScanEngine {
       this.suspended = true;
       // Tetto di sicurezza: se la promessa non arrivasse mai, la
       // scansione riprende comunque.
-      this.suspendUntil = now + 25000;
+      this.suspendUntil = now + tettoMs;
       this._pushState();
       result.then(resume, resume);
       return true;
@@ -1758,13 +1883,27 @@ export class ScanEngine {
       this._hold(this.h.onOutput('menu', 'niente da dire'), now || this._now || 0);
       return false;
     }
-    const p = this.h.onOutput('speech', text);
+    const p = this.h.onOutput('speech', text, { frase: true });
     // Tolto dallo schermo, ma tenuto in memoria per RIPETI.
     this.ultimoDetto = text;
     this.buffer = { letters: '', words: [], sentence: '' };
     this.h.onBuffer({ ...this.buffer });
-    this._hold(p, now || this._now || 0);
+    this._hold(p, now || this._now || 0, 0, this._tettoFrase(text));
     return true;
+  }
+
+  /**
+   * ⚠️ Quanto può durare, al massimo, la lettura di una frase composta.
+   *
+   * La voce guida resta ferma finché la frase non è finita; il tetto
+   * serve solo se la sintesi non avvisasse mai della fine. Era 25 s per
+   * tutto: una frase lunga, letta lentamente, superava il tetto e la
+   * voce guida ripartiva sopra la frase ancora in corso. Ora è
+   * proporzionale alla lunghezza (≈150 ms per carattere, ben più lento
+   * di qualunque voce), mai sotto i 25 s di prima.
+   */
+  _tettoFrase(text) {
+    return Math.max(25000, String(text || '').length * 150 + 8000);
   }
 
   /**
@@ -1790,7 +1929,16 @@ export class ScanEngine {
     this.stack = this.stack.slice(0, wl + 1);
     this.rebuild();
     const figli = this.level.node.children || [];
-    const i = dove === 'azioni' ? figli.findIndex(c => c.id === 'act') : -1;
+    let i = dove === 'azioni' ? figli.findIndex(c => c.id === 'act') : -1;
+    /* ══ DOPO UNA LETTERA: si riparte dallo SPAZIO (o dal PUNTO) ══
+     * Se spazio e/o punto stanno fuori dai gruppi, dopo una lettera la
+     * sequenza riparte da lì: spazio, punto, (suggerimenti), gruppo 1.
+     * Prima ripartiva dal gruppo 1 e lo spazio si raggiungeva solo
+     * tornando indietro con gli occhi o aspettando tutto il giro.
+     * `scan.ripartiDaSpazio` spento: come prima. */
+    if (i < 0 && dove === 'gruppi' && this.cfg.scan?.ripartiDaSpazio !== false) {
+      i = figli.findIndex(c => c.id === 'k:spazio' || c.id === 'k:punto');
+    }
     this.level.index = i >= 0 ? i : this._hotIndex(this.level.node);
     this.lastStepAt = now;
     if (!silent) { this._announce(now); }
