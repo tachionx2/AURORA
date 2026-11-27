@@ -647,3 +647,41 @@ giudizio "ben inquadrato / troppo a destra / lontano…". Solo disegno.
    max(p·1,25, p+250 ms), ultimi 30 tempi → sale e SCENDE, converge.
    Corretto l'azzeramento: `updateConfig` confrontava `cfg.scan.stepMs`
    con sé stesso (stesso oggetto) — ora con `_impostato`.
+
+### 27/11, build 20261127-0100 — proposta a voce e ESCI
+
+1. **Proposta a voce a ogni giro nello stesso punto di dopo la lettera**:
+   `_indiceRipartenza(node)` (spazio/punto se fuori dai gruppi e
+   `ripartiDaSpazio` acceso, altrimenti `hot`) è ora l'unica regola sia
+   per `_backToWrite(…, 'gruppi')` sia per `_propostaDelGiro`. Prima, a
+   ogni giro, la proposta arrivava DOPO spazio e punto (prima di
+   Suggerimenti). Ordine: proposta → ␣ → . → Suggerimenti → gruppi.
+2. **INDIETRO ripropone le parole** (`indietro`): dal punto di ripartenza
+   → di nuovo le proposte dalla prima; da una proposta non prima → quella
+   prima; dalla PRIMA proposta → indietro come sempre (AZIONI), così non
+   si resta chiusi. Solo con `suggerimentiDiretti`, parola in corso, non
+   per le varianti. `_storia` dà la parola all'inizio del gesto.
+3. **ESCI «sparito» (segnalazione)**: NON riprodotto. Ogni sottomenu ha
+   ESCI per costruzione (controllati tutti, con ogni combinazione);
+   simulazione casuale su migliaia di sequenze (gesti, indietro, PARLA,
+   RIPETI, LEGGI, SALVA): ESCI sempre raggiunta. Spiegazione probabile:
+   si finisce nel MENU PRINCIPALE, che non ha ESCI perché è il livello
+   più alto — dopo 3 giri a vuoto (`maxCycles`) Scrivi si chiude da solo,
+   e RILEGGI (Miei testi) e le Frasi riportano lì. Test 77es-*.
+
+### 27/11, build 20261127-0200 — ESCI nel respiro fra due giri (segnalazione)
+
+«Dopo la pausa, entrando in Scrivi, ESCI non funziona, si resta
+bloccati»: RIPRODOTTO nel browser, ed era un difetto introdotto il 25/11
+con la selezione dall'inizio del gesto. Nel respiro fra un giro e l'altro
+(`cyclePauseMs`) lo schermo mostra già ESCI come voce corrente, ma la voce
+guida non l'ha ancora detta: la memoria breve (`_storia`) aveva come
+ultima voce l'ULTIMA del giro prima («⌫ lettera»), e il gesto partiva su
+quella. Si vedeva ESCI, si faceva il gesto, e non si usciva.
+ · `_advance`, al giro: si scrive nella memoria breve il respiro come
+   voce 0 (`respiro: true`). Il gesto nel respiro vale per ESCI, come
+   prima del 25/11; "indietro" nel respiro porta all'ultima voce (quella
+   appena sentita) invece che alla penultima.
+ · `resume`: la memoria breve riparte vuota — un gesto subito dopo il
+   risveglio non può valere per una voce di prima della pausa.
+Test 77es-r1…r3, 77es-p1…p5.

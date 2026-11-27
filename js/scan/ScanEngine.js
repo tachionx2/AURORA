@@ -845,6 +845,11 @@ export class ScanEngine {
     if (!this.paused) return;
     this.paused = false;
     this.stack = [{ node: this.tree, index: 0 }];
+    /* ⚠️ La memoria breve degli annunci riparte da zero: ciò che si
+     * sentiva PRIMA della pausa non c'entra più. Senza, un gesto fatto
+     * subito dopo il risveglio (mentre si dice «riprendo») poteva valere
+     * per la voce di prima della pausa — per esempio di nuovo PAUSA. */
+    this._storia = [];
     this.emptyCycles = 0;
     this.lastStepAt = now;
     this._pushState();
@@ -936,6 +941,19 @@ export class ScanEngine {
         this.pause(now);
         return;
       }
+      /* ⚠️ Il respiro fra un giro e l'altro: lo schermo mostra GIÀ la
+       * prima voce (ESCI) come corrente, la voce guida la dirà alla
+       * fine della pausa. Va scritto nella memoria breve: senza, un
+       * gesto cominciato in questo respiro valeva per l'ULTIMA voce del
+       * giro prima (la selezione dall'inizio del gesto, 25/11) — si
+       * vedeva ESCI evidenziata, si faceva il gesto, e partiva invece
+       * l'ultima voce («⌫ lettera»): da Scrivi non si usciva più. Ora
+       * vale ESCI, come prima del 25/11; e "indietro" da qui porta
+       * all'ultima voce, quella appena sentita. */
+      this._storia = this._storia || [];
+      this._storia.push({ t: now, livello: l.node.id, profondita: this.stack.length, index: 0,
+                          proposta: null, respiro: true });
+      if (this._storia.length > 24) this._storia.shift();
       this.inCyclePause = true;
       this.lastStepAt = now;
       this._pushState();
@@ -947,8 +965,10 @@ export class ScanEngine {
      * la mancava doveva scrivere un'altra lettera per risentirla.
      * Ora, finché c'è una parola in corso e non si scrive altro, viene
      * riproposta a ogni giro nello stesso punto della prima volta:
-     * un attimo prima del punto di ripartenza (Suggerimenti, o il
-     * primo gruppo). Poi la sequenza prosegue come sempre. */
+     * un attimo prima del punto di ripartenza (lo spazio o il punto se
+     * stanno fuori dai gruppi, altrimenti Suggerimenti o il primo
+     * gruppo: vedi `_indiceRipartenza`). Poi la sequenza prosegue come
+     * sempre. */
     if (this._propostaDelGiro(l)) {
       this.proposta = { lista: this._propostaDelGiro(l), i: 0 };
     }
@@ -962,7 +982,9 @@ export class ScanEngine {
     const S = this.cfg.scan || {};
     if (!S.suggerimentiDiretti || S.propostaOgniGiro === false) return null;
     if (l?.node?.id !== 'write' || !this.buffer.letters.trim()) return null;
-    if (l.index !== this._hotIndex(l.node)) return null;
+    // Nello stesso punto in cui la si dice dopo una lettera: prima dello
+    // spazio e del punto (se fuori dai gruppi), poi Suggerimenti e gruppi.
+    if (l.index !== this._indiceRipartenza(l.node)) return null;
     const lista = (this.ctx.proposte || []).filter(Boolean);
     return lista.length ? lista : null;
   }
@@ -1113,6 +1135,9 @@ export class ScanEngine {
    */
   indietro(now, inizio = null) {
     if (this.paused || this.suspended) return;
+    // La parola proposta che suonava ADESSO (serve se manca l'istante
+    // d'inizio del gesto: tastiera).
+    const prOra = this.proposta && !this.proposta.variante ? this.proposta.lista[this.proposta.i] : null;
     this.proposta = null;
     this._propostaPrecedente = null;
     const l = this.level;
@@ -1120,6 +1145,7 @@ export class ScanEngine {
     if (!n) return;
 
     let da = l.index;
+    let parolaAllInizio = inizio != null && Number.isFinite(inizio) ? null : prOra;
     if (inizio != null && Number.isFinite(inizio)) {
       /* La persona reagisce a ciò che ha SENTITO, e il rilevamento
        * vede il gesto con un piccolo ritardo (i filtri): l'inizio vero
@@ -1130,11 +1156,48 @@ export class ScanEngine {
         if (st[i].t > quando) continue;
         // Solo se allora si era in QUESTO stesso menu: altrimenti la
         // voce di allora non esiste qui, e vale quella corrente.
-        if (st[i].livello === l.node.id && st[i].profondita === this.stack.length) da = st[i].index;
+        if (st[i].livello === l.node.id && st[i].profondita === this.stack.length) {
+          da = st[i].index;
+          const pv = st[i].proposta;
+          if (pv && !pv.variante) parolaAllInizio = pv.w;
+        }
         break;
       }
     }
     da = Math.max(0, Math.min(n - 1, da));
+    /* ══ INDIETRO RIPROPONE LE PAROLE PROPOSTE A VOCE ══
+     * Chi non ha fatto in tempo a scegliere la parola proposta torna
+     * indietro e la risente, invece di finire su AZIONI:
+     *  · dal punto di ripartenza (la voce subito dopo la proposta) →
+     *    di nuovo le parole proposte, dalla prima;
+     *  · da una parola proposta che non è la prima → quella prima.
+     * Dalla PRIMA parola proposta si torna indietro come sempre (AZIONI),
+     * così non si resta mai chiusi in un giro di parole. Solo durante
+     * una parola in corso e con le proposte a voce accese; le varianti
+     * di un suggerimento scelto restano come prima. */
+    const S = this.cfg.scan || {};
+    const proposteOra = (S.suggerimentiDiretti && l.node.id === 'write' && this.buffer.letters.trim())
+      ? (this.ctx.proposte || []).filter(Boolean) : [];
+    if (proposteOra.length) {
+      const rip = this._indiceRipartenza(l.node);
+      const k = parolaAllInizio != null ? proposteOra.indexOf(parolaAllInizio) : -1;
+      const da0 = parolaAllInizio != null ? (k > 0 ? k - 1 : -1) : (da === rip ? 0 : -1);
+      if (da0 >= 0) {
+        l.index = rip;
+        this.proposta = { lista: proposteOra, i: da0 };
+        this.inCyclePause = false;
+        this.attesaFino = 0;
+        this.emptyCycles = 0;
+        this._tAvanzamento = null;
+        this._vocePrecedente = null;
+        this._tFineProposta = null;
+        this.lastStepAt = now;
+        this.stats.indietro = (this.stats.indietro || 0) + 1;
+        this._announce(now);
+        this._pushState();
+        return;
+      }
+    }
     l.index = da > 0 ? da - 1 : n - 1;     // prima della prima: l'ultima
     this.inCyclePause = false;
     this.attesaFino = 0;
@@ -1936,9 +1999,7 @@ export class ScanEngine {
      * Prima ripartiva dal gruppo 1 e lo spazio si raggiungeva solo
      * tornando indietro con gli occhi o aspettando tutto il giro.
      * `scan.ripartiDaSpazio` spento: come prima. */
-    if (i < 0 && dove === 'gruppi' && this.cfg.scan?.ripartiDaSpazio !== false) {
-      i = figli.findIndex(c => c.id === 'k:spazio' || c.id === 'k:punto');
-    }
+    if (i < 0 && dove === 'gruppi') i = this._indiceRipartenza(this.level.node);
     this.level.index = i >= 0 ? i : this._hotIndex(this.level.node);
     this.lastStepAt = now;
     if (!silent) { this._announce(now); }
@@ -2013,6 +2074,24 @@ export class ScanEngine {
     }
     this._announce(now);
     this._pushState();
+  }
+
+  /**
+   * Il PUNTO DI RIPARTENZA del livello di scrittura: dove riparte la
+   * sequenza dopo una lettera, e dove — un attimo prima — si dice la
+   * proposta a voce, sia dopo la lettera sia a ogni giro. Lo spazio (o
+   * il punto) se stanno fuori dai gruppi e `scan.ripartiDaSpazio` è
+   * acceso; altrimenti Suggerimenti o il gruppo 1 (`hot`).
+   * Un'unica regola per tutti e due i casi: prima, a ogni giro, la
+   * proposta arrivava DOPO spazio e punto, dopo una lettera PRIMA.
+   */
+  _indiceRipartenza(node) {
+    const figli = node?.children || [];
+    if (this.cfg.scan?.ripartiDaSpazio !== false) {
+      const i = figli.findIndex(c => c.id === 'k:spazio' || c.id === 'k:punto');
+      if (i >= 0) return i;
+    }
+    return this._hotIndex(node);
   }
 
   /** Indice da cui far ripartire la scansione dopo una composizione. */

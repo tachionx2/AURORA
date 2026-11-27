@@ -2867,7 +2867,9 @@ function buildTreeFor(b){ return b.eng.tree; }
       era = !!c2; giri++;
     }
     ok(viste >= 2, `77an. non scelta, viene riproposta a ogni giro (${viste} volte in ${Math.round((b.tempo() - T0) / 1000)} s)`);
-    ok(primaDi === 'Suggerimenti', `77ao. nello stesso punto della prima volta: un attimo prima di Suggerimenti (${primaDi})`);
+    // Dal 27/11: nello stesso punto in cui la si dice dopo la lettera,
+    // cioè prima dello spazio e del punto (qui, predefinito, il punto).
+    ok(primaDi === '.', `77ao. nello stesso punto della prima volta: un attimo prima del punto (${primaDi})`);
     ok(b.eng.buffer.letters === 'SE', '77ap. e intanto non è stato scritto nulla');
     // Al giro dopo la si prende.
     for (let i = 0; i < 6000 && !b.eng.parolaProposta; i++) b.passo();
@@ -2884,6 +2886,144 @@ function buildTreeFor(b){ return b.eng.tree; }
     let rivista = false; const T0 = b.tempo();
     while (b.tempo() - T0 < 40000) { b.passo(); if (b.eng.parolaProposta) rivista = true; }
     ok(!rivista, '77as. a parola finita non si ripropone nulla'); }
+
+  // ── 27/11: la proposta a ogni giro sta PRIMA dello spazio e del punto ──
+  const primaDiGiro = (b) => {
+    // La proposta dopo la lettera: la si lascia passare, poi si aspetta
+    // che torni al giro successivo e si guarda la voce che viene dopo.
+    let era = !!b.eng.parolaProposta, T0 = b.tempo();
+    while (b.tempo() - T0 < 90000) {
+      b.passo();
+      const c2 = b.eng.parolaProposta;
+      if (c2 && !era) return b.eng.level.node.children[b.eng.level.index]?.label;
+      era = !!c2;
+    }
+    return null;
+  };
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('se');
+    ok(b.eng.parolaProposta && b.eng.level.node.children[b.eng.level.index]?.label === '␣',
+       '77pa1. dopo la lettera: prima la proposta, poi lo spazio');
+    const p = primaDiGiro(b);
+    ok(p === '␣', `77pa2. a ogni giro: la proposta torna PRIMA dello spazio (${p})`);
+    b.passo();
+    let seq = []; let prima = null; const T0 = b.tempo();
+    while (b.tempo() - T0 < 30000 && seq.length < 4) { b.passo(); const q = qui(b); if (q !== prima && !b.eng.parolaProposta) { seq.push(q); prima = q; } }
+    ok(seq.slice(0, 3).join(',') === '␣,.,Suggerimenti', `77pa3. poi spazio, punto, Suggerimenti (${seq.join(',')})`); }
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.ripartiDaSpazio = false; });
+    b.gesto('Scrivi'); b.scrivi('se');
+    const p = primaDiGiro(b);
+    ok(p === 'Suggerimenti', `77pa4. "riparti dallo spazio" spento: a ogni giro prima di Suggerimenti, come prima (${p})`); }
+
+  // ── 27/11: INDIETRO dopo la proposta la ripropone ──
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('se');
+    const prop = b.eng.parolaProposta;
+    // Lasciata passare: ora suona lo spazio.
+    for (let i = 0; i < 4000 && b.eng.parolaProposta; i++) b.passo();
+    ok(qui(b) === '␣', `77pb1. lasciata passare la proposta, suona lo spazio (${qui(b)})`);
+    b.avanti(500);                                   // si sente "spazio", poi il gesto
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+    ok(b.eng.parolaProposta === prop, `77pb2. indietro: la parola proposta viene ripetuta (${b.eng.parolaProposta})`);
+    b.eng.select(b.tempo());
+    ok(b.eng.buffer.words.join(' ') === prop.toUpperCase() && b.eng.buffer.letters === '',
+       `77pb3. e ora la si può scegliere (${testo(b)})`); }
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('se');
+    for (let i = 0; i < 4000 && b.eng.parolaProposta; i++) b.passo();
+    b.avanti(500);
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+    b.avanti(500);
+    // Dalla PRIMA parola proposta, indietro torna ad AZIONI come sempre.
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+    ok(!b.eng.parolaProposta && qui(b) === 'AZIONI', `77pb4. indietro dalla prima parola proposta: AZIONI, come sempre (${qui(b)})`);
+    // E più avanti il giro ripropone tutto come sempre.
+    const p = primaDiGiro(b);
+    ok(p === '␣', `77pb5. poi la sequenza continua e la proposta torna al giro dopo (${p})`); }
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.suggerimentiDirettiN = 2; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('se');
+    const lista = [...(b.eng.proposta?.lista || [])];
+    if (lista.length >= 2) {
+      for (let i = 0; i < 4000 && b.eng.parolaProposta === lista[0]; i++) b.passo();
+      ok(b.eng.parolaProposta === lista[1], `77pb6. preparazione: suona la seconda parola (${b.eng.parolaProposta})`);
+      b.avanti(400);
+      b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+      ok(b.eng.parolaProposta === lista[0], `77pb7. indietro dalla seconda parola proposta: la prima (${b.eng.parolaProposta})`);
+    } else ok(true, '77pb6. (una sola proposta per questo prefisso)');
+    for (let i = 0; i < 8000 && b.eng.parolaProposta; i++) b.passo();
+    b.avanti(500);
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+    ok(!!b.eng.parolaProposta && b.eng.parolaProposta === (lista[0] || b.eng.parolaProposta), `77pb8. dallo spazio: tutte le proposte da capo (${b.eng.parolaProposta})`); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('se');
+    while (qui(b) !== '.') b.passo();
+    b.avanti(500);
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+    ok(!b.eng.parolaProposta && qui(b) === 'AZIONI', `77pb9. proposte a voce spente: indietro come sempre (${qui(b)})`); }
+  { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('se'); b.spazio();
+    while (qui(b) !== '␣') b.passo();
+    b.avanti(500);
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() });
+    ok(!b.eng.parolaProposta && qui(b) === 'AZIONI', `77pb10. a parola finita: indietro come sempre (${qui(b)})`); }
+  { // Dopo una lettera, con le proposte, il percorso completo resta quello deciso.
+    const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('s');
+    const p1 = b.eng.parolaProposta;
+    b.scrivi('e');
+    const p2 = b.eng.parolaProposta;
+    ok(p2 && b.eng.ctx.suggestions[0] === p2, `77pc1. un'altra lettera: proposta e Suggerimenti aggiornati insieme (${p1} → ${p2} / ${b.eng.ctx.suggestions.join(', ')})`); }
+
+  // ── ESCI c'è sempre (27/11, segnalazione: «dopo PARLA ESCI è sparito») ──
+  for (const az of ['PARLA', 'RIPETI', 'LEGGI', 'SALVA']) {
+    const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
+    b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto(az);
+    let esci = false; const T0 = b.tempo();
+    while (b.tempo() - T0 < 60000 && !esci) { b.passo(); if (b.eng.level.node.id === 'write' && qui(b) === '← ESCI') esci = true; }
+    ok(esci, `77es-${az}. dopo ${az} la sequenza di Scrivi ripassa da ESCI`);
+    ok(b.gesto('← ESCI') && b.eng.level.node.id === 'root', `77es-${az}b. ed ESCI porta fuori da Scrivi`);
+    const b2 = banco(); b2.gesto('Scrivi'); b2.scrivi('ok'); b2.gesto('AZIONI'); b2.gesto(az); b2.gesto('AZIONI');
+    ok(b2.gesto('← ESCI') && b2.eng.level.node.id === 'write', `77es-${az}c. rientrati in AZIONI, ESCI c'è ed esce`);
+  }
+  { // Il respiro fra un giro e l'altro: si vede ESCI, il gesto vale per ESCI.
+    const b = banco(); b.gesto('Scrivi');
+    for (let i = 0; i < 20000 && !b.eng.inCyclePause; i++) b.passo();
+    b.avanti(300);
+    ok(b.eng.inCyclePause && qui(b) === '← ESCI', `77es-r1. nel respiro fra due giri lo schermo mostra ESCI (${qui(b)})`);
+    b.eng.select(b.tempo(), b.tempo() - 100);
+    ok(b.eng.level.node.id === 'root', `77es-r2. un gesto cominciato nel respiro sceglie ESCI ed esce da Scrivi (${b.eng.level.node.id} / ${qui(b)})`); }
+  { const b = banco(); b.gesto('Scrivi');
+    const figli = b.eng.level.node.children;
+    for (let i = 0; i < 20000 && !b.eng.inCyclePause; i++) b.passo();
+    b.avanti(700);                                   // il respiro dura 900 ms
+    b.eng.handleAction('PREV', b.tempo(), { inizio: b.tempo() - 100 });
+    ok(qui(b) === figli[figli.length - 1].label, `77es-r3. indietro nel respiro: l'ultima voce, quella appena sentita (${qui(b)})`); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('← ESCI');
+    b.gesto('PAUSA');
+    ok(b.eng.paused, '77es-p1. in pausa');
+    b.avanti(3000);
+    b.eng.select(b.tempo(), b.tempo() - 100);          // risveglio
+    ok(!b.eng.paused, '77es-p2. risvegliato');
+    b.eng.select(b.tempo() + 50, b.tempo());           // un gesto subito dopo il risveglio
+    ok(!b.eng.paused,
+       `77es-p3. subito dopo il risveglio un gesto non vale per la voce di prima della pausa (${b.eng.paused ? 'di nuovo in pausa' : qui(b)})`);
+    const b2 = banco(); b2.gesto('PAUSA'); b2.avanti(2000); b2.eng.select(b2.tempo()); b2.gesto('Scrivi');
+    b2.avanti(b2.eng.attesaCorrente + 30);
+    ok(qui(b2) === '← ESCI', `77es-p4. dopo la pausa, entrando in Scrivi la prima voce è ESCI (${qui(b2)})`);
+    ok(b2.gesto('← ESCI') && b2.eng.level.node.id === 'root', '77es-p5. ed ESCI esce'); }
+  { // Ogni sottomenu, con ogni combinazione delle opzioni di Scrivi, ha la sua ESCI.
+    const senza = new Set(); let menu = 0;
+    for (const sf of [false, true]) for (const pf of [false, true]) for (const cg of [false, true])
+      for (const cd of [false, true]) for (const bp of ['first', 'last']) for (const ai of [false, true]) {
+        const b = banco(c => { Object.assign(c.scan, { spazioFuori: sf, puntoFuori: pf, cancellaNeiGruppi: cg,
+          cancellaDopoGruppi: cd, backPosition: bp, suggerimentiDiretti: true, showMenuItem: ai });
+          c.assistente = { ...(c.assistente || {}), enabled: ai }; });
+        b.gesto('Scrivi'); b.scrivi('se');
+        const visita = (n, p) => { if (!n.children) return; menu++;
+          if (n.id !== 'root' && !n.children.some(x => x.action === 'BACK')) senza.add(p);
+          n.children.forEach(x => visita(x, p + '>' + x.label)); };
+        visita(b.eng.tree, 'Menu');
+      }
+    ok(senza.size === 0, `77es-z. ${menu} sottomenu controllati, tutti con ESCI (${[...senza].join(' | ')})`); }
 
   // ── Varianti del suggerimento scelto ──
   { const b = banco(c => { c.scan.variantiSuggerimento = true; c.prediction.minPrefixForWord = 3; });
