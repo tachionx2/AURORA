@@ -685,3 +685,22 @@ quella. Si vedeva ESCI, si faceva il gesto, e non si usciva.
  · `resume`: la memoria breve riparte vuota — un gesto subito dopo il
    risveglio non può valere per una voce di prima della pausa.
 Test 77es-r1…r3, 77es-p1…p5.
+
+### 27/11, build 20261127-0300 — la voce guida «sbordava» dopo la selezione
+
+Segnalazione: si sceglie Frasi, il programma entra in Frasi, ma la voce
+dice «scrivi»; si sceglie Base e la voce dice «puoi». Soprattutto a passi
+veloci. RIPRODOTTO nel browser con una sintesi finta lenta (150 ms di
+avvio, 700 ms di durata): sulla versione di prima «scrivi» veniva detta
+fino in fondo DENTRO Frasi.
+Causa: con la selezione dall'inizio del gesto (25/11) si sceglie la voce
+sentita prima, ma quando il gesto viene riconosciuto la sequenza è già
+passata alla successiva e la voce guida ha cominciato a dirla; entrando
+nel menu c'è il respiro d'ingresso (`enterDelayMs`), in cui nessuno la
+interrompeva.
+ · `AudioDirector.zittisciAnnuncio()`: ferma solo l'annuncio in corso
+   (`speechSynthesis.cancel`, e la registrazione del canale guida);
+   con `protecting` acceso non fa NULLA (frase detta, conferme).
+ · `main.onGesture`: per SELECT, BACK, UNDO, a scansione attiva (non in
+   pausa, non sospesa), la chiama PRIMA di `scan.handleAction`.
+Test in integrita.mjs (3).

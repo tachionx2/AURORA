@@ -939,6 +939,16 @@ class App {
      * non quando è finito: nel frattempo la sequenza è andata avanti. */
     const ora = performance.now();
     const daQuanto = Number.isFinite(e.agoMs) ? e.agoMs : (Number.isFinite(e.durMs) ? e.durMs : null);
+    /* ⚠️ Gesto preso: la voce guida non deve continuare a dire la voce
+     * che è partita nel frattempo. Entrando in un menu c'è un respiro
+     * prima del primo annuncio, e in quel respiro si sentiva il nome
+     * della voce DOPO quella scelta («scrivi» entrando in Frasi). Solo
+     * per i comandi che spostano la sequenza, solo a scansione attiva e
+     * mai sopra un messaggio protetto (vedi `zittisciAnnuncio`). */
+    if ((e.action === 'SELECT' || e.action === 'BACK' || e.action === 'UNDO')
+        && !this.scan.paused && !this.scan.suspended) {
+      try { this.audio.zittisciAnnuncio(); } catch {}
+    }
     this.scan.handleAction(e.action, ora, daQuanto != null ? { inizio: ora - daQuanto } : null);
     this.gestures.setPaused(this._pausaVoluta());
   }

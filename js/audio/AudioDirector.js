@@ -336,6 +336,27 @@ export class AudioDirector {
     this.say(text, 'menu', true);
   }
 
+  /**
+   * Zittisce l'ANNUNCIO di scansione in corso, e solo quello.
+   *
+   * Serve quando un gesto è appena stato preso: con la selezione
+   * dall'inizio del gesto si sceglie la voce sentita PRIMA, ma nel
+   * frattempo la voce guida ha già cominciato a dire quella dopo
+   * («scrivi» mentre si entra in Frasi). Lasciata finire, si sente il
+   * nome di un comando mentre se n'è appena scelto un altro.
+   *
+   * ⚠️ Mai un messaggio protetto (la frase detta, le conferme, la
+   * rilettura): con `protecting` acceso non fa nulla.
+   */
+  zittisciAnnuncio() {
+    if (this.protecting) return;
+    try { window.speechSynthesis?.cancel(); } catch {}
+    try {
+      const el = this.menuEl;
+      if (el && !el.paused) { el.pause(); el.onended?.(); }
+    } catch {}
+  }
+
   stop() {
     window.speechSynthesis?.cancel();
     try { this.menuEl?.pause(); this.speechEl?.pause(); } catch {}

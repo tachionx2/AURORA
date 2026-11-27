@@ -515,6 +515,27 @@ ok(/\.counter \.cv\{[^}]*height:/.test(css) && /\.counter \.cl\{[^}]*height:/.te
      `ogni parametro di scansione e puntatore è regolabile (mancano: ${veri.join(', ') || 'nessuno'})`);
 }
 
+/* ══ 27/11: dopo un gesto preso, la voce guida tace — ma mai sopra un
+ * messaggio protetto (la frase detta, le conferme). ══ */
+{
+  const annulli = [];
+  globalThis.window = globalThis.window || {};
+  const primaSynth = globalThis.window.speechSynthesis;
+  globalThis.window.speechSynthesis = { cancel() { annulli.push(1); }, getVoices() { return []; },
+    addEventListener() {}, speak() {} };
+  const { AudioDirector } = await import('../js/audio/AudioDirector.js');
+  const a = new AudioDirector({ audio: { enabled: true } });
+  a.protecting = true; a.zittisciAnnuncio();
+  ok(annulli.length === 0, 'zittisciAnnuncio non tocca un messaggio protetto');
+  a.protecting = false; a.zittisciAnnuncio();
+  ok(annulli.length === 1, 'zittisciAnnuncio ferma l\'annuncio di scansione in corso');
+  globalThis.window.speechSynthesis = primaSynth;
+  const m = read('js/main.js');
+  ok(/zittisciAnnuncio\(\)[\s\S]{0,200}this\.scan\.handleAction\(/.test(m)
+     && /e\.action === 'SELECT' \|\| e\.action === 'BACK' \|\| e\.action === 'UNDO'\)\s*&& !this\.scan\.paused && !this\.scan\.suspended/.test(m),
+     'il gesto preso zittisce l\'annuncio PRIMA di arrivare alla scansione, solo a scansione attiva');
+}
+
 console.log(`\n${pass} superati, ${fail} falliti`);
 if (problems.length) { console.log('\nDA CORREGGERE:'); problems.forEach(p => console.log('  · ' + p)); }
 process.exit(fail ? 1 : 0);
