@@ -704,3 +704,34 @@ interrompeva.
  · `main.onGesture`: per SELECT, BACK, UNDO, a scansione attiva (non in
    pausa, non sospesa), la chiama PRIMA di `scan.handleAction`.
 Test in integrita.mjs (3).
+
+### 28/11, build 20261128-0100 — AZIONI rinnovate, Spunti, Cestino
+
+Richiesta di Francesco, tutta in `actionsNode` / motore / Media:
+1. «Suggerimenti» → **«Spunti»** (etichetta e voce; `id: 'sugg'` invariato).
+2. PARLA e RIPETI → **una voce sola** (`id: 'a:speak'`): con testo nella
+   riga **LEGGI E SVUOTA** (azione SPEAK, = vecchio PARLA); a riga vuota
+   e con qualcosa di già detto **RIPETI** (SPEAK_AGAIN, = vecchio RIPETI,
+   che con testo faceva già PARLA). Stato da `_statoAzioni()` passato
+   all'albero come `ctx.azioni` (`_ctxAlbero`), e nella chiave di
+   `setContext` così l'albero si ricostruisce quando cambia.
+3. **LEGGI** a riga vuota rimette nella riga il testo appena tolto e lo
+   legge; con testo nella riga resta com'era (legge e lascia).
+4. **RECUPERA** (`a:recover`, RESTORE_TEXT): compare solo a riga vuota
+   con qualcosa da recuperare; rimette il testo senza leggerlo e torna a
+   scrivere (`_backToWrite(..., 'gruppi')`).
+   Il «testo da recuperare» (`_recupero`) lo mettono da parte
+   `_speakSentence` e CLEAR; si azzera appena nella riga c'è di nuovo un
+   testo (`_afterCompose`, `loadText`): mai un testo precedente.
+5. **CESTINO**: CLEAR (solo SVUOTA, non LEGGI E SVUOTA) chiama
+   `onCestino(testo)` → `Drafts.metteNelCestino` (localStorage
+   `aurora.cestino.v1`, ultimi 5, il più recente in testa). Riquadro in
+   cima alla scheda Media (`#cestinoCard`), il primo evidenziato
+   («ultimo svuotato»): Rimetti nella riga (il testo che c'era va lui
+   nel cestino), Salva tra i miei testi, ×. Pulsante «Cestino» nella
+   barra di Parla.
+6. Frase **«Leggi il cestino»**: in `DEFAULT_PHRASE_GROUPS` (Persone) e,
+   con la migrazione 49, nel gruppo «Puoi» di chi lo ha (altrimenti
+   Persone), mai due volte.
+VoiceBank: aggiunte 'leggi e svuota', 'recupera', 'recuperato', 'spunti'.
+Test 78a…78g (percorsi), cestino e migrazione (applicazione).

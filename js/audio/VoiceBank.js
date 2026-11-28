@@ -221,7 +221,9 @@ export function vocabolarioGuida(cfg) {
   for (const t of ['frasi', 'scrivi', 'miei testi', 'guarda', 'pausa', 'esci', 'menu',
                    'azioni', 'leggi', 'parla', 'ripeti', 'rileggi', 'salva', 'chiedi',
                    'lettera', 'parola', 'svuota', 'spazio', 'punto', 'cancella',
-                   'riprendo', 'annullato', 'niente da dire']) agg(t, 'comandi');
+                   'riprendo', 'annullato', 'niente da dire',
+                   // 28/11: le voci nuove di AZIONI e il gruppo «Spunti».
+                   'leggi e svuota', 'recupera', 'recuperato', 'spunti']) agg(t, 'comandi');
 
   // Nomi dei gruppi di lettere.
   for (const g of cfg.scan.groups || []) agg(g.spoken || g.label, 'gruppi');

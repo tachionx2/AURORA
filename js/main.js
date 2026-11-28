@@ -116,6 +116,8 @@ class App {
        * detta — insegnata ai suggerimenti a ogni rilettura. */
       onOutput: (kind, text, opt) => this.onOutput(kind, text, opt),
       onBuffer: (b) => this.onBuffer(b),
+      // SVUOTA: il testo tolto finisce nel cestino (scheda Media).
+      onCestino: (testo) => { this.drafts.metteNelCestino(testo); this.renderCestino(); },
       /* Conferma a voce facoltativa della lettera o della parola appena
        * scritta: in auricolare, come gli altri annunci. La lettera con
        * il suo nome ("bi", "effe") se così sono annunciate le lettere. */
@@ -240,6 +242,7 @@ class App {
       this.renderMediaBar();
     });
     this._safe('testi', () => { this.renderDrafts(); this.restoreWip(); });
+    this._safe('cestino', () => this.renderCestino());
     this._safe('tracce', () => this.renderTraceBar());
     this._safe('versione', () => this.mostraVersione());
     window.addEventListener('resize', () => this.overlay.resize());
@@ -753,6 +756,58 @@ class App {
         this.drafts.remove(d.id); this.refreshContext(); this.renderDrafts();
       };
       row.append(k, play, edit, dl, ord, del);
+      list.append(row);
+    });
+  }
+
+  /**
+   * CESTINO: gli ultimi testi tolti con SVUOTA, il più recente in testa
+   * ed evidenziato. Per chi assiste: un testo scritto a fatica e svuotato
+   * per sbaglio si rimette nella riga o si salva tra i testi.
+   */
+  renderCestino() {
+    const list = document.getElementById('cestinoList');
+    if (!list) return;
+    const items = this.drafts.cestino();
+    list.innerHTML = '';
+    if (!items.length) {
+      list.innerHTML = '<p class="sub">Il cestino è vuoto.</p>';
+      return;
+    }
+    items.forEach((c, i) => {
+      const row = document.createElement('div');
+      row.className = 'row' + (i === 0 ? ' cestino-ultimo' : '');
+      const k = document.createElement('span');
+      k.className = 'k';
+      const quando = new Date(c.t).toLocaleString('it-IT', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+      k.innerHTML = (i === 0 ? '<span class="tag">ultimo svuotato</span> ' : '')
+        + `<span class="sub">${this._esc(quando)}</span><br>${this._esc(c.text)}`;
+      const rimetti = document.createElement('button');
+      rimetti.textContent = 'Rimetti nella riga';
+      rimetti.title = 'Rimette il testo nella riga di scrittura della pagina Parla';
+      rimetti.onclick = () => {
+        // Il testo che c'è ora nella riga non si perde: va nel cestino.
+        const ora = this.scan._composedText?.() || '';
+        if (ora) this.drafts.metteNelCestino(ora);
+        this.scan.loadText(c.text, performance.now());
+        this.renderCestino();
+        this.toast('Testo rimesso nella riga');
+        this.goto('parla');
+      };
+      const salva = document.createElement('button');
+      salva.textContent = 'Salva tra i miei testi';
+      salva.onclick = () => {
+        this.drafts.add(c.text);
+        this.refreshContext(); this.renderDrafts();
+        this.toast('Salvato tra i miei testi');
+      };
+      const del = document.createElement('button');
+      del.textContent = '×'; del.title = 'Elimina dal cestino';
+      del.onclick = () => {
+        if (!confirm('Eliminare questo testo dal cestino?')) return;
+        this.drafts.togliDalCestino(c.id); this.renderCestino();
+      };
+      row.append(k, rimetti, salva, del);
       list.append(row);
     });
   }
@@ -5047,6 +5102,18 @@ class App {
     // Lo stesso pulsante anche in Parla: ricalibrare senza Diagnostica.
     const binP = document.getElementById('btnInsegnaParla');
     if (binP) binP.onclick = insegna;
+    // Scorciatoia al CESTINO per chi assiste: scheda Media, riquadro Cestino.
+    const bce = document.getElementById('btnCestinoParla');
+    if (bce) bce.onclick = () => {
+      this.renderCestino();
+      this.goto('guarda');
+      const card = document.getElementById('cestinoCard');
+      if (card) {
+        try { card.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch {}
+        card.classList.add('cestino-lampo');
+        setTimeout(() => card.classList.remove('cestino-lampo'), 1600);
+      }
+    };
 
     const bns = document.getElementById('btnNuovaSessione');
     if (bns) bns.onclick = () => {

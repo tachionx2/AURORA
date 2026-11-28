@@ -19,6 +19,8 @@
 
 const KEY = 'aurora.drafts.v1';
 const WIP = 'aurora.wip.v1';
+const CESTINO = 'aurora.cestino.v1';
+export const CESTINO_MAX = 5;
 
 export class Drafts {
   constructor() {
@@ -144,6 +146,34 @@ export class Drafts {
   }
 
   clearWip() { try { localStorage.removeItem(WIP); } catch {} }
+
+  /* ------------------------------ Cestino ------------------------------ *
+   * Gli ultimi testi tolti dalla riga con SVUOTA. Scrivere con gli occhi
+   * costa minuti per frase: uno SVUOTA per sbaglio non deve buttarli.
+   * Chi assiste li ritrova nella scheda Media. Solo SVUOTA: un testo
+   * detto con LEGGI E SVUOTA è stato consegnato, non perso. */
+  cestino() {
+    try {
+      const raw = localStorage.getItem(CESTINO);
+      const l = raw ? JSON.parse(raw) : [];
+      return Array.isArray(l) ? l.filter(x => x && typeof x.text === 'string') : [];
+    } catch { return []; }
+  }
+
+  metteNelCestino(text) {
+    const clean = (text || '').trim();
+    if (!clean) return null;
+    const l = this.cestino();
+    const v = { id: 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), text: clean, t: Date.now() };
+    l.unshift(v);                         // il più recente in testa
+    try { localStorage.setItem(CESTINO, JSON.stringify(l.slice(0, CESTINO_MAX))); } catch {}
+    return v;
+  }
+
+  togliDalCestino(id) {
+    const l = this.cestino().filter(x => x.id !== id);
+    try { localStorage.setItem(CESTINO, JSON.stringify(l)); } catch {}
+  }
 
   /* ------------------------------ Scambio ------------------------------ */
 

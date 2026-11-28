@@ -3169,7 +3169,7 @@ app.goto('parla');
   pick('AZIONI'); pick('LEGGI'); pump(400);
   ok(app.scan.buffer.letters === 'CIAO' || app.scan.buffer.words.join(' ') === 'CIAO', 'ripeti: LEGGI lascia il testo dov è');
   ok(imparate.length === 0, `ripeti: LEGGI NON insegna la frase ai suggerimenti (imparate: ${imparate.join(' | ') || 'nessuna'})`);
-  pick('AZIONI'); pick('PARLA'); pump(400);
+  pick('AZIONI'); pick('LEGGI E SVUOTA'); pump(400);
   ok(imparate.length === 1 && imparate[0] === 'CIAO', `ripeti: PARLA sì, una volta (${imparate.join(' | ')})`);
   ok(!app.scan.buffer.letters && !app.scan.buffer.words.length, 'ripeti: PARLA toglie il testo dallo schermo');
   pick('AZIONI'); pick('RIPETI'); pump(400);
@@ -3183,6 +3183,39 @@ app.goto('parla');
   // Varianti: il collegamento con il suggeritore esiste e risponde.
   ok(Array.isArray(app.scan.h.onVarianti('andato', [])) && app.scan.h.onVarianti('andato', []).includes('andata'),
      'varianti: l applicazione le chiede al suggeritore ("andato" → "andata")');
+}
+
+/* ═══════════ 28/11: CESTINO e frase «Leggi il cestino» ═══════════ */
+{
+  const { Drafts, CESTINO_MAX } = await import('../js/lang/Drafts.js');
+  localStorage.removeItem('aurora.cestino.v1');
+  const d = new Drafts();
+  ok(d.cestino().length === 0, 'cestino: vuoto all\'inizio');
+  for (let i = 1; i <= 7; i++) d.metteNelCestino('testo ' + i);
+  const l = d.cestino();
+  ok(CESTINO_MAX === 5 && l.length === 5, `cestino: tiene gli ultimi 5 (${l.length})`);
+  ok(l[0].text === 'testo 7' && l[4].text === 'testo 3', 'cestino: il più recente in testa');
+  ok(new Drafts().cestino()[0].text === 'testo 7', 'cestino: resta dopo una riapertura');
+  ok(d.metteNelCestino('   ') === null && d.cestino().length === 5, 'cestino: un testo vuoto non entra');
+  d.togliDalCestino(l[0].id);
+  ok(d.cestino()[0].text === 'testo 6' && d.cestino().length === 4, 'cestino: si può togliere un testo');
+  localStorage.removeItem('aurora.cestino.v1');
+
+  const { DEFAULT_CONFIG: DC, migrateConfig: mc, deepClone: dcl } = await import('../js/core/config.js');
+  ok(DC.scan.phraseGroups.some(g => g.phrases.includes('Leggi il cestino')), 'frase: «Leggi il cestino» fra le frasi predefinite');
+  const vecchio = dcl(DC); vecchio.version = 48;
+  vecchio.scan.phraseGroups = [{ id: 'x1', label: 'Base', phrases: ['Sì'] }, { id: 'x2', label: 'Puoi', phrases: ['Puoi aprire'] }];
+  const m1 = mc(vecchio);
+  ok(m1.scan.phraseGroups[1].phrases.join('|') === 'Puoi aprire|Leggi il cestino' && m1.scan.phraseGroups[0].phrases.join('|') === 'Sì',
+     `frase: aggiunta nel gruppo «Puoi», le altre non si toccano (${JSON.stringify(m1.scan.phraseGroups)})`);
+  const m2 = mc(dcl(m1)); 
+  const v2 = dcl(m1); v2.version = 48; const m3 = mc(v2);
+  ok(m3.scan.phraseGroups[1].phrases.filter(f => f === 'Leggi il cestino').length === 1, 'frase: mai due volte');
+  const v4 = dcl(DC); v4.version = 48;
+  v4.scan.phraseGroups = dcl(DC.scan.phraseGroups).map(g => ({ ...g, phrases: g.phrases.filter(f => f !== 'Leggi il cestino') }));
+  const m4 = mc(v4);
+  ok(m4.scan.phraseGroups.find(g => g.id === 'pg3').phrases.includes('Leggi il cestino'), 'frase: senza «Puoi», va in «Persone»');
+  ok(m2.version === m1.version, 'frase: la migrazione è stabile');
 }
 
 console.log(`\n─── TOTALE: ${pass} superati, ${fail} falliti ───`);

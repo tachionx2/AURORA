@@ -10,7 +10,7 @@
  * parametro qui lo fa comparire automaticamente nel tab Impostazioni.
  */
 
-export const CONFIG_VERSION = 48;
+export const CONFIG_VERSION = 49;
 
 /* ------------------------------------------------------------------ *
  * ALFABETO E GRUPPI
@@ -70,7 +70,7 @@ export const DEFAULT_PHRASE_GROUPS = [
   { id: 'pg2', label: 'Corpo', spoken: 'corpo',
     phrases: ['Ho dolore', 'Ho sete', 'Ho fame', 'Cambiami posizione', 'Ho caldo', 'Ho freddo'] },
   { id: 'pg3', label: 'Persone', spoken: 'persone',
-    phrases: ['Chiama qualcuno', 'Ciao', 'Ti voglio bene', 'Resta un po\''] },
+    phrases: ['Chiama qualcuno', 'Ciao', 'Ti voglio bene', 'Resta un po\'', 'Leggi il cestino'] },
 ];
 
 export const DEFAULT_GROUPS = [
@@ -1517,6 +1517,19 @@ export function migrateConfig(cfg) {
     if (c.signal.baselineFreezeSigma === undefined) c.signal.baselineFreezeSigma = 0;
   }
   if (v < 31 && !c.debug) c.debug = { console: false, ogniMs: 2000 };
+  if (v < 49 && c.scan && Array.isArray(c.scan.phraseGroups)) {
+    /* La frase per chiedere a chi assiste di guardare nel CESTINO (gli
+     * ultimi testi svuotati). Nel gruppo «Puoi» se c'è, altrimenti in
+     * «Persone»; mai due volte. Le altre frasi non si toccano. */
+    const FRASE = 'Leggi il cestino';
+    const gr = c.scan.phraseGroups;
+    const gia = gr.some(g => (g?.phrases || []).some(f => String(f).toLowerCase().includes('cestino')));
+    if (!gia) {
+      const dove = gr.find(g => String(g?.label || '').trim().toLowerCase() === 'puoi')
+                || gr.find(g => g?.id === 'pg3');
+      if (dove && Array.isArray(dove.phrases)) dove.phrases.push(FRASE);
+    }
+  }
   if (v < 48 && c.scan) {
     /* Il CANCELLA nei gruppi di lettere ha cambiato significato: acceso,
      * ora la sequenza si ferma su di lui dopo OGNI lettera. Prima era

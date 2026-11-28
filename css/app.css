@@ -1364,3 +1364,9 @@ body.frase-al-centro .stage > .compose .compose-current{text-align:center}
   box-shadow:0 8px 30px rgba(0,0,0,.45);
 }
 .parla-inquadra canvas{display:block;width:100%;height:auto;aspect-ratio:16/9}
+
+/* Cestino (scheda Media): il più recente svuotato è evidenziato. */
+#cestinoList .row{flex-wrap:wrap;align-items:flex-start}
+#cestinoList .row .k{flex:1 1 100%;font-size:.95rem}
+#cestinoList .row.cestino-ultimo{outline:2px solid var(--accent);background:var(--raised)}
+#cestinoCard.cestino-lampo{outline:3px solid var(--accent);transition:outline-color .3s}

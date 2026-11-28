@@ -64,9 +64,34 @@ export function buildTree(cfg, ctx = {}) {
        * ⚠️ SVUOTA sta IN FONDO, e di proposito. Cancella tutto ciò che
        * è stato scritto — minuti di lavoro — e non si annulla: in coda
        * è la voce più difficile da selezionare per sbaglio. */
-      { kind: NodeKind.ACTION, id: 'a:speak',  label: 'PARLA',    spoken: 'parla',   action: 'SPEAK' },
-      { kind: NodeKind.ACTION, id: 'a:again',  label: 'RIPETI',   spoken: 'ripeti',  action: 'SPEAK_AGAIN' },
-      { kind: NodeKind.ACTION, id: 'a:repeat', label: 'LEGGI',    spoken: 'leggi',   action: 'SPEAK_KEEP' },
+      /* ══ 28/11: LEGGI E SVUOTA, che dopo diventa RIPETI ══
+       *
+       * PARLA e RIPETI sono diventati UNA voce sola (un passo in meno a
+       * ogni giro). Con un testo nella riga si chiama LEGGI E SVUOTA:
+       * lo dice e lo toglie dalla riga (era PARLA). A riga vuota, se
+       * c'è qualcosa di già detto, si chiama RIPETI e lo ridice (era
+       * RIPETI, che con un testo nella riga faceva già PARLA). Stesso
+       * `id`: quando cambia nome il cursore non si sposta.
+       *
+       * LEGGI legge e LASCIA il testo nella riga. A riga vuota, se il
+       * testo appena tolto (da LEGGI E SVUOTA o da SVUOTA) non è
+       * ancora stato sostituito da uno nuovo, lo RIMETTE nella riga e
+       * lo legge. RECUPERA fa lo stesso senza leggerlo, e compare solo
+       * quando c'è qualcosa da recuperare. Lo stato arriva dal motore
+       * (`ctx.azioni`, vedi `_ctxAlbero`); senza, è come a riga piena. */
+      ...(() => {
+        const st = ctx.azioni || {};
+        const ripeti = !!(st.vuoto && st.ripeti);
+        return [
+          ripeti
+            ? { kind: NodeKind.ACTION, id: 'a:speak', label: 'RIPETI', spoken: 'ripeti', action: 'SPEAK_AGAIN' }
+            : { kind: NodeKind.ACTION, id: 'a:speak', label: 'LEGGI E SVUOTA', spoken: 'leggi e svuota', action: 'SPEAK' },
+          { kind: NodeKind.ACTION, id: 'a:repeat', label: 'LEGGI', spoken: 'leggi', action: 'SPEAK_KEEP' },
+          ...(st.vuoto && st.recupera
+            ? [{ kind: NodeKind.ACTION, id: 'a:recover', label: 'RECUPERA', spoken: 'recupera', action: 'RESTORE_TEXT' }]
+            : []),
+        ];
+      })(),
       { kind: NodeKind.ACTION, id: 'a:save',   label: 'SALVA',    spoken: 'salva',   action: 'SAVE_DRAFT' },
       /* L'assistente compare solo se acceso in impostazioni: chi non
        * lo usa non deve trovarsi una voce in più nella scansione, che
@@ -139,7 +164,8 @@ export function buildTree(cfg, ctx = {}) {
      * Deciso sul campo. */
     if (cfg.scan.showSuggestions && ctx.suggestions?.length) {
       kids.push({
-        kind: NodeKind.GROUP, id: 'sugg', label: 'Suggerimenti', spoken: 'suggerimenti',
+        // 28/11: «Spunti» invece di «Suggerimenti»: più corto da dire a ogni giro.
+        kind: NodeKind.GROUP, id: 'sugg', label: 'Spunti', spoken: 'spunti',
         hot: true,
         children: [
           ...(showBack ? [back('sugg')] : []),
@@ -578,7 +604,12 @@ export class ScanEngine {
     };
     this.timing = new AdaptiveTiming(cfg);
     this.ctx = { suggestions: [], proposte: [], phrases: null };
-    this.tree = buildTree(cfg, this.ctx);
+    // Il testo appena tolto dalla riga (LEGGI E SVUOTA, SVUOTA): LEGGI
+    // e RECUPERA lo rimettono, finché non se ne comincia un altro.
+    this._recupero = null;
+    this.ultimoDetto = '';
+    this.buffer = { letters: '', words: [], sentence: '' };
+    this.tree = buildTree(cfg, this._ctxAlbero());
     this.stack = [];          // percorso: [{node, index}]
     this.paused = true;
     this.emptyCycles = 0;
@@ -633,7 +664,8 @@ export class ScanEngine {
                                 JSON.stringify(this.cfg.radio || {}),
                                 JSON.stringify((this.cfg.email || {}).contatti || []),
                                 !!(this.cfg.email || {}).enabled,
-                                !!this.cfg.scan?.showMenuItem]);
+                                !!this.cfg.scan?.showMenuItem,
+                                JSON.stringify(this._statoAzioni())]);
     if (key === this._ctxKey) return;
     this._ctxKey = key;
     this.ctx = next;
@@ -665,7 +697,7 @@ export class ScanEngine {
       id: f.node.id, index: f.index, label: f.node.label,
       corrente: f.node.children?.[f.index]?.id ?? null,
     }));
-    this.tree = buildTree(this.cfg, this.ctx);
+    this.tree = buildTree(this.cfg, this._ctxAlbero());
     const newStack = [{ node: this.tree, index: 0 }];
     for (let i = 1; i < frames.length; i++) {
       const parent = newStack[newStack.length - 1].node;
@@ -1551,10 +1583,27 @@ export class ScanEngine {
         this._afterCompose(now, false);
         this._restaQui(now);
         return;
-      case 'CLEAR':
+      case 'CLEAR': {
+        /* Il testo svuotato si può ancora riprendere: con LEGGI o
+         * RECUPERA finché non se ne comincia un altro, e da chi assiste
+         * nel CESTINO (gli ultimi svuotati), anche dopo. */
+        const via = this._mettiDaParte();
+        if (via) { try { this.h.onCestino?.(via); } catch {} }
         this.buffer = { letters: '', words: [], sentence: '' };
         this._afterCompose(now, false);
         break;
+      }
+      case 'RESTORE_TEXT': {
+        // RECUPERA: rimette nella riga il testo appena tolto, senza leggerlo.
+        if (this._composedText() || !this._rimettiTesto(now)) {
+          this._hold(this.h.onOutput('menu', 'niente da recuperare'), now);
+          return;
+        }
+        const p = this.h.onOutput('menu', 'recuperato');
+        this._backToWrite(now, true, 'gruppi');
+        if (!this._hold(p, now)) this._announceNow(now);
+        return;
+      }
       case 'REPEAT': {
         const txt = this._composedText();
         const p = this.h.onOutput('menu', txt || 'niente da rileggere');
@@ -1570,6 +1619,8 @@ export class ScanEngine {
         return;
       }
       case 'SPEAK_KEEP': {
+        // A riga vuota LEGGI rimette il testo appena tolto, e lo legge.
+        if (!this._composedText() && this._recupero) this._rimettiTesto(now);
         if (this.cfg.prediction?.autoCorrectMode === 'frase') this._correggiFrase();
         const text = this._composedText();
         if (!text) { this._hold(this.h.onOutput('menu', 'niente da leggere'), now); return; }
@@ -1844,6 +1895,9 @@ export class ScanEngine {
       }
     }
     this.buffer.sentence = this._composedText();
+    // Si è cominciato (o rimesso) un testo: quello tenuto da parte non
+    // si può più recuperare da qui — resta, se svuotato, nel cestino.
+    if (this.buffer.sentence) this._recupero = null;
     this.h.onBuffer({ ...this.buffer });
   }
 
@@ -1893,8 +1947,34 @@ export class ScanEngine {
   loadText(text, now) {
     const words = (text || '').trim().split(/\s+/).filter(Boolean);
     this.buffer = { letters: '', words, sentence: (text || '').trim() };
+    if (words.length) this._recupero = null;      // un testo nuovo nella riga
     this.h.onBuffer({ ...this.buffer });
     this._pushState();
+  }
+
+  /** Ciò che decide le voci variabili di AZIONI (vedi `actionsNode`). */
+  _statoAzioni() {
+    const vuoto = !this._composedText();
+    return { vuoto, ripeti: vuoto && !!this.ultimoDetto, recupera: vuoto && !!this._recupero };
+  }
+
+  _ctxAlbero() { return { ...this.ctx, azioni: this._statoAzioni() }; }
+
+  /** Tiene da parte il testo che sta per essere tolto dalla riga. */
+  _mettiDaParte() {
+    const testo = this._composedText();
+    if (!testo) return '';
+    this._recupero = { letters: this.buffer.letters, words: [...this.buffer.words], testo };
+    return testo;
+  }
+
+  /** Rimette nella riga il testo tenuto da parte. */
+  _rimettiTesto(now) {
+    const r = this._recupero;
+    if (!r) return false;
+    this.buffer = { letters: r.letters, words: [...r.words], sentence: '' };
+    this._afterCompose(now, false);       // azzera anche `_recupero`
+    return true;
   }
 
   _composedText() {
@@ -1949,6 +2029,7 @@ export class ScanEngine {
     const p = this.h.onOutput('speech', text, { frase: true });
     // Tolto dallo schermo, ma tenuto in memoria per RIPETI.
     this.ultimoDetto = text;
+    this._mettiDaParte();                 // LEGGI e RECUPERA lo rimettono
     this.buffer = { letters: '', words: [], sentence: '' };
     this.h.onBuffer({ ...this.buffer });
     this._hold(p, now || this._now || 0, 0, this._tettoFrase(text));

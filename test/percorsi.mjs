@@ -89,7 +89,7 @@ function banco(opts = {}) {
   ok(b.gesto('O'), '2c. compone O');
   ok(b.eng.buffer.letters === 'O', '2d. la lettera è nel buffer');
   ok(b.gesto('AZIONI'), '2e. raggiunge le azioni');
-  ok(b.gesto('PARLA'), '2f. seleziona PARLA');
+  ok(b.gesto('LEGGI E SVUOTA'), '2f. seleziona PARLA');
   ok(b.detto.includes('O'), '2g. la parola viene pronunciata');
   ok(b.eng.buffer.words.length === 0, '2h. il buffer si svuota dopo aver parlato');
 }
@@ -1931,15 +1931,16 @@ function buildTreeFor(b){ return b.eng.tree; }
   };
 
   const base = etichette();
-  ok(base.slice(0, 4).join(' ') === 'PARLA RIPETI LEGGI SALVA',
-     `70a. in testa PARLA, RIPETI, LEGGI, SALVA, in quest ordine (${base.join(' · ')})`);
+  // 28/11: PARLA e RIPETI sono una voce sola (LEGGI E SVUOTA, poi RIPETI).
+  ok(base.slice(0, 3).join(' · ') === 'LEGGI E SVUOTA · LEGGI · SALVA',
+     `70a. in testa LEGGI E SVUOTA, LEGGI, SALVA, in quest ordine (${base.join(' · ')})`);
   ok(base[base.length - 1] === 'SVUOTA',
      '70b. SVUOTA è l ultima: la più difficile da selezionare per sbaglio');
   ok(!base.includes('RILEGGI'),
      '70c. RILEGGI non esiste più fra le azioni: si chiama LEGGI');
 
   const conAi = etichette(c => { c.assistente.enabled = true; });
-  ok(conAi.slice(0, 5).join(' ') === 'PARLA RIPETI LEGGI SALVA CHIEDI',
+  ok(conAi.slice(0, 4).join(' · ') === 'LEGGI E SVUOTA · LEGGI · SALVA · CHIEDI',
      `70d. con l assistente acceso CHIEDI viene subito dopo SALVA (${conAi.join(' · ')})`);
   ok(conAi[conAi.length - 1] === 'SVUOTA', '70e. e SVUOTA resta in fondo');
 
@@ -2302,17 +2303,17 @@ function buildTreeFor(b){ return b.eng.tree; }
        `72c. lettera scelta CON suggerimenti presenti → il punto, subito prima dei Suggerimenti (${qui(b)})`); }
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
     b.gesto('R–Q'); b.gesto('← ESCI');
-    ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === 'Suggerimenti',
+    ok(b.eng.ctx.suggestions?.length > 0 && qui(b) === 'Spunti',
        `72c2. ESCI da un gruppo di lettere CON suggerimenti → Suggerimenti (${qui(b)})`); }
   { const b = banco72(); b.eng.loadText('ciao', 0); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('LEGGI');
     ok(qui(b) === 'AZIONI', `72d. azione scelta → di nuovo AZIONI (${qui(b)})`); }
   { const b = banco72(); b.eng.loadText('ciao', 0); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('← ESCI');
     ok(qui(b) === 'AZIONI', `72e. ESCI da AZIONI → AZIONI, non ESCI (${qui(b)})`); }
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
-    b.gesto('Suggerimenti'); b.gesto('← ESCI');
-    ok(qui(b) === 'Suggerimenti', `72f. ESCI da Suggerimenti → di nuovo Suggerimenti, non ESCI (${qui(b)})`); }
+    b.gesto('Spunti'); b.gesto('← ESCI');
+    ok(qui(b) === 'Spunti', `72f. ESCI da Suggerimenti → di nuovo Suggerimenti, non ESCI (${qui(b)})`); }
   { const b = banco72(); b.gesto('Scrivi'); b.gesto('R–Q'); b.gesto('S'); b.gesto('Vocali'); b.gesto('E');
-    b.gesto('Suggerimenti');
+    b.gesto('Spunti');
     const w = b.eng.level.node.children.find(c => c.action === 'WORD')?.label;
     b.gesto(w);
     ok(qui(b) === 'AZIONI' && b.eng.buffer.letters === '',
@@ -2659,7 +2660,7 @@ function buildTreeFor(b){ return b.eng.tree; }
     b.scrivi('ho');
     ok(fraseInCorso(b.eng.buffer.words).length === 0,
        '77o. dopo il punto comincia una frase nuova: il contesto dei suggerimenti riparte');
-    b.gesto('AZIONI'); b.gesto('PARLA');
+    b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
     ok(b.detti.some(d => d.k === 'speech' && d.t === 'CIAO. HO'), '77p. PARLA dice il testo con il suo punto'); }
   { const b = banco(); b.gesto('Scrivi'); b.gesto('.');
     ok(testo(b) === '', '77q. punto senza testo: non scrive nulla'); }
@@ -2681,19 +2682,87 @@ function buildTreeFor(b){ return b.eng.tree; }
     for (let i = 0; i < 5; i++) { b.gesto('AZIONI'); b.gesto('LEGGI'); }
     ok(testo(b) === 'CIAO' && !b.detti.some(d => d.t === 'niente da leggere'),
        '77v. LEGGI cinque volte di fila: il testo non sparisce mai');
-    b.gesto('AZIONI'); b.gesto('PARLA');
+    b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
     ok(testo(b) === '' && b.eng.ultimoDetto === 'CIAO', '77w. PARLA toglie il testo dallo schermo ma lo tiene in memoria');
     const prima = b.detti.length;
     b.gesto('AZIONI'); b.gesto('RIPETI'); b.gesto('AZIONI'); b.gesto('RIPETI');
     const rip = b.detti.slice(prima).filter(d => d.k === 'speech');
     ok(rip.length === 2 && rip.every(d => d.t === 'CIAO' && d.o?.rilettura === true),
        `77x. RIPETI ridice l ultima cosa detta, quante volte si vuole, senza insegnarla di nuovo (${JSON.stringify(rip)})`);
-    b.scrivi('ok'); b.gesto('AZIONI'); b.gesto('RIPETI');
+    b.scrivi('ok'); b.gesto('AZIONI');
+    ok(!b.eng.level.node.children.some(c => c.label === 'RIPETI'),
+       '77y0. (28/11) con un testo nuovo nella riga la voce torna LEGGI E SVUOTA, non RIPETI');
+    b.gesto('LEGGI E SVUOTA');
     const u = b.detti.filter(d => d.k === 'speech').pop();
     ok(u.t === 'OK' && !u.o?.rilettura && testo(b) === '' && b.eng.ultimoDetto === 'OK',
-       '77y. con un testo nuovo RIPETI fa ciò che fa PARLA, e la memoria si aggiorna'); }
-  { const b = banco(); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('RIPETI');
-    ok(b.detti.some(d => d.k === 'menu' && d.t === 'niente da ripetere'), '77z. RIPETI senza nulla da ripetere lo dice'); }
+       '77y. con un testo nuovo LEGGI E SVUOTA lo dice e lo toglie, e la memoria si aggiorna'); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('AZIONI');
+    ok(!b.eng.level.node.children.some(c => c.label === 'RIPETI'), '77z0. (28/11) niente di già detto: non c\'è RIPETI');
+    b.gesto('LEGGI E SVUOTA');
+    ok(b.detti.some(d => d.k === 'menu' && d.t === 'niente da dire'), '77z. LEGGI E SVUOTA senza nulla da dire lo dice'); }
+
+  // ── 28/11: LEGGI E SVUOTA → RIPETI, LEGGI e RECUPERA rimettono il testo, CESTINO ──
+  const azioni = (b) => { b.gesto('AZIONI'); return b.eng.level.node.children.map(c => c.label); };
+  { const b = banco(); b.gesto('Scrivi');
+    const a0 = azioni(b);
+    ok(a0.slice(0, 4).join(',') === '← ESCI,LEGGI E SVUOTA,LEGGI,SALVA' && !a0.includes('RIPETI') && !a0.includes('PARLA') && !a0.includes('RECUPERA'),
+       `78a1. AZIONI all'inizio: LEGGI E SVUOTA, LEGGI, SALVA — niente PARLA, RIPETI, RECUPERA (${a0.join(',')})`);
+    b.gesto('← ESCI'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
+    ok(testo(b) === '' && b.detti.filter(d => d.k === 'speech').pop()?.t === 'CIAO', '78a2. LEGGI E SVUOTA dice e toglie dalla riga');
+    const a1 = azioni(b);
+    ok(a1.slice(0, 5).join(',') === '← ESCI,RIPETI,LEGGI,RECUPERA,SALVA', `78a3. dopo: RIPETI al posto di LEGGI E SVUOTA, e RECUPERA (${a1.join(',')})`);
+    const idR = b.eng.level.node.children[1].id;
+    ok(idR === 'a:speak', '78a4. RIPETI è la stessa voce (stesso posto, il cursore non salta)');
+    b.gesto('RIPETI');
+    const r = b.detti.filter(d => d.k === 'speech').pop();
+    ok(r.t === 'CIAO' && r.o?.rilettura === true && testo(b) === '', `78a5. RIPETI ridice, senza rimettere il testo (${JSON.stringify(r)})`);
+    b.gesto('AZIONI'); b.gesto('LEGGI');
+    const l = b.detti.filter(d => d.k === 'speech').pop();
+    ok(testo(b) === 'CIAO' && l.t === 'CIAO' && l.o?.rilettura === true, `78a6. LEGGI a riga vuota rimette il testo nella riga e lo legge (${testo(b)})`);
+    const a2 = azioni(b);
+    ok(a2[1] === 'LEGGI E SVUOTA' && !a2.includes('RECUPERA'), `78a7. testo di nuovo nella riga: LEGGI E SVUOTA, niente RECUPERA (${a2.join(',')})`);
+    b.gesto('LEGGI');
+    ok(testo(b) === 'CIAO', '78a8. LEGGI con il testo nella riga: legge e lo lascia, come sempre'); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
+    const nDetti = b.detti.filter(d => d.k === 'speech').length;
+    b.gesto('AZIONI'); b.gesto('RECUPERA');
+    ok(testo(b) === 'CIAO' && b.detti.filter(d => d.k === 'speech').length === nDetti,
+       `78b1. RECUPERA rimette il testo SENZA leggerlo (${testo(b)})`);
+    ok(b.eng.level.node.id === 'write', '78b2. e si torna a scrivere');
+    b.spazio(); b.scrivi('ok');
+    ok(testo(b) === 'CIAO OK', `78b3. e si continua a scrivere da lì (${testo(b)})`); }
+  { const b = banco(); const cest = []; b.eng.h.onCestino = (t) => cest.push(t);
+    b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('SVUOTA');
+    ok(testo(b) === '' && cest.length === 1 && cest[0] === 'CIAO', `78c1. SVUOTA manda il testo nel cestino (${cest.join('|')})`);
+    const a = azioni(b);
+    ok(a.includes('RECUPERA') && a[1] === 'LEGGI E SVUOTA', `78c2. dopo SVUOTA: RECUPERA c'è; niente RIPETI se nulla è stato detto (${a.join(',')})`);
+    b.gesto('RECUPERA');
+    ok(testo(b) === 'CIAO', '78c3. RECUPERA riprende anche un testo svuotato per sbaglio');
+    b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
+    ok(cest.length === 1, '78c4. LEGGI E SVUOTA NON manda nel cestino (il testo è stato detto, non perso)');
+    b.gesto('AZIONI'); b.gesto('SVUOTA');
+    ok(cest.length === 1, '78c5. SVUOTA a riga vuota non mette nulla nel cestino'); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('SVUOTA');
+    b.scrivi('ok');
+    const a = azioni(b);
+    ok(!a.includes('RECUPERA'), '78d1. cominciato un testo nuovo, il vecchio non si recupera più da qui');
+    b.gesto('SVUOTA');                  // toglie OK
+    b.gesto('AZIONI'); b.gesto('LEGGI');
+    ok(testo(b) === 'OK', `78d2. LEGGI recupera solo l'ULTIMO testo tolto, mai uno precedente (${testo(b)})`); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
+    b.scrivi('o'); b.gesto('AZIONI'); b.gesto('⌫ lettera');
+    ok(testo(b) === '', '78e0. preparazione: riga di nuovo vuota cancellando');
+    const a = azioni(b);
+    ok(!a.includes('RECUPERA'), `78e1. cancellato a mano un testo nuovo: niente da recuperare (${a.join(',')})`);
+    b.gesto('LEGGI');
+    ok(testo(b) === '' && b.detti.some(d => d.t === 'niente da leggere'), '78e2. e LEGGI a riga vuota dice "niente da leggere", come prima'); }
+  { const b = banco(); b.gesto('Scrivi'); b.gesto('AZIONI'); b.gesto('LEGGI');
+    ok(b.detti.some(d => d.t === 'niente da leggere'), '78f. LEGGI senza nulla: come prima'); }
+  { const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao');
+    b.eng.handleAction('SPEAK', b.tempo());        // Invio / gesto "pronuncia"
+    for (let i = 0; i < 40; i++) b.passo();
+    const a = azioni(b);
+    ok(a.includes('RECUPERA') && a[1] === 'RIPETI', `78g. anche il comando diretto "pronuncia" tiene da parte il testo (${a.join(',')})`); }
   { const b = banco(); b.gesto('Frasi');
     const f = b.eng.level.node.children.find(x => x.action === 'PHRASE' || x.children);
     const frase = b.eng.level.node.children.flatMap(x => x.children || [x]).find(x => x.action === 'PHRASE');
@@ -2812,7 +2881,7 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(testo(b) === '', '77aj3. e poi la parola prima');
     ok(b.eng.handleAction('DEL_CHAR', b.tempo()) === false, '77aj4. niente da cancellare: non fa nulla'); }
   { // PARLA: la frase è protetta, e il tetto di sicurezza cresce con la lunghezza.
-    const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('PARLA');
+    const b = banco(); b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
     const d = b.detti.filter(x => x.k === 'speech').pop();
     ok(d?.o?.frase === true, '77ak1. PARLA segnala la frase composta: i gesti non la interrompono');
     const lunga = 'parola '.repeat(80);
@@ -2835,7 +2904,7 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(menuDetti(b, n0).length === 0, '77af4. "rileggi la parola": le lettere non vengono dette');
     b.spazio(); b.scrivi('sete'); b.gesto('.');
     ok(menuDetti(b, n0).join(',') === 'HO,SETE.', `77af5. ogni parola finita (spazio, punto) riletta una volta (${menuDetti(b, n0)})`);
-    b.gesto('AZIONI'); b.gesto('PARLA');
+    b.gesto('AZIONI'); b.gesto('LEGGI E SVUOTA');
     ok(b.detti.some(d => d.k === 'speech' && d.t === 'HO SETE.'), '77af6. PARLA dice la frase intera, come sempre'); }
   { const b = banco(c => { c.scan.ecoLettera = true; c.scan.ecoParola = true; c.scan.cancellaNeiGruppi = true; });
     b.gesto('Scrivi'); const n0 = b.detti.length;
@@ -2909,11 +2978,11 @@ function buildTreeFor(b){ return b.eng.tree; }
     b.passo();
     let seq = []; let prima = null; const T0 = b.tempo();
     while (b.tempo() - T0 < 30000 && seq.length < 4) { b.passo(); const q = qui(b); if (q !== prima && !b.eng.parolaProposta) { seq.push(q); prima = q; } }
-    ok(seq.slice(0, 3).join(',') === '␣,.,Suggerimenti', `77pa3. poi spazio, punto, Suggerimenti (${seq.join(',')})`); }
+    ok(seq.slice(0, 3).join(',') === '␣,.,Spunti', `77pa3. poi spazio, punto, Spunti (${seq.join(',')})`); }
   { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.ripartiDaSpazio = false; });
     b.gesto('Scrivi'); b.scrivi('se');
     const p = primaDiGiro(b);
-    ok(p === 'Suggerimenti', `77pa4. "riparti dallo spazio" spento: a ogni giro prima di Suggerimenti, come prima (${p})`); }
+    ok(p === 'Spunti', `77pa4. "riparti dallo spazio" spento: a ogni giro prima di Suggerimenti, come prima (${p})`); }
 
   // ── 27/11: INDIETRO dopo la proposta la ripropone ──
   { const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
@@ -2974,7 +3043,7 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(p2 && b.eng.ctx.suggestions[0] === p2, `77pc1. un'altra lettera: proposta e Suggerimenti aggiornati insieme (${p1} → ${p2} / ${b.eng.ctx.suggestions.join(', ')})`); }
 
   // ── ESCI c'è sempre (27/11, segnalazione: «dopo PARLA ESCI è sparito») ──
-  for (const az of ['PARLA', 'RIPETI', 'LEGGI', 'SALVA']) {
+  for (const az of ['LEGGI E SVUOTA', 'LEGGI', 'SALVA']) {
     const b = banco(c => { c.scan.suggerimentiDiretti = true; c.scan.spazioFuori = true; });
     b.gesto('Scrivi'); b.scrivi('ciao'); b.gesto('AZIONI'); b.gesto(az);
     let esci = false; const T0 = b.tempo();
@@ -3028,7 +3097,7 @@ function buildTreeFor(b){ return b.eng.tree; }
   // ── Varianti del suggerimento scelto ──
   { const b = banco(c => { c.scan.variantiSuggerimento = true; c.prediction.minPrefixForWord = 3; });
     b.gesto('Scrivi'); b.scrivi('and');
-    b.gesto('Suggerimenti');
+    b.gesto('Spunti');
     // Una parola dell'elenco che abbia forme vicine ("andare" → "andarci").
     const scelta = b.eng.level.node.children.find(x => x.action === 'WORD' && b.pred.varianti(x.label, []).length).label;
     b.gesto(scelta);
@@ -3041,14 +3110,14 @@ function buildTreeFor(b){ return b.eng.tree; }
     ok(b.eng.buffer.words.join(' ') === var1.toUpperCase() && qui(b) === 'AZIONI',
        `77av. un gesto sulla variante SOSTITUISCE la parola (${testo(b)}) e riparte da AZIONI (${qui(b)})`); }
   { const b = banco(c => { c.scan.variantiSuggerimento = true; c.prediction.minPrefixForWord = 3; });
-    b.gesto('Scrivi'); b.scrivi('and'); b.gesto('Suggerimenti');
+    b.gesto('Scrivi'); b.scrivi('and'); b.gesto('Spunti');
     const scelta = b.eng.level.node.children.find(x => x.action === 'WORD' && b.pred.varianti(x.label, []).length).label;
     b.gesto(scelta);
     ok(!!b.eng.proposta, '77ay. (le varianti ci sono)');
     b.avanti(b.eng.stepCorrente * 4 + 100);
     ok(!b.eng.proposta && b.eng.buffer.words.join(' ') === scelta.toUpperCase(),
        '77az. varianti lasciate passare: la parola scelta resta com è'); }
-  { const b = banco(c => { c.prediction.minPrefixForWord = 3; }); b.gesto('Scrivi'); b.scrivi('and'); b.gesto('Suggerimenti');
+  { const b = banco(c => { c.prediction.minPrefixForWord = 3; }); b.gesto('Scrivi'); b.scrivi('and'); b.gesto('Spunti');
     b.gesto(b.eng.level.node.children.find(x => x.action === 'WORD').label);
     ok(!b.eng.proposta && qui(b) === 'AZIONI', '77ba. opzione spenta (predefinito): nessun passo in più, come prima'); }
 }

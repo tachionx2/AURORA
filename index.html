@@ -88,6 +88,8 @@
          senza andare in Diagnostica. Gli stessi comandi di là. -->
     <button class="btn btn-sm" id="btnInquadraParla" title="Mostra l'immagine intera della telecamera, per controllare che inquadri bene il volto">Inquadratura</button>
     <button class="btn btn-sm" id="btnInsegnaParla" title="Tre gesti, e il programma reimpara il gesto tipico (modalità normalizzata)">Insegna il gesto</button>
+    <!-- Il cestino: gli ultimi testi svuotati, per recuperarli. -->
+    <button class="btn btn-sm" id="btnCestinoParla" title="Gli ultimi testi tolti con SVUOTA: si possono rimettere nella riga o salvare">Cestino</button>
   </section>
 
   <!-- Inquadratura in Parla: compare solo se chiesta dal pulsante. -->
@@ -148,6 +150,11 @@
 
   <div class="guarda-corpo">
     <aside class="guarda-lato">
+      <section class="card" id="cestinoCard">
+        <h2>Cestino</h2>
+        <p class="note">Gli ultimi 5 testi tolti dalla riga con <b>SVUOTA</b>, il più recente in alto. Se la persona chiede di leggere il cestino, è quasi sempre il primo.</p>
+        <div class="list" id="cestinoList"></div>
+      </section>
       <section class="card" id="favCard">
     <h2 data-i18n="card.favorites">Video preferiti</h2>
     <p class="note" data-i18n="watch.favNote">Chi assiste incolla qui i link. La persona li sceglie in scansione, senza dover cercare né digitare.</p>
